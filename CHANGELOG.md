@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.2.6
+
+- Centralized OAuth and Authoring GraphQL requests in a shared Sitecore HTTP client.
+- Added up to three retries for transient network failures and HTTP 408, 429, 500, 502, 503, and 504 responses.
+- Added exponential backoff with jitter and support for both forms of the `Retry-After` response header.
+- Shared endpoint cooldowns across requests to the same origin and made retry waits cancellable.
+- Added sanitized retry diagnostics without logging credentials, tokens, request bodies, or query parameters.
+
 ## 0.2.5
 
 - Added **Refresh Subtree** to the paired-row context menu.

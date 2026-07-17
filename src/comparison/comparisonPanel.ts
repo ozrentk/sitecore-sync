@@ -35,7 +35,6 @@ export class ComparisonPanelManager implements vscode.Disposable {
   private panel: vscode.WebviewPanel | undefined;
   private panelDisposables: vscode.Disposable[] = [];
   private readonly disposables: vscode.Disposable[] = [];
-  private readonly authoringClient = new AuthoringContentClient();
   private readonly treeLevelCache = new Map<string, AuthoringTreeLevel>();
   private readonly pendingTreeLevels = new Map<string, Promise<AuthoringTreeLevel>>();
   private readonly requestControllers = new Set<AbortController>();
@@ -44,6 +43,7 @@ export class ComparisonPanelManager implements vscode.Disposable {
     private readonly extensionUri: vscode.Uri,
     private readonly workspaceState: vscode.Memento,
     private readonly connectionStore: ConnectionStore,
+    private readonly authoringClient: AuthoringContentClient,
     private readonly log: vscode.LogOutputChannel,
   ) {
     this.disposables.push(
@@ -484,7 +484,6 @@ export class ComparisonPanelManager implements vscode.Disposable {
   dispose(): void {
     this.cancelRequests();
     this.treeLevelCache.clear();
-    this.authoringClient.clear();
     this.panel?.dispose();
     this.disposePanelSubscriptions();
     for (const disposable of this.disposables) {

@@ -3,6 +3,7 @@ import { ComparisonPanelManager } from "./comparison/comparisonPanel";
 import { addConnection, removeConnection, testConnection } from "./connections/connectionCommands";
 import { ConnectionStore } from "./connections/connectionStore";
 import { ConnectionTreeItem, ConnectionTreeProvider } from "./connections/connectionTreeProvider";
+import { AuthoringContentClient } from "./sitecore/authoringClient";
 
 const viewIds = ["xmCloudSync.operations"] as const;
 
@@ -32,16 +33,19 @@ export function activate(context: vscode.ExtensionContext): void {
   const log = vscode.window.createOutputChannel("XM Cloud Sync", { log: true });
   const connectionStore = new ConnectionStore(context.globalState, context.secrets);
   const connectionProvider = new ConnectionTreeProvider(connectionStore);
+  const authoringClient = new AuthoringContentClient(log);
   const comparisonPanelManager = new ComparisonPanelManager(
     context.extensionUri,
     context.workspaceState,
     connectionStore,
+    authoringClient,
     log,
   );
   context.subscriptions.push(
     log,
     connectionStore,
     connectionProvider,
+    { dispose: () => authoringClient.clear() },
     comparisonPanelManager,
     vscode.window.registerTreeDataProvider("xmCloudSync.connections", connectionProvider),
   );
@@ -57,10 +61,10 @@ export function activate(context: vscode.ExtensionContext): void {
 
   context.subscriptions.push(
     vscode.commands.registerCommand("xmCloudSync.addConnection", async () => {
-      await addConnection(connectionStore, connectionProvider);
+      await addConnection(connectionStore, connectionProvider, authoringClient);
     }),
     vscode.commands.registerCommand("xmCloudSync.testConnection", async (argument) => {
-      await testConnection(argument, connectionStore, connectionProvider);
+      await testConnection(argument, connectionStore, connectionProvider, authoringClient);
     }),
     vscode.commands.registerCommand("xmCloudSync.removeConnection", async (argument) => {
       await removeConnection(argument, connectionStore);

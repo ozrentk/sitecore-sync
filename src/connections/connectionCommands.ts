@@ -2,11 +2,15 @@ import * as vscode from "vscode";
 import { normalizeServerUrl, type XmCloudConnection } from "./connection";
 import type { ConnectionStore } from "./connectionStore";
 import { ConnectionTreeItem, type ConnectionTreeProvider } from "./connectionTreeProvider";
-import { testAuthoringConnection, type AuthoringSite } from "../sitecore/authoringClient";
+import {
+  type AuthoringContentClient,
+  type AuthoringSite,
+} from "../sitecore/authoringClient";
 
 export async function addConnection(
   store: ConnectionStore,
   provider: ConnectionTreeProvider,
+  authoringClient: AuthoringContentClient,
 ): Promise<void> {
   const name = await vscode.window.showInputBox({
     title: "Add XM Cloud Connection (1/4)",
@@ -70,7 +74,7 @@ export async function addConnection(
     "Test Connection",
   );
   if (selection === "Test Connection") {
-    await testConnection(connection, store, provider);
+    await testConnection(connection, store, provider, authoringClient);
   }
 }
 
@@ -78,6 +82,7 @@ export async function testConnection(
   argument: ConnectionTreeItem | XmCloudConnection | undefined,
   store: ConnectionStore,
   provider: ConnectionTreeProvider,
+  authoringClient: AuthoringContentClient,
 ): Promise<void> {
   const connection = resolveConnection(argument, store);
   if (!connection) {
@@ -107,7 +112,11 @@ export async function testConnection(
         const controller = new AbortController();
         const subscription = token.onCancellationRequested(() => controller.abort());
         try {
-          return await testAuthoringConnection(connection, clientSecret, controller.signal);
+          return await authoringClient.testConnection(
+            connection,
+            clientSecret,
+            controller.signal,
+          );
         } finally {
           subscription.dispose();
         }
