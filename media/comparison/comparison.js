@@ -271,22 +271,6 @@ function loadMissingPairLevels(pair) {
   }
 }
 
-function createConnectionIdentity(side) {
-  const connectionId = state.selection[`${side}ConnectionId`];
-  const connection = connectionById(connectionId);
-  const identity = document.createElement("div");
-  identity.className = "column-identity";
-  const name = document.createElement("div");
-  name.className = "column-name";
-  name.textContent = connection?.name ?? `${side} connection`;
-  const url = document.createElement("div");
-  url.className = "column-url";
-  url.textContent = connection?.serverUrl ?? "No connection selected";
-  url.title = connection?.serverUrl ?? "";
-  identity.append(name, url);
-  return identity;
-}
-
 function createRootStatus(side) {
   const tree = state.trees[side];
   const status = document.createElement("div");
@@ -312,34 +296,87 @@ const flagPresentation = {
   onlyLeft: { label: "L", title: "Item exists only on the left by ID" },
   onlyRight: { label: "R", title: "Item exists only on the right by ID" },
   idMismatch: { label: "ID", title: "The same path has different item IDs" },
-  pathMismatch: { label: "PATH", title: "The same item ID has different paths" },
-  nameMismatch: { label: "NAME", title: "The item name or display name differs" },
-  childPresenceMismatch: { label: "TREE", title: "Child presence differs" },
+  pathMismatch: { label: "P", title: "The same item ID has different paths" },
+  nameMismatch: { label: "N", title: "The item name or display name differs" },
+  childPresenceMismatch: { label: "T", title: "Child presence differs" },
 };
+
+function createLegendGroup(flags, kind) {
+  const group = document.createElement("span");
+  group.className = `difference-legend ${kind}`;
+  for (const flag of flags) {
+    const presentation = flagPresentation[flag];
+    const symbol = document.createElement("span");
+    symbol.className = "difference-symbol";
+    if (presentation.label.length > 1) {
+      symbol.classList.add("wide");
+    }
+    symbol.textContent = presentation.label;
+    symbol.title = presentation.title;
+    group.append(symbol);
+  }
+  return group;
+}
+
+function togglePairExpansion(pair) {
+  if (!pairCanExpand(pair)) {
+    return;
+  }
+  if (state.expandedRows.has(pair.key)) {
+    state.expandedRows.delete(pair.key);
+  } else {
+    state.expandedRows.add(pair.key);
+    loadMissingPairLevels(pair);
+  }
+  render();
+}
 
 function createDifferenceBadges(flags) {
   const badges = document.createElement("span");
   badges.className = "difference-badges";
-  for (const flag of flags) {
-    const presentation = flagPresentation[flag];
-    const badge = document.createElement("span");
-    badge.className = `difference-badge ${flag}`;
-    badge.textContent = presentation.label;
-    badge.title = presentation.title;
-    badges.append(badge);
+  const identityFlags = flags.includes("idMismatch")
+    ? ["idMismatch"]
+    : ["onlyLeft", "onlyRight"].filter((flag) => flags.includes(flag));
+  const structuralFlags = [
+    "pathMismatch",
+    "nameMismatch",
+    "childPresenceMismatch",
+  ].filter((flag) => flags.includes(flag));
+
+  if (identityFlags.length) {
+    badges.append(createLegendGroup(identityFlags, "identity"));
+  }
+  if (structuralFlags.length) {
+    badges.append(createLegendGroup(structuralFlags, "structural"));
   }
   return badges;
 }
 
-function createItemCell(node, side, pair, depth) {
+function createConnectionFooter() {
+  const footer = document.createElement("footer");
+  footer.className = "connection-footer";
+  for (const side of ["left", "right"]) {
+    const connectionId = state.selection[`${side}ConnectionId`];
+    const connection = connectionById(connectionId);
+    const url = document.createElement("span");
+    url.className = `connection-url ${side}`;
+    url.textContent = connection?.serverUrl ?? "";
+    url.title = connection?.serverUrl ?? "";
+    footer.append(url);
+    if (side === "left") {
+      const gutter = document.createElement("span");
+      gutter.className = "connection-footer-gutter";
+      footer.append(gutter);
+    }
+  }
+  return footer;
+}
+
+function createItemCell(node, side, depth) {
   const cell = document.createElement("button");
   cell.type = "button";
   cell.className = `comparison-cell ${side}`;
   cell.style.setProperty("--tree-depth", String(depth));
-  cell.addEventListener("click", () => {
-    state.selectedRowKey = pair.key;
-    render();
-  });
 
   if (!node) {
     cell.classList.add("missing");
@@ -348,14 +385,19 @@ function createItemCell(node, side, pair, depth) {
     return cell;
   }
 
-  cell.title = `${node.path}\nItem ID: ${node.itemId}`;
+  const displayName = node.displayName || node.name;
+  const tooltipLines = [node.path, `Item ID: ${node.itemId}`];
+  if (displayName !== node.name) {
+    tooltipLines.push(`Item name: ${node.name}`);
+  }
+  cell.title = tooltipLines.join("\n");
   const name = document.createElement("span");
   name.className = "item-name";
-  name.textContent = node.displayName || node.name;
-  const path = document.createElement("span");
-  path.className = "item-path";
-  path.textContent = node.path;
-  cell.append(name, path);
+  name.textContent = displayName;
+  if (displayName !== node.name) {
+    name.classList.add("display-name-differs");
+  }
+  cell.append(name);
   return cell;
 }
 
@@ -376,13 +418,7 @@ function createRowControl(pair) {
       disclosure.classList.add("loading");
     }
     disclosure.addEventListener("click", () => {
-      if (expanded) {
-        state.expandedRows.delete(pair.key);
-      } else {
-        state.expandedRows.add(pair.key);
-        loadMissingPairLevels(pair);
-      }
-      render();
+      togglePairExpansion(pair);
     });
   } else {
     disclosure.disabled = true;
@@ -433,10 +469,24 @@ function renderPair(pair, depth) {
   if (state.selectedRowKey === pair.key) {
     row.classList.add("selected");
   }
+  row.addEventListener("click", (event) => {
+    if (!event.target.closest(".comparison-cell")) {
+      return;
+    }
+    state.selectedRowKey = pair.key;
+    document.querySelector(".comparison-row.selected")?.classList.remove("selected");
+    row.classList.add("selected");
+  });
+  row.addEventListener("dblclick", (event) => {
+    if (event.target.closest(".paired-disclosure, .difference-legend")) {
+      return;
+    }
+    togglePairExpansion(pair);
+  });
   row.append(
-    createItemCell(pair.left, "left", pair, depth),
+    createItemCell(pair.left, "left", depth),
     createRowControl(pair),
-    createItemCell(pair.right, "right", pair, depth),
+    createItemCell(pair.right, "right", depth),
   );
   fragment.append(row);
 
@@ -471,18 +521,6 @@ function createComparisonWorkspace() {
   const comparison = document.createElement("section");
   comparison.className = "comparison";
 
-  const header = document.createElement("header");
-  header.className = "comparison-header";
-  const differenceHeading = document.createElement("div");
-  differenceHeading.className = "difference-heading";
-  differenceHeading.textContent = "Difference";
-  header.append(
-    createConnectionIdentity("left"),
-    differenceHeading,
-    createConnectionIdentity("right"),
-  );
-  comparison.append(header);
-
   const leftRoot = state.trees.left.root;
   const rightRoot = state.trees.right.root;
   const tree = document.createElement("div");
@@ -508,7 +546,7 @@ function createComparisonWorkspace() {
     tree.append(renderPair(rootPair, 0));
   }
 
-  comparison.append(tree);
+  comparison.append(tree, createConnectionFooter());
   return comparison;
 }
 

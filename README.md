@@ -29,6 +29,22 @@ The comparison tab loads the authoring root and its immediate children on both s
 
 Loaded items are displayed in one paired-row tree so the left and right sides share selection, expansion, and scrolling. Items are matched by normalized Sitecore item ID. The comparison marks left-only and right-only items, same-path items with different IDs, and differences in path, name, or child presence. The left hierarchy supplies the primary row order; right-only items are inserted near their closest loaded right-side neighbour.
 
+Tree rows show only the item display name so deeply nested content remains readable. The tooltip contains the full path and item ID. When the display name differs from the underlying item name, the display name is blue and the tooltip also includes the item name.
+
+### Difference legend
+
+| Badge | Meaning |
+| --- | --- |
+| `L` | The item ID exists only on the left side within the currently loaded comparison data. |
+| `R` | The item ID exists only on the right side within the currently loaded comparison data. |
+| `LR` | Both left-only and right-only identity states apply. The two symbols are rendered as one group while retaining separate tooltips. |
+| `ID` | Items have the same path but different item IDs. This badge replaces the otherwise redundant `LR` group for that row. |
+| `P` | The same item ID has different paths on the left and right sides. |
+| `N` | The same item ID has a different item name or display name. |
+| `T` | The two items disagree about whether they have child items. |
+
+Identity symbols (`L`, `R`, or `ID`) form one blue group. Structural symbols (`P`, `N`, and `T`) form one orange group without spacing between their equal-width characters. Each symbol retains its own tooltip. Multiple groups can appear on the same row when several differences coexist. A row without a badge is structurally equal based on the metadata currently loaded by the comparison. Field values, templates, languages, and versions are not yet included in this structural legend and will receive additional comparison states as those features are implemented.
+
 Connection secrets, access tokens, and Authoring API requests remain in the extension host and are never exposed to the webview.
 
 Run **XM Cloud Sync: Show Logs** to open the extension's diagnostic log. It records comparison loading, caching, and errors without recording client secrets or access tokens.
