@@ -25,7 +25,11 @@ Run **XM Cloud Sync: Open Comparison** from the Command Palette or use the diff 
 
 You need at least two XM Cloud connections to compare content. You can also right-click a connection and choose **Compare with…**; the selected connection becomes the left side and a Quick Pick selects the right side.
 
-The current comparison tab is the UI shell for the upcoming authoring content trees and field-level diff. Connection secrets remain in the extension host and are never exposed to the webview.
+The comparison tab loads the authoring root and its immediate children on both sides. Expanding an item loads its complete set of direct children using paginated Authoring GraphQL requests. Loaded levels are cached for the lifetime of the extension, while clicking an item only selects it and never causes a refresh. Field-level diff is the next comparison milestone.
+
+Connection secrets, access tokens, and Authoring API requests remain in the extension host and are never exposed to the webview.
+
+Run **XM Cloud Sync: Show Logs** to open the extension's diagnostic log. It records comparison loading, caching, and errors without recording client secrets or access tokens.
 
 The comparison webview is separated into `media/comparison/comparison.html`, `comparison.css`, and `comparison.js`. Extension-host lifecycle and state messaging remain in `src/comparison/comparisonPanel.ts`.
 

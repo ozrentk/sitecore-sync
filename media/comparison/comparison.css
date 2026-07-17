@@ -88,7 +88,6 @@ select:focus {
 
 .side {
   min-width: 0;
-  padding: 16px;
 }
 
 .side + .side {
@@ -99,7 +98,7 @@ select:focus {
   display: flex;
   justify-content: space-between;
   gap: 12px;
-  padding-bottom: 10px;
+  padding: 12px 16px 10px;
   border-bottom: 1px solid var(--vscode-panel-border);
 }
 
@@ -141,6 +140,128 @@ select:focus {
 
 .hint {
   color: var(--vscode-descriptionForeground);
+}
+
+.content-tree {
+  min-height: 260px;
+  padding: 8px 0 24px;
+  overflow: auto;
+}
+
+.tree-status {
+  display: grid;
+  justify-items: center;
+  gap: 8px;
+  padding: 48px 20px;
+  color: var(--vscode-descriptionForeground);
+  text-align: center;
+}
+
+.tree-status p {
+  margin: 0;
+  line-height: 1.5;
+}
+
+.tree-row {
+  display: flex;
+  align-items: stretch;
+  min-width: max-content;
+  padding-left: calc(8px + var(--tree-depth) * 16px);
+}
+
+.tree-row:hover {
+  background: var(--vscode-list-hoverBackground);
+}
+
+.tree-row.selected {
+  color: var(--vscode-list-activeSelectionForeground);
+  background: var(--vscode-list-activeSelectionBackground);
+}
+
+.disclosure,
+.tree-item,
+.tree-inline-error button {
+  color: inherit;
+  background: transparent;
+  border: 0;
+}
+
+.disclosure {
+  position: relative;
+  flex: 0 0 24px;
+  width: 24px;
+  padding: 0;
+  cursor: pointer;
+}
+
+.disclosure:disabled {
+  cursor: default;
+}
+
+.disclosure.loading::after {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 10px;
+  height: 10px;
+  margin: -6px 0 0 -6px;
+  border: 2px solid var(--vscode-progressBar-background);
+  border-right-color: transparent;
+  border-radius: 50%;
+  content: "";
+  animation: tree-spin .8s linear infinite;
+}
+
+.tree-item {
+  display: flex;
+  flex: 1;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+  min-height: 24px;
+  padding: 2px 10px 2px 0;
+  text-align: left;
+  cursor: default;
+}
+
+.tree-item-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tree-item-path {
+  overflow: hidden;
+  color: var(--vscode-descriptionForeground);
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.selected .tree-item-path {
+  color: inherit;
+  opacity: .8;
+}
+
+.tree-inline-error {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  min-height: 24px;
+  padding-left: calc(32px + var(--tree-depth) * 16px);
+  color: var(--vscode-errorForeground);
+  font-size: 12px;
+}
+
+.tree-inline-error button {
+  color: var(--vscode-textLink-foreground);
+  cursor: pointer;
+}
+
+@keyframes tree-spin {
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 @media (max-width: 760px) {

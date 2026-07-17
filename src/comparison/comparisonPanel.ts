@@ -1,7 +1,14 @@
 import * as vscode from "vscode";
 import type { ConnectionStore } from "../connections/connectionStore";
+import {
+  AuthoringContentClient,
+  type AuthoringItemLocator,
+  type AuthoringTreeLevel,
+} from "../sitecore/authoringClient";
 
 const selectionKey = "sitecoreXmCloudSync.comparisonSelection.v1";
+const defaultLanguage = "en";
+const authoringRootPath = "/sitecore";
 
 interface ComparisonSelection {
   readonly leftConnectionId?: string;
@@ -12,30 +19,39 @@ interface WebviewMessage {
   readonly type?: unknown;
   readonly side?: unknown;
   readonly connectionId?: unknown;
+  readonly itemId?: unknown;
 }
 
 export class ComparisonPanelManager implements vscode.Disposable {
   private panel: vscode.WebviewPanel | undefined;
   private panelDisposables: vscode.Disposable[] = [];
   private readonly disposables: vscode.Disposable[] = [];
+  private readonly authoringClient = new AuthoringContentClient();
+  private readonly treeLevelCache = new Map<string, AuthoringTreeLevel>();
+  private readonly pendingTreeLevels = new Map<string, Promise<AuthoringTreeLevel>>();
+  private readonly requestControllers = new Set<AbortController>();
 
   constructor(
     private readonly extensionUri: vscode.Uri,
     private readonly workspaceState: vscode.Memento,
     private readonly connectionStore: ConnectionStore,
+    private readonly log: vscode.LogOutputChannel,
   ) {
     this.disposables.push(
       connectionStore.onDidChange(() => {
-        void this.postState();
+        void this.refreshStateAndTrees();
       }),
     );
   }
 
   async open(): Promise<void> {
     if (this.panel) {
+      this.log.debug("Revealing the existing comparison tab.");
       this.panel.reveal(vscode.ViewColumn.Active);
       return;
     }
+
+    this.log.info("Opening the comparison tab.");
 
     const comparisonMediaUri = vscode.Uri.joinPath(this.extensionUri, "media", "comparison");
     const panel = vscode.window.createWebviewPanel(
@@ -53,6 +69,7 @@ export class ComparisonPanelManager implements vscode.Disposable {
     panel.iconPath = vscode.Uri.joinPath(this.extensionUri, "media", "sitecore-xm-cloud-sync.svg");
     this.panelDisposables = [
       panel.onDidDispose(() => {
+        this.cancelRequests();
         this.disposePanelSubscriptions();
         this.panel = undefined;
       }),
@@ -75,11 +92,13 @@ export class ComparisonPanelManager implements vscode.Disposable {
     await this.saveSelection(selection);
     await this.open();
     await this.postState();
+    await this.loadInitialTrees();
   }
 
   private async handleMessage(message: WebviewMessage): Promise<void> {
     if (message.type === "ready") {
       await this.postState();
+      await this.loadInitialTrees();
       return;
     }
 
@@ -95,6 +114,7 @@ export class ComparisonPanelManager implements vscode.Disposable {
         rightConnectionId: selection.leftConnectionId,
       });
       await this.postState();
+      await this.loadInitialTrees();
       return;
     }
 
@@ -112,7 +132,181 @@ export class ComparisonPanelManager implements vscode.Disposable {
           : { rightConnectionId: connectionId }),
       }, message.side));
       await this.postState();
+      await this.loadInitialTrees();
+      return;
     }
+
+    if (
+      message.type === "loadRoot" &&
+      (message.side === "left" || message.side === "right") &&
+      typeof message.connectionId === "string"
+    ) {
+      await this.loadTreeLevel(
+        message.side,
+        message.connectionId,
+        { path: authoringRootPath },
+      );
+      return;
+    }
+
+    if (
+      message.type === "loadChildren" &&
+      (message.side === "left" || message.side === "right") &&
+      typeof message.connectionId === "string" &&
+      typeof message.itemId === "string"
+    ) {
+      await this.loadTreeLevel(
+        message.side,
+        message.connectionId,
+        { itemId: message.itemId },
+        message.itemId,
+      );
+    }
+  }
+
+  private async refreshStateAndTrees(): Promise<void> {
+    await this.postState();
+    await this.loadInitialTrees();
+  }
+
+  private async loadInitialTrees(): Promise<void> {
+    if (!this.panel || this.connectionStore.list().length < 2) {
+      return;
+    }
+
+    const selection = this.getSelection();
+    const requests: Promise<void>[] = [];
+    if (selection.leftConnectionId) {
+      requests.push(
+        this.loadTreeLevel(
+          "left",
+          selection.leftConnectionId,
+          { path: authoringRootPath },
+        ),
+      );
+    }
+    if (selection.rightConnectionId) {
+      requests.push(
+        this.loadTreeLevel(
+          "right",
+          selection.rightConnectionId,
+          { path: authoringRootPath },
+        ),
+      );
+    }
+    await Promise.all(requests);
+  }
+
+  private async loadTreeLevel(
+    side: "left" | "right",
+    connectionId: string,
+    locator: AuthoringItemLocator,
+    requestedItemId?: string,
+  ): Promise<void> {
+    if (!this.panel || !this.isCurrentConnection(side, connectionId)) {
+      return;
+    }
+
+    await this.panel.webview.postMessage({
+      type: "treeLoading",
+      side,
+      connectionId,
+      requestedItemId,
+    });
+    this.log.debug(
+      `Loading ${side} tree level for connection ${connectionId} (${locatorDescription(locator)}).`,
+    );
+
+    try {
+      const level = await this.getTreeLevel(connectionId, locator);
+      if (!this.panel || !this.isCurrentConnection(side, connectionId)) {
+        return;
+      }
+      await this.panel.webview.postMessage({
+        type: "treeLoaded",
+        side,
+        connectionId,
+        requestedItemId,
+        level,
+      });
+      this.log.info(
+        `Loaded ${side} tree level ${level.item.path} with ${level.children.length} direct child item(s).`,
+      );
+    } catch (error: unknown) {
+      if (!this.panel || !this.isCurrentConnection(side, connectionId)) {
+        return;
+      }
+      await this.panel.webview.postMessage({
+        type: "treeLoadFailed",
+        side,
+        connectionId,
+        requestedItemId,
+        message: errorMessage(error),
+      });
+      this.log.error(
+        `Failed to load ${side} tree level for connection ${connectionId} (${locatorDescription(locator)}).`,
+        error,
+      );
+    }
+  }
+
+  private async getTreeLevel(
+    connectionId: string,
+    locator: AuthoringItemLocator,
+  ): Promise<AuthoringTreeLevel> {
+    const locatorKey = "path" in locator ? `path:${locator.path}` : `id:${locator.itemId}`;
+    const cacheKey = `${connectionId}:${defaultLanguage}:${locatorKey}`;
+    const cached = this.treeLevelCache.get(cacheKey);
+    if (cached) {
+      this.log.trace(`Tree cache hit: ${cacheKey}.`);
+      return cached;
+    }
+
+    const pending = this.pendingTreeLevels.get(cacheKey);
+    if (pending) {
+      this.log.trace(`Reusing pending tree request: ${cacheKey}.`);
+      return pending;
+    }
+    this.log.trace(`Tree cache miss: ${cacheKey}.`);
+
+    const connection = this.connectionStore.get(connectionId);
+    if (!connection) {
+      throw new Error("The XM Cloud connection no longer exists.");
+    }
+    const clientSecret = await this.connectionStore.getClientSecret(connectionId);
+    if (!clientSecret) {
+      throw new Error("The connection's client secret is missing.");
+    }
+
+    const controller = new AbortController();
+    const timeout = setTimeout(
+      () => controller.abort(new Error("Content-tree loading timed out.")),
+      30_000,
+    );
+    this.requestControllers.add(controller);
+    let request: Promise<AuthoringTreeLevel>;
+    request = this.authoringClient
+      .loadTreeLevel(connection, clientSecret, locator, defaultLanguage, controller.signal)
+      .then((level) => {
+        this.treeLevelCache.set(cacheKey, level);
+        return level;
+      })
+      .finally(() => {
+        clearTimeout(timeout);
+        if (this.pendingTreeLevels.get(cacheKey) === request) {
+          this.pendingTreeLevels.delete(cacheKey);
+        }
+        this.requestControllers.delete(controller);
+      });
+    this.pendingTreeLevels.set(cacheKey, request);
+    return request;
+  }
+
+  private isCurrentConnection(side: "left" | "right", connectionId: string): boolean {
+    const selection = this.getSelection();
+    return side === "left"
+      ? selection.leftConnectionId === connectionId
+      : selection.rightConnectionId === connectionId;
   }
 
   private getSelection(): ComparisonSelection {
@@ -191,11 +385,36 @@ export class ComparisonPanelManager implements vscode.Disposable {
     this.panelDisposables = [];
   }
 
+  private cancelRequests(): void {
+    for (const controller of this.requestControllers) {
+      controller.abort();
+    }
+    this.requestControllers.clear();
+    this.pendingTreeLevels.clear();
+  }
+
   dispose(): void {
+    this.cancelRequests();
+    this.treeLevelCache.clear();
+    this.authoringClient.clear();
     this.panel?.dispose();
     this.disposePanelSubscriptions();
     for (const disposable of this.disposables) {
       disposable.dispose();
     }
   }
+}
+
+function errorMessage(error: unknown): string {
+  if (error instanceof Error) {
+    if (error.name === "AbortError") {
+      return "Content-tree loading was cancelled.";
+    }
+    return error.message;
+  }
+  return "An unknown error occurred while loading the content tree.";
+}
+
+function locatorDescription(locator: AuthoringItemLocator): string {
+  return "path" in locator ? `path ${locator.path}` : `item ${locator.itemId}`;
 }
