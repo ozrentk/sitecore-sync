@@ -2,7 +2,7 @@
   "name": "sitecore-xm-cloud-sync",
   "displayName": "XM Cloud Sync",
   "description": "Compare and synchronize Sitecore XM Cloud authoring content from VS Code.",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "publisher": "OzrenTK",
   "license": "MIT",
   "engines": {
@@ -19,13 +19,12 @@
   ],
   "activationEvents": [
     "onView:xmCloudSync.connections",
-    "onView:xmCloudSync.leftTree",
-    "onView:xmCloudSync.rightTree",
     "onView:xmCloudSync.operations",
     "onCommand:xmCloudSync.addConnection",
     "onCommand:xmCloudSync.testConnection",
     "onCommand:xmCloudSync.removeConnection",
     "onCommand:xmCloudSync.openComparison",
+    "onCommand:xmCloudSync.compareWithConnection",
     "onCommand:xmCloudSync.refreshAll",
     "onCommand:xmCloudSync.openProductSpec"
   ],
@@ -53,6 +52,10 @@
         "icon": "$(diff)"
       },
       {
+        "command": "xmCloudSync.compareWithConnection",
+        "title": "Compare with…"
+      },
+      {
         "command": "xmCloudSync.refreshAll",
         "title": "XM Cloud Sync: Refresh All",
         "icon": "$(refresh)"
@@ -78,14 +81,6 @@
           "name": "Connections"
         },
         {
-          "id": "xmCloudSync.leftTree",
-          "name": "Left Content Tree"
-        },
-        {
-          "id": "xmCloudSync.rightTree",
-          "name": "Right Content Tree"
-        },
-        {
           "id": "xmCloudSync.operations",
           "name": "Sync Operations"
         }
@@ -95,14 +90,6 @@
       {
         "view": "xmCloudSync.connections",
         "contents": "No XM Cloud connections have been added.\n[Add Connection](command:xmCloudSync.addConnection)"
-      },
-      {
-        "view": "xmCloudSync.leftTree",
-        "contents": "Open a comparison tab to choose a left connection and browse authoring content.\n[Open Comparison](command:xmCloudSync.openComparison)"
-      },
-      {
-        "view": "xmCloudSync.rightTree",
-        "contents": "Open a comparison tab to choose a right connection and browse authoring content.\n[Open Comparison](command:xmCloudSync.openComparison)"
       },
       {
         "view": "xmCloudSync.operations",
@@ -118,16 +105,16 @@
         },
         {
           "command": "xmCloudSync.openComparison",
-          "when": "view == xmCloudSync.connections || view == xmCloudSync.leftTree || view == xmCloudSync.rightTree || view == xmCloudSync.operations",
+          "when": "view == xmCloudSync.connections || view == xmCloudSync.operations",
           "group": "navigation@10"
-        },
-        {
-          "command": "xmCloudSync.refreshAll",
-          "when": "view == xmCloudSync.leftTree || view == xmCloudSync.rightTree",
-          "group": "navigation"
         }
       ],
       "view/item/context": [
+        {
+          "command": "xmCloudSync.compareWithConnection",
+          "when": "view == xmCloudSync.connections && viewItem == xmCloudConnection",
+          "group": "1_compare"
+        },
         {
           "command": "xmCloudSync.testConnection",
           "when": "view == xmCloudSync.connections && viewItem == xmCloudConnection",
@@ -137,6 +124,12 @@
           "command": "xmCloudSync.removeConnection",
           "when": "view == xmCloudSync.connections && viewItem == xmCloudConnection",
           "group": "2_manage"
+        }
+      ],
+      "commandPalette": [
+        {
+          "command": "xmCloudSync.compareWithConnection",
+          "when": "false"
         }
       ]
     },

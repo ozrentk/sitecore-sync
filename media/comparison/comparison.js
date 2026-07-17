@@ -89,7 +89,26 @@ function createSide(side, connectionId) {
 function render() {
   renderOptions(leftSelect, state.selection.leftConnectionId);
   renderOptions(rightSelect, state.selection.rightConnectionId);
-  swapButton.disabled = state.connections.length === 0;
+  swapButton.disabled = state.connections.length < 2;
+
+  if (state.connections.length < 2) {
+    const empty = document.createElement("div");
+    empty.className = "empty comparison-empty";
+    const content = document.createElement("div");
+    content.className = "empty-content";
+    const message = document.createElement("p");
+    message.textContent = "You need at least two XM Cloud connections to compare content.";
+    const button = document.createElement("button");
+    button.className = "primary";
+    button.type = "button";
+    button.textContent = "Add Connection";
+    button.addEventListener("click", () => vscode.postMessage({ type: "addConnection" }));
+    content.append(message, button);
+    empty.append(content);
+    workspace.replaceChildren(empty);
+    return;
+  }
+
   workspace.replaceChildren(
     createSide("Left", state.selection.leftConnectionId),
     createSide("Right", state.selection.rightConnectionId),

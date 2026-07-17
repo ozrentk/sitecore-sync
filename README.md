@@ -2,7 +2,7 @@
 
 XM Cloud Sync is an early-stage VS Code extension for comparing and synchronizing Sitecore XM Cloud authoring content.
 
-The current build supports multiple saved XM Cloud connections, automation-client authentication, and authenticated connection testing. It also contributes placeholder Left Content Tree, Right Content Tree, and Sync Operations views for the next milestones.
+The current build supports multiple saved XM Cloud connections, automation-client authentication, authenticated connection testing, and a single document-style comparison workspace. The activity view contains Connections and the placeholder Sync Operations view for the next milestones.
 
 ## Add and test a connection
 
@@ -22,6 +22,8 @@ If the Authoring API returns identical site records, the extension displays the 
 ## Open a comparison
 
 Run **XM Cloud Sync: Open Comparison** from the Command Palette or use the diff icon in the XM Cloud Sync activity view. The comparison opens as a document-style tab with independent left and right connection selectors and a swap button. Choices are remembered per workspace.
+
+You need at least two XM Cloud connections to compare content. You can also right-click a connection and choose **Compare with…**; the selected connection becomes the left side and a Quick Pick selects the right side.
 
 The current comparison tab is the UI shell for the upcoming authoring content trees and field-level diff. Connection secrets remain in the extension host and are never exposed to the webview.
 

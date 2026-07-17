@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.2.1
+
+- Added **Compare with…** to the connection context menu.
+- Required two distinct XM Cloud connections for a comparison.
+- Removed the redundant Left Content Tree and Right Content Tree activity views.
+- Kept comparison content in a single document-style tab.
+
 ## 0.2.0
 
 - Added a document-style comparison tab.

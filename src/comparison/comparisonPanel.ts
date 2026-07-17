@@ -70,6 +70,13 @@ export class ComparisonPanelManager implements vscode.Disposable {
     }
   }
 
+  async openWith(leftConnectionId: string, rightConnectionId: string): Promise<void> {
+    const selection = this.normalizeSelection({ leftConnectionId, rightConnectionId });
+    await this.saveSelection(selection);
+    await this.open();
+    await this.postState();
+  }
+
   private async handleMessage(message: WebviewMessage): Promise<void> {
     if (message.type === "ready") {
       await this.postState();
@@ -98,29 +105,43 @@ export class ComparisonPanelManager implements vscode.Disposable {
     ) {
       const connectionId = this.connectionStore.get(message.connectionId)?.id;
       const selection = this.getSelection();
-      await this.saveSelection({
+      await this.saveSelection(this.normalizeSelection({
         ...selection,
         ...(message.side === "left"
           ? { leftConnectionId: connectionId }
           : { rightConnectionId: connectionId }),
-      });
+      }, message.side));
       await this.postState();
     }
   }
 
   private getSelection(): ComparisonSelection {
-    const connections = this.connectionStore.list();
     const stored = this.workspaceState.get<ComparisonSelection>(selectionKey, {});
-    const validIds = new Set(connections.map((connection) => connection.id));
+    return this.normalizeSelection(stored);
+  }
 
-    const leftConnectionId =
-      stored.leftConnectionId && validIds.has(stored.leftConnectionId)
-        ? stored.leftConnectionId
-        : connections[0]?.id;
-    const rightConnectionId =
-      stored.rightConnectionId && validIds.has(stored.rightConnectionId)
-        ? stored.rightConnectionId
-        : connections[1]?.id ?? connections[0]?.id;
+  private normalizeSelection(
+    selection: ComparisonSelection,
+    changedSide?: "left" | "right",
+  ): ComparisonSelection {
+    const connectionIds = this.connectionStore.list().map((connection) => connection.id);
+    const validIds = new Set(connectionIds);
+    let leftConnectionId: string | undefined =
+      selection.leftConnectionId && validIds.has(selection.leftConnectionId)
+        ? selection.leftConnectionId
+        : connectionIds[0];
+    let rightConnectionId: string | undefined =
+      selection.rightConnectionId && validIds.has(selection.rightConnectionId)
+        ? selection.rightConnectionId
+        : connectionIds.find((id) => id !== leftConnectionId);
+
+    if (leftConnectionId === rightConnectionId) {
+      if (changedSide === "left") {
+        rightConnectionId = connectionIds.find((id) => id !== leftConnectionId);
+      } else {
+        leftConnectionId = connectionIds.find((id) => id !== rightConnectionId);
+      }
+    }
 
     return { leftConnectionId, rightConnectionId };
   }

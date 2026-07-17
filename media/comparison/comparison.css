@@ -131,6 +131,10 @@ select:focus {
   max-width: 360px;
 }
 
+.comparison-empty {
+  grid-column: 1 / -1;
+}
+
 .empty-content p {
   line-height: 1.5;
 }

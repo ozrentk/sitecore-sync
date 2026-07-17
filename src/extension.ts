@@ -2,13 +2,9 @@ import * as vscode from "vscode";
 import { ComparisonPanelManager } from "./comparison/comparisonPanel";
 import { addConnection, removeConnection, testConnection } from "./connections/connectionCommands";
 import { ConnectionStore } from "./connections/connectionStore";
-import { ConnectionTreeProvider } from "./connections/connectionTreeProvider";
+import { ConnectionTreeItem, ConnectionTreeProvider } from "./connections/connectionTreeProvider";
 
-const viewIds = [
-  "xmCloudSync.leftTree",
-  "xmCloudSync.rightTree",
-  "xmCloudSync.operations",
-] as const;
+const viewIds = ["xmCloudSync.operations"] as const;
 
 class EmptyTreeDataProvider implements vscode.TreeDataProvider<never> {
   private readonly changeEmitter = new vscode.EventEmitter<never | undefined | null | void>();
@@ -68,6 +64,39 @@ export function activate(context: vscode.ExtensionContext): void {
     }),
     vscode.commands.registerCommand("xmCloudSync.openComparison", async () => {
       await comparisonPanelManager.open();
+    }),
+    vscode.commands.registerCommand("xmCloudSync.compareWithConnection", async (argument) => {
+      if (!(argument instanceof ConnectionTreeItem)) {
+        return;
+      }
+
+      const candidates = connectionStore
+        .list()
+        .filter((connection) => connection.id !== argument.connection.id);
+      if (candidates.length === 0) {
+        await vscode.window.showInformationMessage(
+          "You need at least two XM Cloud connections to compare content.",
+        );
+        return;
+      }
+
+      const selected = await vscode.window.showQuickPick(
+        candidates.map((connection) => ({
+          label: connection.name,
+          description: connection.serverUrl,
+          connectionId: connection.id,
+        })),
+        {
+          title: `Compare ${argument.connection.name} with…`,
+          placeHolder: "Select the right-side connection",
+        },
+      );
+      if (selected) {
+        await comparisonPanelManager.openWith(
+          argument.connection.id,
+          selected.connectionId,
+        );
+      }
     }),
     vscode.commands.registerCommand("xmCloudSync.refreshAll", async () => {
       for (const provider of providers) {
