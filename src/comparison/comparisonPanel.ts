@@ -20,6 +20,15 @@ interface WebviewMessage {
   readonly side?: unknown;
   readonly connectionId?: unknown;
   readonly itemId?: unknown;
+  readonly rowKey?: unknown;
+  readonly leftRefreshPlan?: unknown;
+  readonly rightRefreshPlan?: unknown;
+}
+
+interface RefreshPlanEntry {
+  readonly itemId: string;
+  readonly path: string;
+  readonly depth: number;
 }
 
 export class ComparisonPanelManager implements vscode.Disposable {
@@ -161,6 +170,81 @@ export class ComparisonPanelManager implements vscode.Disposable {
         { itemId: message.itemId },
         message.itemId,
       );
+      return;
+    }
+
+    if (message.type === "refreshSubtree" && typeof message.rowKey === "string") {
+      await this.refreshSubtree(
+        message.rowKey,
+        parseRefreshPlan(message.leftRefreshPlan),
+        parseRefreshPlan(message.rightRefreshPlan),
+      );
+    }
+  }
+
+  private async refreshSubtree(
+    rowKey: string,
+    leftPlan: readonly RefreshPlanEntry[],
+    rightPlan: readonly RefreshPlanEntry[],
+  ): Promise<void> {
+    if (!this.panel) {
+      return;
+    }
+    if (!leftPlan.length && !rightPlan.length) {
+      await this.panel.webview.postMessage({ type: "subtreeRefreshFinished", rowKey });
+      return;
+    }
+
+    const selection = this.getSelection();
+    const sides = [
+      { side: "left" as const, connectionId: selection.leftConnectionId, plan: leftPlan },
+      { side: "right" as const, connectionId: selection.rightConnectionId, plan: rightPlan },
+    ].filter(
+      (entry): entry is {
+        readonly side: "left" | "right";
+        readonly connectionId: string;
+        readonly plan: readonly RefreshPlanEntry[];
+      } => Boolean(entry.connectionId && entry.plan.length),
+    );
+    if (!sides.length) {
+      await this.panel.webview.postMessage({ type: "subtreeRefreshFinished", rowKey });
+      return;
+    }
+
+    for (const { connectionId, plan } of sides) {
+      for (const entry of plan) {
+        this.treeLevelCache.delete(this.treeCacheKey(connectionId, { itemId: entry.itemId }));
+        this.treeLevelCache.delete(this.treeCacheKey(connectionId, { path: entry.path }));
+      }
+    }
+
+    this.log.info(
+      `Refreshing comparison subtree ${rowKey} (${leftPlan.length} left level(s), ${rightPlan.length} right level(s)).`,
+    );
+
+    try {
+      const maximumDepth = Math.max(
+        ...sides.flatMap(({ plan }) => plan.map((entry) => entry.depth)),
+      );
+      for (let depth = 0; depth <= maximumDepth; depth += 1) {
+        const requests: Promise<void>[] = [];
+        for (const { side, connectionId, plan } of sides) {
+          for (const entry of plan.filter((candidate) => candidate.depth === depth)) {
+            requests.push(
+              this.loadTreeLevel(
+                side,
+                connectionId,
+                { itemId: entry.itemId },
+                entry.itemId,
+              ),
+            );
+          }
+        }
+        await Promise.all(requests);
+      }
+      this.log.info(`Finished refreshing comparison subtree ${rowKey}.`);
+    } finally {
+      await this.panel?.webview.postMessage({ type: "subtreeRefreshFinished", rowKey });
     }
   }
 
@@ -254,8 +338,7 @@ export class ComparisonPanelManager implements vscode.Disposable {
     connectionId: string,
     locator: AuthoringItemLocator,
   ): Promise<AuthoringTreeLevel> {
-    const locatorKey = "path" in locator ? `path:${locator.path}` : `id:${locator.itemId}`;
-    const cacheKey = `${connectionId}:${defaultLanguage}:${locatorKey}`;
+    const cacheKey = this.treeCacheKey(connectionId, locator);
     const cached = this.treeLevelCache.get(cacheKey);
     if (cached) {
       this.log.trace(`Tree cache hit: ${cacheKey}.`);
@@ -300,6 +383,11 @@ export class ComparisonPanelManager implements vscode.Disposable {
       });
     this.pendingTreeLevels.set(cacheKey, request);
     return request;
+  }
+
+  private treeCacheKey(connectionId: string, locator: AuthoringItemLocator): string {
+    const locatorKey = "path" in locator ? `path:${locator.path}` : `id:${locator.itemId}`;
+    return `${connectionId}:${defaultLanguage}:${locatorKey}`;
   }
 
   private isCurrentConnection(side: "left" | "right", connectionId: string): boolean {
@@ -417,4 +505,30 @@ function errorMessage(error: unknown): string {
 
 function locatorDescription(locator: AuthoringItemLocator): string {
   return "path" in locator ? `path ${locator.path}` : `item ${locator.itemId}`;
+}
+
+function parseRefreshPlan(value: unknown): readonly RefreshPlanEntry[] {
+  if (!Array.isArray(value) || value.length > 5_000) {
+    return [];
+  }
+
+  const entries: RefreshPlanEntry[] = [];
+  for (const candidate of value) {
+    if (!candidate || typeof candidate !== "object") {
+      return [];
+    }
+    const entry = candidate as Partial<RefreshPlanEntry>;
+    if (
+      typeof entry.itemId !== "string" ||
+      typeof entry.path !== "string" ||
+      typeof entry.depth !== "number" ||
+      !Number.isInteger(entry.depth) ||
+      entry.depth < 0 ||
+      entry.depth > 1_000
+    ) {
+      return [];
+    }
+    entries.push({ itemId: entry.itemId, path: entry.path, depth: entry.depth });
+  }
+  return entries;
 }
