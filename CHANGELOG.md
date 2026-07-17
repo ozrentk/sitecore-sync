@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.2.0
+
+- Added a document-style comparison tab.
+- Added persistent left and right connection selectors and a swap action.
+- Added comparison launch actions to the activity view and Command Palette.
+- Kept connection secrets and OAuth tokens outside the webview process.
+
 ## 0.1.2
 
 - Collapsed exact duplicate sites returned by the Authoring API.

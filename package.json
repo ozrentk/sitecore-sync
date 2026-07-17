@@ -2,7 +2,7 @@
   "name": "sitecore-xm-cloud-sync",
   "displayName": "XM Cloud Sync",
   "description": "Compare and synchronize Sitecore XM Cloud authoring content from VS Code.",
-  "version": "0.1.2",
+  "version": "0.2.0",
   "publisher": "OzrenTK",
   "license": "MIT",
   "engines": {
@@ -25,6 +25,7 @@
     "onCommand:xmCloudSync.addConnection",
     "onCommand:xmCloudSync.testConnection",
     "onCommand:xmCloudSync.removeConnection",
+    "onCommand:xmCloudSync.openComparison",
     "onCommand:xmCloudSync.refreshAll",
     "onCommand:xmCloudSync.openProductSpec"
   ],
@@ -45,6 +46,11 @@
         "command": "xmCloudSync.removeConnection",
         "title": "XM Cloud Sync: Delete Connection",
         "icon": "$(trash)"
+      },
+      {
+        "command": "xmCloudSync.openComparison",
+        "title": "XM Cloud Sync: Open Comparison",
+        "icon": "$(diff)"
       },
       {
         "command": "xmCloudSync.refreshAll",
@@ -92,11 +98,11 @@
       },
       {
         "view": "xmCloudSync.leftTree",
-        "contents": "Choose a left connection to browse authoring content."
+        "contents": "Open a comparison tab to choose a left connection and browse authoring content.\n[Open Comparison](command:xmCloudSync.openComparison)"
       },
       {
         "view": "xmCloudSync.rightTree",
-        "contents": "Choose a right connection to browse authoring content."
+        "contents": "Open a comparison tab to choose a right connection and browse authoring content.\n[Open Comparison](command:xmCloudSync.openComparison)"
       },
       {
         "view": "xmCloudSync.operations",
@@ -109,6 +115,11 @@
           "command": "xmCloudSync.addConnection",
           "when": "view == xmCloudSync.connections",
           "group": "navigation"
+        },
+        {
+          "command": "xmCloudSync.openComparison",
+          "when": "view == xmCloudSync.connections || view == xmCloudSync.leftTree || view == xmCloudSync.rightTree || view == xmCloudSync.operations",
+          "group": "navigation@10"
         },
         {
           "command": "xmCloudSync.refreshAll",
