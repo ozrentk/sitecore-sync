@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.2.4
+
+- Simplified the comparison selector toolbar and removed repeated connection headings.
+- Moved server URLs into a thin strip beneath the paired tree.
+- Narrowed the difference indicator gutter.
+- Removed redundant left/right badges from same-path ID conflicts.
+- Grouped compact monospace `L`/`R` and `P`/`N`/`T` legend symbols with individual tooltips.
+- Anchored the connection URL strip to the bottom when the tree is shorter than the viewport.
+- Removed visible full paths from tree rows and highlighted display names that differ from item names.
+- Added paired-row expand and collapse by double-clicking either item cell.
+
 ## 0.2.3
 
 - Replaced independent content trees with one synchronized paired-row comparison tree.
