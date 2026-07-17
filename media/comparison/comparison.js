@@ -24,6 +24,7 @@ const state = {
     right: new Map(),
   },
   refreshOperations: new Map(),
+  subtreeLoadOperations: new Map(),
 };
 
 let contextMenu;
@@ -257,6 +258,12 @@ function pairReady(pair) {
   return nodeReady(pair.left) && nodeReady(pair.right);
 }
 
+function pairLevelsLoaded(pair) {
+  return [pair.left, pair.right].every((node) =>
+    !node || !node.hasChildren || node.childrenLoaded,
+  );
+}
+
 function pairLoading(pair) {
   return pair.left?.loading === true || pair.right?.loading === true;
 }
@@ -334,6 +341,78 @@ function togglePairExpansion(pair) {
   render();
 }
 
+function expandPairItem(pair) {
+  if (
+    !pairCanExpand(pair) ||
+    state.expandedRows.has(pair.key) ||
+    isPairRefreshing(pair)
+  ) {
+    return;
+  }
+  state.expandedRows.add(pair.key);
+  loadMissingPairLevels(pair);
+  closeContextMenu();
+  render();
+}
+
+function collapsePairItem(pair) {
+  if (!state.expandedRows.has(pair.key) || isPairRefreshing(pair)) {
+    return;
+  }
+  state.expandedRows.delete(pair.key);
+  closeContextMenu();
+  render();
+}
+
+function findLoadedPair(rowKey) {
+  refreshLoadedItemIndexes();
+  const leftRoot = state.trees.left.root;
+  const rightRoot = state.trees.right.root;
+  if (!leftRoot || !rightRoot) {
+    return undefined;
+  }
+
+  const visit = (pair) => {
+    if (pair.key === rowKey) {
+      return pair;
+    }
+    if (!pairLevelsLoaded(pair)) {
+      return undefined;
+    }
+    for (const childPair of pairChildren(
+      pair.left?.children ?? [],
+      pair.right?.children ?? [],
+    )) {
+      const found = visit(childPair);
+      if (found) {
+        return found;
+      }
+    }
+    return undefined;
+  };
+  return visit(createPair(leftRoot, rightRoot, "root"));
+}
+
+function expandLoadedSubtree(rowKey) {
+  const rootPair = findLoadedPair(rowKey);
+  if (!rootPair) {
+    return;
+  }
+  const visit = (pair) => {
+    if (!pairCanExpand(pair) || !pairLevelsLoaded(pair)) {
+      return;
+    }
+    state.expandedRows.add(pair.key);
+    for (const childPair of pairChildren(
+      pair.left?.children ?? [],
+      pair.right?.children ?? [],
+    )) {
+      visit(childPair);
+    }
+  };
+  visit(rootPair);
+}
+
 function buildRefreshPlan(node, depth = 0, plan = []) {
   if (!node) {
     return plan;
@@ -368,17 +447,23 @@ function isPairRefreshing(pair) {
   const pairIds = [pair.left, pair.right]
     .filter(Boolean)
     .map((node) => normalizeItemId(node.itemId));
-  return [...state.refreshOperations.values()].some(({ itemIds }) =>
+  return [
+    ...state.refreshOperations.values(),
+    ...state.subtreeLoadOperations.values(),
+  ].some(({ itemIds }) =>
     pairIds.some((itemId) => itemIds.has(itemId)),
   );
 }
 
 function isRefreshRoot(pair) {
-  return state.refreshOperations.has(pair.key);
+  return state.refreshOperations.has(pair.key) || state.subtreeLoadOperations.has(pair.key);
 }
 
 function hasRefreshOverlap(itemIds) {
-  return [...state.refreshOperations.values()].some(({ itemIds: activeIds }) =>
+  return [
+    ...state.refreshOperations.values(),
+    ...state.subtreeLoadOperations.values(),
+  ].some(({ itemIds: activeIds }) =>
     [...itemIds].some((itemId) => activeIds.has(itemId)),
   );
 }
@@ -388,6 +473,16 @@ function subtreeIsLoading(node) {
     return false;
   }
   return node.loading || node.children.some(subtreeIsLoading);
+}
+
+function clearNodeLoadingState(node) {
+  if (!node) {
+    return;
+  }
+  node.loading = false;
+  for (const child of node.children) {
+    clearNodeLoadingState(child);
+  }
 }
 
 function startSubtreeRefresh(pair) {
@@ -407,9 +502,41 @@ function startSubtreeRefresh(pair) {
   render();
 }
 
+function startSubtreeLoad(pair) {
+  const itemIds = refreshIdsForPair(pair);
+  if (
+    !pairCanExpand(pair) ||
+    hasRefreshOverlap(itemIds) ||
+    subtreeIsLoading(pair.left) ||
+    subtreeIsLoading(pair.right)
+  ) {
+    return;
+  }
+
+  vscode.postMessage({
+    type: "loadSubtree",
+    rowKey: pair.key,
+    leftItemId: pair.left?.hasChildren ? pair.left.itemId : undefined,
+    rightItemId: pair.right?.hasChildren ? pair.right.itemId : undefined,
+  });
+  closeContextMenu();
+}
+
+function cancelSubtreeLoad(rowKey) {
+  vscode.postMessage({ type: "cancelSubtreeLoad", rowKey });
+  closeContextMenu();
+}
+
 function closeContextMenu() {
   contextMenu?.remove();
   contextMenu = undefined;
+}
+
+function createContextMenuSeparator() {
+  const separator = document.createElement("div");
+  separator.className = "context-menu-separator";
+  separator.setAttribute("role", "separator");
+  return separator;
 }
 
 function showContextMenu(event, pair, forceDisabled = false) {
@@ -424,6 +551,59 @@ function showContextMenu(event, pair, forceDisabled = false) {
   const menu = document.createElement("div");
   menu.className = "comparison-context-menu";
   menu.setAttribute("role", "menu");
+  const activeSubtreeLoad = state.subtreeLoadOperations.has(pair.key);
+  if (activeSubtreeLoad) {
+    const cancel = document.createElement("button");
+    cancel.className = "context-menu-item";
+    cancel.type = "button";
+    cancel.textContent = "Cancel Expand All";
+    cancel.addEventListener("click", () => cancelSubtreeLoad(pair.key));
+    menu.append(cancel, createContextMenuSeparator());
+  }
+
+  const itemAction = document.createElement("button");
+  itemAction.className = "context-menu-item";
+  itemAction.type = "button";
+  if (state.expandedRows.has(pair.key)) {
+    itemAction.textContent = "Collapse Item";
+    itemAction.disabled = disabled;
+    itemAction.title = itemAction.disabled
+      ? "This item is currently locked."
+      : "Collapse this item while preserving descendant expansion state.";
+    itemAction.addEventListener("click", () => collapsePairItem(pair));
+  } else {
+    itemAction.textContent = "Expand Item";
+    itemAction.disabled = disabled || !pairCanExpand(pair);
+    itemAction.title = itemAction.disabled
+      ? "This item cannot be expanded in its current state."
+      : "Expand this item and load its immediate children if needed.";
+    itemAction.addEventListener("click", () => expandPairItem(pair));
+  }
+
+  const expandLoaded = document.createElement("button");
+  expandLoaded.className = "context-menu-item";
+  expandLoaded.type = "button";
+  expandLoaded.textContent = "Expand Loaded Items";
+  expandLoaded.disabled = disabled || !pairCanExpand(pair) || !pairLevelsLoaded(pair);
+  expandLoaded.title = expandLoaded.disabled
+    ? "Load this item's immediate level before expanding its cached subtree."
+    : "Expand every complete cached level below this item without making API requests.";
+  expandLoaded.addEventListener("click", () => {
+    expandLoadedSubtree(pair.key);
+    closeContextMenu();
+    render();
+  });
+
+  const load = document.createElement("button");
+  load.className = "context-menu-item";
+  load.type = "button";
+  load.textContent = "Expand All…";
+  load.disabled = disabled || !pairCanExpand(pair);
+  load.title = load.disabled
+    ? "This subtree has no children, overlaps another operation, or is still loading."
+    : "Confirm, then load every descendant below this item and expand the completed subtree.";
+  load.addEventListener("click", () => startSubtreeLoad(pair));
+
   const refresh = document.createElement("button");
   refresh.className = "context-menu-item";
   refresh.type = "button";
@@ -433,14 +613,20 @@ function showContextMenu(event, pair, forceDisabled = false) {
     ? "This subtree overlaps another operation or is still loading."
     : "Refresh the selected item and every loaded descendant level.";
   refresh.addEventListener("click", () => startSubtreeRefresh(pair));
-  menu.append(refresh);
+  menu.append(
+    itemAction,
+    expandLoaded,
+    load,
+    createContextMenuSeparator(),
+    refresh,
+  );
   document.body.append(menu);
   contextMenu = menu;
 
   const bounds = menu.getBoundingClientRect();
   menu.style.left = `${Math.max(4, Math.min(event.clientX, window.innerWidth - bounds.width - 4))}px`;
   menu.style.top = `${Math.max(4, Math.min(event.clientY, window.innerHeight - bounds.height - 4))}px`;
-  refresh.focus();
+  (activeSubtreeLoad ? menu.firstElementChild : itemAction).focus();
 }
 
 function createDifferenceBadges(flags) {
@@ -712,6 +898,7 @@ function updateTreeConnections() {
     state.selectedRowKey = undefined;
     state.rootRowKey = undefined;
     state.refreshOperations.clear();
+    state.subtreeLoadOperations.clear();
     closeContextMenu();
   }
 }
@@ -811,6 +998,30 @@ window.addEventListener("message", (event) => {
     applyLoadFailure(message);
   } else if (message?.type === "subtreeRefreshFinished") {
     state.refreshOperations.delete(message.rowKey);
+  } else if (message?.type === "subtreeLoadStarted") {
+    const pair = findLoadedPair(message.rowKey);
+    if (pair) {
+      state.subtreeLoadOperations.set(message.rowKey, {
+        itemIds: refreshIdsForPair(pair),
+        loadedLevels: 0,
+      });
+      state.expandedRows.add(message.rowKey);
+    } else {
+      vscode.postMessage({ type: "cancelSubtreeLoad", rowKey: message.rowKey });
+    }
+  } else if (message?.type === "subtreeLoadProgress") {
+    const operation = state.subtreeLoadOperations.get(message.rowKey);
+    if (operation) {
+      operation.loadedLevels = message.loadedLevels;
+    }
+  } else if (message?.type === "subtreeLoadDepthLoaded") {
+    expandLoadedSubtree(message.rowKey);
+  } else if (message?.type === "subtreeLoadFinished") {
+    const pair = findLoadedPair(message.rowKey);
+    clearNodeLoadingState(pair?.left);
+    clearNodeLoadingState(pair?.right);
+    state.subtreeLoadOperations.delete(message.rowKey);
+    expandLoadedSubtree(message.rowKey);
   } else {
     return;
   }

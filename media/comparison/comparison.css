@@ -360,6 +360,12 @@ select:focus {
   cursor: default;
 }
 
+.context-menu-separator {
+  height: 1px;
+  margin: 3px 5px;
+  background: var(--vscode-menu-separatorBackground, var(--vscode-panel-border));
+}
+
 .empty {
   display: grid;
   place-items: center;
@@ -387,4 +393,5 @@ select:focus {
     grid-template-columns: 1fr auto 1fr;
     padding-inline: 10px;
   }
+
 }

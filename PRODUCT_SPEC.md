@@ -53,6 +53,8 @@ The activity view is the launcher and connection-management surface. The primary
 
 The comparison tab's sticky top bar contains independent left and right connection selectors and a swap action. The comparison tab remembers its selected connections per workspace and updates when connections are added or removed.
 
+Later enhancement: double-clicking a configured site beneath a connection in the Connections pane should open or reveal the comparison tab and use that site's root as the relevant comparison-side starting point. The exact side-selection behavior and handling when the other connection has not yet been chosen remain to be designed.
+
 The comparison tab will contain the two synchronized content trees, field rows, text-diff launch actions, and sync-operation controls. Connection secrets and access tokens are never sent into the webview; API operations remain in the extension host.
 
 Each side independently selects:
@@ -76,6 +78,12 @@ Fields are leaf nodes and have comparison states. Selecting a differing textual 
 
 Selecting an item never refreshes it. Loaded item metadata, fields, versions, languages, and children are cached. Collapsing and re-expanding a loaded node reuses the cache.
 
+The paired-row context menu provides **Expand All…** for large trees. The ellipsis signals that a native modal VS Code warning requires confirmation before traversal begins. The operation traverses breadth-first only below the selected row, loading whichever of the left and right items exist. Completed depths expand progressively. Only the selected subtree is locked, disjoint subtree operations may run concurrently, and cancellation is available from the progress notification or the operation root's **Cancel Expand All** action.
+
+The same context menu shows either **Expand Item** or **Collapse Item** according to row state, then **Expand Loaded Items**, then **Expand All…**. **Refresh Subtree** follows a separator. **Expand Loaded Items** recursively expands complete cached levels beneath the selected row without issuing Authoring API requests or changing unrelated branches. While an expand-all operation runs, **Cancel Expand All** leads the menu and overlapping actions remain disabled.
+
+A later enhancement may perform a cancellable preflight traversal in the extension host, count unique left and right subtree items without populating the webview, and ask for confirmation before materializing a large subtree. The preflight can either return an exact count or stop at a configurable warning threshold and report that the subtree exceeds it.
+
 When a comparison opens, each side loads the configured root item and all of its direct children. Expanding a child loads exactly one additional level. Direct-child collections are followed through every Authoring GraphQL page before the level is displayed as complete. Loading and errors are shown inline in the affected tree without opening another pane.
 
 The two snapshots are rendered as one paired-row tree rather than two independently scrolling controls. A row owns the shared selection and expanded state. Expanding it loads the corresponding level on both available sides concurrently; a left-only or right-only row loads only its existing side.
@@ -90,7 +98,7 @@ Context commands for the MVP:
 - `Refresh Subtree`
 - `Refresh All`
 
-`Refresh All` greedily reloads the entire configured root subtree. Internally it uses iterative, paginated traversal; pagination is a transport detail and does not make the visible operation lazy.
+`Refresh All` will greedily re-read the entire configured root subtree. Internally it uses iterative, paginated traversal; pagination is a transport detail and does not make the visible operation lazy.
 
 `Clear Connection Cache` is reserved for a later release.
 
