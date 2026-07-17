@@ -1,0 +1,25 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src {{cspSource}}; script-src {{cspSource}};">
+  <link rel="stylesheet" href="{{styleUri}}">
+  <title>XM Cloud Comparison</title>
+</head>
+<body>
+  <header class="toolbar">
+    <div class="selector">
+      <label for="left-connection">Left connection</label>
+      <select id="left-connection" aria-label="Left XM Cloud connection"></select>
+    </div>
+    <button id="swap" class="swap" type="button" title="Swap left and right connections" aria-label="Swap connections">⇄</button>
+    <div class="selector">
+      <label for="right-connection">Right connection</label>
+      <select id="right-connection" aria-label="Right XM Cloud connection"></select>
+    </div>
+  </header>
+  <main id="workspace" class="workspace" aria-live="polite"></main>
+  <script src="{{scriptUri}}"></script>
+</body>
+</html>

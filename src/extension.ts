@@ -1,4 +1,5 @@
 import * as vscode from "vscode";
+import { ComparisonPanelManager } from "./comparison/comparisonPanel";
 import { addConnection, removeConnection, testConnection } from "./connections/connectionCommands";
 import { ConnectionStore } from "./connections/connectionStore";
 import { ConnectionTreeProvider } from "./connections/connectionTreeProvider";
@@ -34,9 +35,15 @@ class EmptyTreeDataProvider implements vscode.TreeDataProvider<never> {
 export function activate(context: vscode.ExtensionContext): void {
   const connectionStore = new ConnectionStore(context.globalState, context.secrets);
   const connectionProvider = new ConnectionTreeProvider(connectionStore);
+  const comparisonPanelManager = new ComparisonPanelManager(
+    context.extensionUri,
+    context.workspaceState,
+    connectionStore,
+  );
   context.subscriptions.push(
     connectionStore,
     connectionProvider,
+    comparisonPanelManager,
     vscode.window.registerTreeDataProvider("xmCloudSync.connections", connectionProvider),
   );
 
@@ -58,6 +65,9 @@ export function activate(context: vscode.ExtensionContext): void {
     }),
     vscode.commands.registerCommand("xmCloudSync.removeConnection", async (argument) => {
       await removeConnection(argument, connectionStore);
+    }),
+    vscode.commands.registerCommand("xmCloudSync.openComparison", async () => {
+      await comparisonPanelManager.open();
     }),
     vscode.commands.registerCommand("xmCloudSync.refreshAll", async () => {
       for (const provider of providers) {

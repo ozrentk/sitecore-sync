@@ -19,6 +19,14 @@ After a successful test, expand the connection to see every configured site retu
 
 If the Authoring API returns identical site records, the extension displays the site once and reports the number of duplicate records omitted. Records are considered identical only when their name, root path, and root item ID all match exactly.
 
+## Open a comparison
+
+Run **XM Cloud Sync: Open Comparison** from the Command Palette or use the diff icon in the XM Cloud Sync activity view. The comparison opens as a document-style tab with independent left and right connection selectors and a swap button. Choices are remembered per workspace.
+
+The current comparison tab is the UI shell for the upcoming authoring content trees and field-level diff. Connection secrets remain in the extension host and are never exposed to the webview.
+
+The comparison webview is separated into `media/comparison/comparison.html`, `comparison.css`, and `comparison.js`. Extension-host lifecycle and state messaging remain in `src/comparison/comparisonPanel.ts`.
+
 ## Debug during development
 
 1. Run `npm install` once.

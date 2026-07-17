@@ -45,6 +45,10 @@ The `Sitecore Sync` activity view contains:
 - Right content tree.
 - Sync operations.
 
+The activity view is the launcher and connection-management surface. The primary comparison workspace opens as a document-style VS Code webview tab. Its sticky top bar contains independent left and right connection selectors and a swap action. The comparison tab remembers its selected connections per workspace and updates when connections are added or removed.
+
+The comparison tab will contain the two synchronized content trees, field rows, text-diff launch actions, and sync-operation controls. Connection secrets and access tokens are never sent into the webview; API operations remain in the extension host.
+
 Each side independently selects:
 
 - Connection.
