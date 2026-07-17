@@ -49,7 +49,9 @@ Identity symbols (`L`, `R`, or `ID`) form one blue group. Structural symbols (`P
 
 Connection secrets, access tokens, and Authoring API requests remain in the extension host and are never exposed to the webview.
 
-Run **XM Cloud Sync: Show Logs** to open the extension's diagnostic log. It records comparison loading, caching, and errors without recording client secrets or access tokens.
+All Sitecore OAuth and Authoring GraphQL traffic passes through a shared request client. A transient network failure or HTTP 408, 429, 500, 502, 503, or 504 response is retried up to three times after the initial attempt. Retries use exponential backoff starting near 500 ms with jitter. When Sitecore supplies `Retry-After` as seconds or an HTTP date, that delay takes precedence and also pauses other requests to the same endpoint origin. Retry waits can be cancelled. Permanent client and authorization responses, GraphQL errors, and missing items are returned immediately instead of being retried.
+
+Run **XM Cloud Sync: Show Logs** to open the extension's diagnostic log. It records comparison loading, caching, errors, retry attempts, and cooldown waits without recording client secrets, access tokens, request bodies, or query parameters.
 
 The comparison webview is separated into `media/comparison/comparison.html`, `comparison.css`, and `comparison.js`. Extension-host lifecycle and state messaging remain in `src/comparison/comparisonPanel.ts`.
 

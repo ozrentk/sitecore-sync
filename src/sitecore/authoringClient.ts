@@ -1,6 +1,7 @@
 import type { XmCloudConnection } from "../connections/connection";
 import { print } from "graphql";
 import { testConnectionQuery, treeLevelQuery } from "./graphql/authoringQueries";
+import { SitecoreHttpClient, type SitecoreHttpLogger } from "./sitecoreHttpClient";
 
 const tokenEndpoint = "https://auth.sitecorecloud.io/oauth/token";
 const audience = "https://api.sitecorecloud.io";
@@ -95,6 +96,11 @@ interface CachedToken {
 
 export class AuthoringContentClient {
   private readonly tokens = new Map<string, CachedToken>();
+  private readonly http: SitecoreHttpClient;
+
+  constructor(log: SitecoreHttpLogger) {
+    this.http = new SitecoreHttpClient(log);
+  }
 
   async loadTreeLevel(
     connection: XmCloudConnection,
@@ -110,7 +116,7 @@ export class AuthoringContentClient {
     let after: string | undefined;
 
     do {
-      const page = await queryTreeLevelPage(
+      const page = await this.queryTreeLevelPage(
         connection.serverUrl,
         accessToken,
         locator,
@@ -134,6 +140,49 @@ export class AuthoringContentClient {
 
   clear(): void {
     this.tokens.clear();
+    this.http.clear();
+  }
+
+  async testConnection(
+    connection: XmCloudConnection,
+    clientSecret: string,
+    cancellationSignal?: AbortSignal,
+  ): Promise<ConnectionTestResult> {
+    const startedAt = performance.now();
+    const controller = new AbortController();
+    const timeout = setTimeout(
+      () => controller.abort(new DOMException("Connection test timed out.", "AbortError")),
+      requestTimeoutMilliseconds,
+    );
+    const cancellationHandler = (): void =>
+      controller.abort(new DOMException("Connection test cancelled.", "AbortError"));
+    if (cancellationSignal?.aborted) {
+      cancellationHandler();
+    } else {
+      cancellationSignal?.addEventListener("abort", cancellationHandler, { once: true });
+    }
+
+    try {
+      const accessToken = await this.requestAccessToken(
+        connection.clientId,
+        clientSecret,
+        controller.signal,
+      );
+      const siteResult = await this.querySites(
+        connection.serverUrl,
+        accessToken.value,
+        controller.signal,
+      );
+
+      return {
+        sites: siteResult.sites,
+        duplicateSiteCount: siteResult.duplicateSiteCount,
+        elapsedMilliseconds: Math.round(performance.now() - startedAt),
+      };
+    } finally {
+      clearTimeout(timeout);
+      cancellationSignal?.removeEventListener("abort", cancellationHandler);
+    }
   }
 
   private async getAccessToken(
@@ -146,139 +195,177 @@ export class AuthoringContentClient {
       return cached.value;
     }
 
-    const token = await requestAccessToken(connection.clientId, clientSecret, signal);
+    const token = await this.requestAccessToken(connection.clientId, clientSecret, signal);
     this.tokens.set(connection.id, {
       value: token.value,
       expiresAt: Date.now() + Math.max(token.expiresInSeconds - 60, 30) * 1_000,
     });
     return token.value;
   }
-}
 
-export async function testAuthoringConnection(
-  connection: XmCloudConnection,
-  clientSecret: string,
-  cancellationSignal?: AbortSignal,
-): Promise<ConnectionTestResult> {
-  const startedAt = performance.now();
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(new Error("Connection test timed out.")), requestTimeoutMilliseconds);
-  const cancellationHandler = (): void => controller.abort(new Error("Connection test cancelled."));
-  cancellationSignal?.addEventListener("abort", cancellationHandler, { once: true });
+  private async requestAccessToken(
+    clientId: string,
+    clientSecret: string,
+    signal: AbortSignal,
+  ): Promise<AccessToken> {
+    const body = new URLSearchParams({
+      audience,
+      grant_type: "client_credentials",
+      client_id: clientId,
+      client_secret: clientSecret,
+    });
 
-  try {
-    const accessToken = await requestAccessToken(
-      connection.clientId,
-      clientSecret,
-      controller.signal,
+    const response = await this.http.request(
+      tokenEndpoint,
+      {
+        method: "POST",
+        headers: { "content-type": "application/x-www-form-urlencoded" },
+        body,
+      },
+      { name: "Sitecore OAuth token request", signal, retryable: true },
     );
-    const siteResult = await querySites(connection.serverUrl, accessToken.value, controller.signal);
+
+    const payload = await readJson<TokenResponse>(response, "OAuth token endpoint");
+    if (!response.ok) {
+      throw new Error(`Authentication failed (${response.status}).`);
+    }
+    if (typeof payload.access_token !== "string" || payload.access_token.length === 0) {
+      throw new Error("Authentication response did not contain an access token.");
+    }
 
     return {
-      sites: siteResult.sites,
-      duplicateSiteCount: siteResult.duplicateSiteCount,
-      elapsedMilliseconds: Math.round(performance.now() - startedAt),
+      value: payload.access_token,
+      expiresInSeconds:
+        typeof payload.expires_in === "number" && Number.isFinite(payload.expires_in)
+          ? payload.expires_in
+          : 300,
     };
-  } finally {
-    clearTimeout(timeout);
-    cancellationSignal?.removeEventListener("abort", cancellationHandler);
-  }
-}
-
-async function requestAccessToken(
-  clientId: string,
-  clientSecret: string,
-  signal: AbortSignal,
-): Promise<AccessToken> {
-  const body = new URLSearchParams({
-    audience,
-    grant_type: "client_credentials",
-    client_id: clientId,
-    client_secret: clientSecret,
-  });
-
-  const response = await fetch(tokenEndpoint, {
-    method: "POST",
-    headers: { "content-type": "application/x-www-form-urlencoded" },
-    body,
-    signal,
-  });
-
-  const payload = await readJson<TokenResponse>(response, "OAuth token endpoint");
-  if (!response.ok) {
-    throw new Error(`Authentication failed (${response.status}).`);
-  }
-  if (typeof payload.access_token !== "string" || payload.access_token.length === 0) {
-    throw new Error("Authentication response did not contain an access token.");
   }
 
-  return {
-    value: payload.access_token,
-    expiresInSeconds:
-      typeof payload.expires_in === "number" && Number.isFinite(payload.expires_in)
-        ? payload.expires_in
-        : 300,
-  };
-}
-
-async function queryTreeLevelPage(
-  serverUrl: string,
-  accessToken: string,
-  locator: AuthoringItemLocator,
-  language: string,
-  after: string | undefined,
-  signal: AbortSignal,
-): Promise<{
-  readonly item: AuthoringTreeItem;
-  readonly children: readonly AuthoringTreeItem[];
-  readonly nextCursor?: string;
-}> {
-  const endpoint = new URL("/sitecore/api/authoring/graphql/v1/", serverUrl);
-  const response = await fetch(endpoint, {
-    method: "POST",
-    headers: {
-      authorization: `Bearer ${accessToken}`,
-      "content-type": "application/json",
-    },
-    body: JSON.stringify({
-      operationName: "XmCloudSyncTreeLevel",
-      query: print(treeLevelQuery),
-      variables: {
-        where: { database: "master", language, ...locator },
-        pageSize: 100,
-        after: after ?? null,
+  private async queryTreeLevelPage(
+    serverUrl: string,
+    accessToken: string,
+    locator: AuthoringItemLocator,
+    language: string,
+    after: string | undefined,
+    signal: AbortSignal,
+  ): Promise<{
+    readonly item: AuthoringTreeItem;
+    readonly children: readonly AuthoringTreeItem[];
+    readonly nextCursor?: string;
+  }> {
+    const endpoint = new URL("/sitecore/api/authoring/graphql/v1/", serverUrl);
+    const response = await this.http.request(
+      endpoint,
+      {
+        method: "POST",
+        headers: {
+          authorization: `Bearer ${accessToken}`,
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          operationName: "XmCloudSyncTreeLevel",
+          query: print(treeLevelQuery),
+          variables: {
+            where: { database: "master", language, ...locator },
+            pageSize: 100,
+            after: after ?? null,
+          },
+        }),
       },
-    }),
-    signal,
-  });
+      { name: "Sitecore Authoring tree query", signal, retryable: true },
+    );
 
-  const payload = await readJson<TreeLevelQueryResponse>(
-    response,
-    "Authoring GraphQL endpoint",
-  );
-  if (!response.ok) {
-    throw new Error(`Authoring API request failed (${response.status}).`);
-  }
-  throwForGraphQlErrors(payload.errors);
-  if (!payload.data?.item) {
-    const identifier = "path" in locator ? locator.path : locator.itemId;
-    throw new Error(`Authoring item “${identifier}” was not found.`);
+    const payload = await readJson<TreeLevelQueryResponse>(
+      response,
+      "Authoring GraphQL endpoint",
+    );
+    if (!response.ok) {
+      throw new Error(`Authoring API request failed (${response.status}).`);
+    }
+    throwForGraphQlErrors(payload.errors);
+    if (!payload.data?.item) {
+      const identifier = "path" in locator ? locator.path : locator.itemId;
+      throw new Error(`Authoring item “${identifier}” was not found.`);
+    }
+
+    const item = parseTreeItem(payload.data.item);
+    const children = (payload.data.item.children?.nodes ?? []).map(parseTreeItem);
+    const pageInfo = payload.data.item.children?.pageInfo;
+    const hasNextPage = pageInfo?.hasNextPage === true;
+    const endCursor = pageInfo?.endCursor;
+    if (hasNextPage && typeof endCursor !== "string") {
+      throw new Error("Authoring API reported another children page without a cursor.");
+    }
+
+    return {
+      item,
+      children,
+      ...(hasNextPage ? { nextCursor: endCursor as string } : {}),
+    };
   }
 
-  const item = parseTreeItem(payload.data.item);
-  const children = (payload.data.item.children?.nodes ?? []).map(parseTreeItem);
-  const pageInfo = payload.data.item.children?.pageInfo;
-  const hasNextPage = pageInfo?.hasNextPage === true;
-  const endCursor = pageInfo?.endCursor;
-  if (hasNextPage && typeof endCursor !== "string") {
-    throw new Error("Authoring API reported another children page without a cursor.");
-  }
+  private async querySites(
+    serverUrl: string,
+    accessToken: string,
+    signal: AbortSignal,
+  ): Promise<SiteQueryResult> {
+    const endpoint = new URL("/sitecore/api/authoring/graphql/v1/", serverUrl);
+    const response = await this.http.request(
+      endpoint,
+      {
+        method: "POST",
+        headers: {
+          authorization: `Bearer ${accessToken}`,
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          operationName: "XmCloudSyncTestConnection",
+          query: print(testConnectionQuery),
+        }),
+      },
+      { name: "Sitecore Authoring sites query", signal, retryable: true },
+    );
 
-  return {
-    item,
-    children,
-    ...(hasNextPage ? { nextCursor: endCursor as string } : {}),
-  };
+    const payload = await readJson<TestQueryResponse>(response, "Authoring GraphQL endpoint");
+    if (!response.ok) {
+      throw new Error(`Authoring API request failed (${response.status}).`);
+    }
+    throwForGraphQlErrors(payload.errors);
+    if (!Array.isArray(payload.data?.sites)) {
+      throw new Error("Authoring API response did not contain the expected sites collection.");
+    }
+
+    const validSites = payload.data.sites
+      .map((site): AuthoringSite | undefined => {
+        if (typeof site.name !== "string" || typeof site.rootPath !== "string") {
+          return undefined;
+        }
+
+        const rootItemId = site.rootItem?.itemId;
+        return {
+          name: site.name,
+          rootPath: site.rootPath,
+          ...(typeof rootItemId === "string" ? { rootItemId } : {}),
+        };
+      })
+      .filter((site): site is AuthoringSite => site !== undefined);
+
+    const uniqueSites = new Map<string, AuthoringSite>();
+    for (const site of validSites) {
+      const key = JSON.stringify([site.name, site.rootPath, site.rootItemId ?? null]);
+      if (!uniqueSites.has(key)) {
+        uniqueSites.set(key, site);
+      }
+    }
+
+    return {
+      sites: [...uniqueSites.values()].sort((left, right) =>
+        left.name.localeCompare(right.name, undefined, { sensitivity: "base" }),
+      ),
+      duplicateSiteCount: validSites.length - uniqueSites.size,
+    };
+  }
 }
 
 function parseTreeItem(value: RawAuthoringTreeItem): AuthoringTreeItem {
@@ -309,65 +396,6 @@ function throwForGraphQlErrors(errors: readonly GraphQlError[] | undefined): voi
     .filter((message): message is string => typeof message === "string")
     .join("; ");
   throw new Error(messages || "Authoring API returned a GraphQL error.");
-}
-
-async function querySites(
-  serverUrl: string,
-  accessToken: string,
-  signal: AbortSignal,
-): Promise<SiteQueryResult> {
-  const endpoint = new URL("/sitecore/api/authoring/graphql/v1/", serverUrl);
-  const response = await fetch(endpoint, {
-    method: "POST",
-    headers: {
-      authorization: `Bearer ${accessToken}`,
-      "content-type": "application/json",
-    },
-    body: JSON.stringify({
-      operationName: "XmCloudSyncTestConnection",
-      query: print(testConnectionQuery),
-    }),
-    signal,
-  });
-
-  const payload = await readJson<TestQueryResponse>(response, "Authoring GraphQL endpoint");
-  if (!response.ok) {
-    throw new Error(`Authoring API request failed (${response.status}).`);
-  }
-  throwForGraphQlErrors(payload.errors);
-  if (!Array.isArray(payload.data?.sites)) {
-    throw new Error("Authoring API response did not contain the expected sites collection.");
-  }
-
-  const validSites = payload.data.sites
-    .map((site): AuthoringSite | undefined => {
-      if (typeof site.name !== "string" || typeof site.rootPath !== "string") {
-        return undefined;
-      }
-
-      const rootItemId = site.rootItem?.itemId;
-      return {
-        name: site.name,
-        rootPath: site.rootPath,
-        ...(typeof rootItemId === "string" ? { rootItemId } : {}),
-      };
-    })
-    .filter((site): site is AuthoringSite => site !== undefined);
-
-  const uniqueSites = new Map<string, AuthoringSite>();
-  for (const site of validSites) {
-    const key = JSON.stringify([site.name, site.rootPath, site.rootItemId ?? null]);
-    if (!uniqueSites.has(key)) {
-      uniqueSites.set(key, site);
-    }
-  }
-
-  return {
-    sites: [...uniqueSites.values()].sort((left, right) =>
-      left.name.localeCompare(right.name, undefined, { sensitivity: "base" }),
-    ),
-    duplicateSiteCount: validSites.length - uniqueSites.size,
-  };
 }
 
 async function readJson<T>(response: Response, endpointName: string): Promise<T> {
