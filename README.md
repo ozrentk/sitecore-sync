@@ -31,6 +31,8 @@ Loaded items are displayed in one paired-row tree so the left and right sides sh
 
 Tree rows show only the item display name so deeply nested content remains readable. The tooltip contains the full path and item ID. When the display name differs from the underlying item name, the display name is blue and the tooltip also includes the item name.
 
+Right-click a paired row and choose **Refresh Subtree** to invalidate and re-read that item plus every descendant level already present in the lazy snapshot. Refresh proceeds from parent levels to child levels so the visible hierarchy remains coherent. The affected rows are temporarily locked; a refresh in a completely disjoint subtree can run at the same time. Unloaded descendants remain lazy and are not fetched solely because of a refresh.
+
 ### Difference legend
 
 | Badge | Meaning |

@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.2.5
+
+- Added **Refresh Subtree** to the paired-row context menu.
+- Refreshed selected items and every descendant level already loaded in the lazy snapshot.
+- Invalidated cached levels and reloaded them in parent-before-child order.
+- Locked and visually marked affected rows while allowing disjoint subtree refreshes in parallel.
+
 ## 0.2.4
 
 - Simplified the comparison selector toolbar and removed repeated connection headings.

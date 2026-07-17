@@ -23,7 +23,10 @@ const state = {
     left: new Map(),
     right: new Map(),
   },
+  refreshOperations: new Map(),
 };
+
+let contextMenu;
 
 const leftSelect = document.getElementById("left-connection");
 const rightSelect = document.getElementById("right-connection");
@@ -319,7 +322,7 @@ function createLegendGroup(flags, kind) {
 }
 
 function togglePairExpansion(pair) {
-  if (!pairCanExpand(pair)) {
+  if (!pairCanExpand(pair) || isPairRefreshing(pair)) {
     return;
   }
   if (state.expandedRows.has(pair.key)) {
@@ -329,6 +332,115 @@ function togglePairExpansion(pair) {
     loadMissingPairLevels(pair);
   }
   render();
+}
+
+function buildRefreshPlan(node, depth = 0, plan = []) {
+  if (!node) {
+    return plan;
+  }
+  plan.push({ itemId: node.itemId, path: node.path, depth });
+  for (const child of node.children) {
+    if (child.childrenLoaded) {
+      buildRefreshPlan(child, depth + 1, plan);
+    }
+  }
+  return plan;
+}
+
+function collectSubtreeIds(node, ids = new Set()) {
+  if (!node) {
+    return ids;
+  }
+  ids.add(normalizeItemId(node.itemId));
+  for (const child of node.children) {
+    collectSubtreeIds(child, ids);
+  }
+  return ids;
+}
+
+function refreshIdsForPair(pair) {
+  const ids = collectSubtreeIds(pair.left);
+  collectSubtreeIds(pair.right, ids);
+  return ids;
+}
+
+function isPairRefreshing(pair) {
+  const pairIds = [pair.left, pair.right]
+    .filter(Boolean)
+    .map((node) => normalizeItemId(node.itemId));
+  return [...state.refreshOperations.values()].some(({ itemIds }) =>
+    pairIds.some((itemId) => itemIds.has(itemId)),
+  );
+}
+
+function isRefreshRoot(pair) {
+  return state.refreshOperations.has(pair.key);
+}
+
+function hasRefreshOverlap(itemIds) {
+  return [...state.refreshOperations.values()].some(({ itemIds: activeIds }) =>
+    [...itemIds].some((itemId) => activeIds.has(itemId)),
+  );
+}
+
+function subtreeIsLoading(node) {
+  if (!node) {
+    return false;
+  }
+  return node.loading || node.children.some(subtreeIsLoading);
+}
+
+function startSubtreeRefresh(pair) {
+  const itemIds = refreshIdsForPair(pair);
+  if (hasRefreshOverlap(itemIds) || subtreeIsLoading(pair.left) || subtreeIsLoading(pair.right)) {
+    return;
+  }
+
+  state.refreshOperations.set(pair.key, { itemIds });
+  vscode.postMessage({
+    type: "refreshSubtree",
+    rowKey: pair.key,
+    leftRefreshPlan: buildRefreshPlan(pair.left),
+    rightRefreshPlan: buildRefreshPlan(pair.right),
+  });
+  closeContextMenu();
+  render();
+}
+
+function closeContextMenu() {
+  contextMenu?.remove();
+  contextMenu = undefined;
+}
+
+function showContextMenu(event, pair, forceDisabled = false) {
+  event.preventDefault();
+  closeContextMenu();
+
+  const itemIds = refreshIdsForPair(pair);
+  const disabled = forceDisabled ||
+    hasRefreshOverlap(itemIds) ||
+    subtreeIsLoading(pair.left) ||
+    subtreeIsLoading(pair.right);
+  const menu = document.createElement("div");
+  menu.className = "comparison-context-menu";
+  menu.setAttribute("role", "menu");
+  const refresh = document.createElement("button");
+  refresh.className = "context-menu-item";
+  refresh.type = "button";
+  refresh.textContent = "Refresh Subtree";
+  refresh.disabled = disabled;
+  refresh.title = disabled
+    ? "This subtree overlaps another operation or is still loading."
+    : "Refresh the selected item and every loaded descendant level.";
+  refresh.addEventListener("click", () => startSubtreeRefresh(pair));
+  menu.append(refresh);
+  document.body.append(menu);
+  contextMenu = menu;
+
+  const bounds = menu.getBoundingClientRect();
+  menu.style.left = `${Math.max(4, Math.min(event.clientX, window.innerWidth - bounds.width - 4))}px`;
+  menu.style.top = `${Math.max(4, Math.min(event.clientY, window.innerHeight - bounds.height - 4))}px`;
+  refresh.focus();
 }
 
 function createDifferenceBadges(flags) {
@@ -401,7 +513,7 @@ function createItemCell(node, side, depth) {
   return cell;
 }
 
-function createRowControl(pair) {
+function createRowControl(pair, refreshing, refreshRoot) {
   const control = document.createElement("div");
   control.className = "row-control";
   const disclosure = document.createElement("button");
@@ -410,11 +522,13 @@ function createRowControl(pair) {
 
   if (pairCanExpand(pair)) {
     const expanded = state.expandedRows.has(pair.key);
-    disclosure.textContent = pairLoading(pair) ? "" : expanded ? "▾" : "▸";
+    const loading = pairLoading(pair) || refreshRoot;
+    disclosure.textContent = loading ? "" : expanded ? "▾" : "▸";
     disclosure.title = expanded ? "Collapse both sides" : "Expand both sides";
     disclosure.setAttribute("aria-label", disclosure.title);
     disclosure.setAttribute("aria-expanded", String(expanded));
-    if (pairLoading(pair)) {
+    disclosure.disabled = refreshing;
+    if (loading) {
       disclosure.classList.add("loading");
     }
     disclosure.addEventListener("click", () => {
@@ -455,7 +569,7 @@ function createInlineSideStatus(side, node) {
   return status;
 }
 
-function renderPair(pair, depth) {
+function renderPair(pair, depth, ancestorRefreshing = false) {
   const fragment = document.createDocumentFragment();
   const row = document.createElement("div");
   row.className = "comparison-row";
@@ -469,8 +583,14 @@ function renderPair(pair, depth) {
   if (state.selectedRowKey === pair.key) {
     row.classList.add("selected");
   }
+  const refreshing = ancestorRefreshing || isPairRefreshing(pair);
+  const refreshRoot = isRefreshRoot(pair);
+  if (refreshing) {
+    row.classList.add("refreshing");
+    row.setAttribute("aria-busy", "true");
+  }
   row.addEventListener("click", (event) => {
-    if (!event.target.closest(".comparison-cell")) {
+    if (refreshing || !event.target.closest(".comparison-cell")) {
       return;
     }
     state.selectedRowKey = pair.key;
@@ -478,14 +598,15 @@ function renderPair(pair, depth) {
     row.classList.add("selected");
   });
   row.addEventListener("dblclick", (event) => {
-    if (event.target.closest(".paired-disclosure, .difference-legend")) {
+    if (refreshing || event.target.closest(".paired-disclosure, .difference-legend")) {
       return;
     }
     togglePairExpansion(pair);
   });
+  row.addEventListener("contextmenu", (event) => showContextMenu(event, pair, refreshing));
   row.append(
     createItemCell(pair.left, "left", depth),
-    createRowControl(pair),
+    createRowControl(pair, refreshing, refreshRoot),
     createItemCell(pair.right, "right", depth),
   );
   fragment.append(row);
@@ -494,7 +615,9 @@ function renderPair(pair, depth) {
     return fragment;
   }
 
-  loadMissingPairLevels(pair);
+  if (!refreshing) {
+    loadMissingPairLevels(pair);
+  }
   if (!pairReady(pair) || pairHasError(pair)) {
     const statusRow = document.createElement("div");
     statusRow.className = "comparison-inline-status";
@@ -512,7 +635,7 @@ function renderPair(pair, depth) {
     pair.right?.children ?? [],
   );
   for (const childPair of children) {
-    fragment.append(renderPair(childPair, depth + 1));
+    fragment.append(renderPair(childPair, depth + 1, refreshing));
   }
   return fragment;
 }
@@ -588,6 +711,8 @@ function updateTreeConnections() {
     state.expandedRows.clear();
     state.selectedRowKey = undefined;
     state.rootRowKey = undefined;
+    state.refreshOperations.clear();
+    closeContextMenu();
   }
 }
 
@@ -684,10 +809,27 @@ window.addEventListener("message", (event) => {
     applyLoadedLevel(message);
   } else if (message?.type === "treeLoadFailed") {
     applyLoadFailure(message);
+  } else if (message?.type === "subtreeRefreshFinished") {
+    state.refreshOperations.delete(message.rowKey);
   } else {
     return;
   }
   render();
 });
+
+document.addEventListener("pointerdown", (event) => {
+  if (contextMenu && !contextMenu.contains(event.target)) {
+    closeContextMenu();
+  }
+});
+
+document.addEventListener("keydown", (event) => {
+  if (event.key === "Escape") {
+    closeContextMenu();
+  }
+});
+
+window.addEventListener("blur", closeContextMenu);
+window.addEventListener("scroll", closeContextMenu, true);
 
 vscode.postMessage({ type: "ready" });
