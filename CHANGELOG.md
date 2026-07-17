@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.2.7
+
+- Added confirmed **Expand All…** to the paired-row context menu for large content trees.
+- Added cached-only **Expand Loaded Items** plus explicit **Expand Item** and **Collapse Item** actions.
+- Ordered context actions from local to network-heavy behavior with state-sensitive item actions and separators.
+- Loaded available sides concurrently with bounded, breadth-first requests and progressive depth updates.
+- Added cancellable progress and scope-aware locking during greedy traversal.
+
 ## 0.2.6
 
 - Centralized OAuth and Authoring GraphQL requests in a shared Sitecore HTTP client.

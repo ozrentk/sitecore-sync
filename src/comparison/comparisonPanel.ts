@@ -9,6 +9,9 @@ import {
 const selectionKey = "sitecoreXmCloudSync.comparisonSelection.v1";
 const defaultLanguage = "en";
 const authoringRootPath = "/sitecore";
+const traversalConcurrencyPerSide = 2;
+
+type TreeSide = "left" | "right";
 
 interface ComparisonSelection {
   readonly leftConnectionId?: string;
@@ -21,6 +24,8 @@ interface WebviewMessage {
   readonly connectionId?: unknown;
   readonly itemId?: unknown;
   readonly rowKey?: unknown;
+  readonly leftItemId?: unknown;
+  readonly rightItemId?: unknown;
   readonly leftRefreshPlan?: unknown;
   readonly rightRefreshPlan?: unknown;
 }
@@ -31,6 +36,11 @@ interface RefreshPlanEntry {
   readonly depth: number;
 }
 
+interface TraversalEntry {
+  readonly locator: AuthoringItemLocator;
+  readonly requestedItemId?: string;
+}
+
 export class ComparisonPanelManager implements vscode.Disposable {
   private panel: vscode.WebviewPanel | undefined;
   private panelDisposables: vscode.Disposable[] = [];
@@ -38,6 +48,8 @@ export class ComparisonPanelManager implements vscode.Disposable {
   private readonly treeLevelCache = new Map<string, AuthoringTreeLevel>();
   private readonly pendingTreeLevels = new Map<string, Promise<AuthoringTreeLevel>>();
   private readonly requestControllers = new Set<AbortController>();
+  private readonly subtreeLoadControllers = new Map<string, AbortController>();
+  private readonly pendingSubtreeConfirmations = new Set<string>();
 
   constructor(
     private readonly extensionUri: vscode.Uri,
@@ -117,6 +129,7 @@ export class ComparisonPanelManager implements vscode.Disposable {
     }
 
     if (message.type === "swapConnections") {
+      this.cancelSubtreeLoads();
       const selection = this.getSelection();
       await this.saveSelection({
         leftConnectionId: selection.rightConnectionId,
@@ -132,6 +145,7 @@ export class ComparisonPanelManager implements vscode.Disposable {
       (message.side === "left" || message.side === "right") &&
       typeof message.connectionId === "string"
     ) {
+      this.cancelSubtreeLoads();
       const connectionId = this.connectionStore.get(message.connectionId)?.id;
       const selection = this.getSelection();
       await this.saveSelection(this.normalizeSelection({
@@ -179,6 +193,212 @@ export class ComparisonPanelManager implements vscode.Disposable {
         parseRefreshPlan(message.leftRefreshPlan),
         parseRefreshPlan(message.rightRefreshPlan),
       );
+      return;
+    }
+
+    if (message.type === "loadSubtree" && typeof message.rowKey === "string") {
+      await this.confirmAndLoadSubtree(
+        message.rowKey,
+        typeof message.leftItemId === "string" ? message.leftItemId : undefined,
+        typeof message.rightItemId === "string" ? message.rightItemId : undefined,
+      );
+      return;
+    }
+
+    if (message.type === "cancelSubtreeLoad" && typeof message.rowKey === "string") {
+      this.cancelSubtreeLoad(message.rowKey);
+    }
+  }
+
+  private async confirmAndLoadSubtree(
+    rowKey: string,
+    leftItemId: string | undefined,
+    rightItemId: string | undefined,
+  ): Promise<void> {
+    if (
+      this.pendingSubtreeConfirmations.has(rowKey) ||
+      this.subtreeLoadControllers.has(rowKey)
+    ) {
+      return;
+    }
+
+    this.pendingSubtreeConfirmations.add(rowKey);
+    try {
+      const selection = await vscode.window.showWarningMessage(
+        "Expand All will load every descendant beneath this item from XM Cloud. Large subtrees may affect VS Code performance. Do you want to continue?",
+        { modal: true },
+        "Expand All",
+      );
+      if (selection === "Expand All") {
+        await this.loadSubtree(rowKey, leftItemId, rightItemId);
+      }
+    } finally {
+      this.pendingSubtreeConfirmations.delete(rowKey);
+    }
+  }
+
+  private async loadSubtree(
+    rowKey: string,
+    leftItemId: string | undefined,
+    rightItemId: string | undefined,
+  ): Promise<void> {
+    if (
+      !this.panel ||
+      this.subtreeLoadControllers.has(rowKey) ||
+      (!leftItemId && !rightItemId)
+    ) {
+      return;
+    }
+
+    const selection = this.getSelection();
+    const sides = [
+      {
+        side: "left" as const,
+        connectionId: selection.leftConnectionId,
+        itemId: leftItemId,
+      },
+      {
+        side: "right" as const,
+        connectionId: selection.rightConnectionId,
+        itemId: rightItemId,
+      },
+    ].filter(
+      (entry): entry is { side: TreeSide; connectionId: string; itemId: string } =>
+        Boolean(entry.connectionId && entry.itemId),
+    );
+    if (!sides.length) {
+      return;
+    }
+
+    const controller = new AbortController();
+    this.subtreeLoadControllers.set(rowKey, controller);
+    await this.panel.webview.postMessage({ type: "subtreeLoadStarted", rowKey });
+    this.log.info(`Loading complete comparison subtree ${rowKey}.`);
+
+    try {
+      await vscode.window.withProgress(
+        {
+          location: vscode.ProgressLocation.Notification,
+          title: "Loading XM Cloud comparison subtree",
+          cancellable: true,
+        },
+        async (progress, token) => {
+          const cancellation = token.onCancellationRequested(() =>
+            controller.abort(new DOMException("Subtree loading was cancelled.", "AbortError")),
+          );
+          let loadedLevels = 0;
+          const reportLevel = async (): Promise<void> => {
+            loadedLevels += 1;
+            progress.report({ message: `${loadedLevels} item level(s) loaded` });
+            await this.panel?.webview.postMessage({
+              type: "subtreeLoadProgress",
+              rowKey,
+              loadedLevels,
+            });
+          };
+
+          try {
+            const sideLoads = sides.map(({ side, connectionId, itemId }) =>
+              this.loadSideRecursively(
+                side,
+                connectionId,
+                { locator: { itemId }, requestedItemId: itemId },
+                controller.signal,
+                reportLevel,
+                async (depth) => {
+                  await this.panel?.webview.postMessage({
+                    type: "subtreeLoadDepthLoaded",
+                    rowKey,
+                    side,
+                    depth,
+                  });
+                },
+              ),
+            );
+            await waitForTraversalSides(sideLoads, controller);
+          } finally {
+            cancellation.dispose();
+          }
+        },
+      );
+      this.log.info(`Finished loading complete comparison subtree ${rowKey}.`);
+      await this.panel?.webview.postMessage({ type: "subtreeLoadFinished", rowKey });
+    } catch (error: unknown) {
+      const cancelled = isAbortError(error);
+      if (!controller.signal.aborted) {
+        controller.abort(error);
+      }
+      if (cancelled) {
+        this.log.info(`Comparison subtree loading was cancelled for ${rowKey}.`);
+      } else {
+        this.log.error(`Comparison subtree loading failed for ${rowKey}.`, error);
+        await vscode.window.showErrorMessage(
+          `Unable to load the complete comparison subtree: ${errorMessage(error)}`,
+        );
+      }
+      await this.panel?.webview.postMessage({
+        type: "subtreeLoadFinished",
+        rowKey,
+        cancelled,
+      });
+    } finally {
+      if (this.subtreeLoadControllers.get(rowKey) === controller) {
+        this.subtreeLoadControllers.delete(rowKey);
+      }
+    }
+  }
+
+  private async loadSideRecursively(
+    side: TreeSide,
+    connectionId: string,
+    initialEntry: TraversalEntry,
+    signal: AbortSignal,
+    reportLevel: () => Promise<void>,
+    reportDepth: (depth: number) => Promise<void>,
+  ): Promise<void> {
+    let depth = 0;
+    let frontier: readonly TraversalEntry[] = [initialEntry];
+    const queuedItemIds = new Set<string>();
+    if (initialEntry.requestedItemId) {
+      queuedItemIds.add(normalizeItemId(initialEntry.requestedItemId));
+    }
+
+    while (frontier.length) {
+      throwIfAborted(signal);
+      const levels = await mapWithConcurrency(
+        frontier,
+        traversalConcurrencyPerSide,
+        async (entry) => {
+          const level = await this.loadAndPostTreeLevel(
+            side,
+            connectionId,
+            entry.locator,
+            entry.requestedItemId,
+            signal,
+          );
+          await reportLevel();
+          return level;
+        },
+      );
+
+      const nextFrontier: TraversalEntry[] = [];
+      for (const level of levels) {
+        queuedItemIds.add(normalizeItemId(level.item.itemId));
+        for (const child of level.children) {
+          const normalizedId = normalizeItemId(child.itemId);
+          if (!child.hasChildren || queuedItemIds.has(normalizedId)) {
+            continue;
+          }
+          queuedItemIds.add(normalizedId);
+          nextFrontier.push({
+            locator: { itemId: child.itemId },
+            requestedItemId: child.itemId,
+          });
+        }
+      }
+      await reportDepth(depth);
+      depth += 1;
+      frontier = nextFrontier;
     }
   }
 
@@ -249,6 +469,7 @@ export class ComparisonPanelManager implements vscode.Disposable {
   }
 
   private async refreshStateAndTrees(): Promise<void> {
+    this.cancelSubtreeLoads();
     await this.postState();
     await this.loadInitialTrees();
   }
@@ -282,13 +503,30 @@ export class ComparisonPanelManager implements vscode.Disposable {
   }
 
   private async loadTreeLevel(
-    side: "left" | "right",
+    side: TreeSide,
     connectionId: string,
     locator: AuthoringItemLocator,
     requestedItemId?: string,
   ): Promise<void> {
+    try {
+      await this.loadAndPostTreeLevel(side, connectionId, locator, requestedItemId);
+    } catch {
+      // loadAndPostTreeLevel already reports non-cancellation failures inline.
+    }
+  }
+
+  private async loadAndPostTreeLevel(
+    side: TreeSide,
+    connectionId: string,
+    locator: AuthoringItemLocator,
+    requestedItemId?: string,
+    cancellationSignal?: AbortSignal,
+  ): Promise<AuthoringTreeLevel> {
+    if (cancellationSignal) {
+      throwIfAborted(cancellationSignal);
+    }
     if (!this.panel || !this.isCurrentConnection(side, connectionId)) {
-      return;
+      throw new DOMException("The comparison selection changed.", "AbortError");
     }
 
     await this.panel.webview.postMessage({
@@ -302,9 +540,12 @@ export class ComparisonPanelManager implements vscode.Disposable {
     );
 
     try {
-      const level = await this.getTreeLevel(connectionId, locator);
+      const level = await this.getTreeLevel(connectionId, locator, cancellationSignal);
+      if (cancellationSignal) {
+        throwIfAborted(cancellationSignal);
+      }
       if (!this.panel || !this.isCurrentConnection(side, connectionId)) {
-        return;
+        throw new DOMException("The comparison selection changed.", "AbortError");
       }
       await this.panel.webview.postMessage({
         type: "treeLoaded",
@@ -316,27 +557,48 @@ export class ComparisonPanelManager implements vscode.Disposable {
       this.log.info(
         `Loaded ${side} tree level ${level.item.path} with ${level.children.length} direct child item(s).`,
       );
+      return level;
     } catch (error: unknown) {
-      if (!this.panel || !this.isCurrentConnection(side, connectionId)) {
-        return;
+      if (!isAbortError(error) && !cancellationSignal?.aborted) {
+        await this.reportTreeLoadFailure(
+          side,
+          connectionId,
+          locator,
+          requestedItemId,
+          error,
+        );
       }
-      await this.panel.webview.postMessage({
-        type: "treeLoadFailed",
-        side,
-        connectionId,
-        requestedItemId,
-        message: errorMessage(error),
-      });
-      this.log.error(
-        `Failed to load ${side} tree level for connection ${connectionId} (${locatorDescription(locator)}).`,
-        error,
-      );
+      throw error;
     }
+  }
+
+  private async reportTreeLoadFailure(
+    side: TreeSide,
+    connectionId: string,
+    locator: AuthoringItemLocator,
+    requestedItemId: string | undefined,
+    error: unknown,
+  ): Promise<void> {
+    if (!this.panel || !this.isCurrentConnection(side, connectionId)) {
+      return;
+    }
+    await this.panel.webview.postMessage({
+      type: "treeLoadFailed",
+      side,
+      connectionId,
+      requestedItemId,
+      message: errorMessage(error),
+    });
+    this.log.error(
+      `Failed to load ${side} tree level for connection ${connectionId} (${locatorDescription(locator)}).`,
+      error,
+    );
   }
 
   private async getTreeLevel(
     connectionId: string,
     locator: AuthoringItemLocator,
+    cancellationSignal?: AbortSignal,
   ): Promise<AuthoringTreeLevel> {
     const cacheKey = this.treeCacheKey(connectionId, locator);
     const cached = this.treeLevelCache.get(cacheKey);
@@ -348,7 +610,9 @@ export class ComparisonPanelManager implements vscode.Disposable {
     const pending = this.pendingTreeLevels.get(cacheKey);
     if (pending) {
       this.log.trace(`Reusing pending tree request: ${cacheKey}.`);
-      return pending;
+      return cancellationSignal
+        ? awaitWithCancellation(pending, cancellationSignal)
+        : pending;
     }
     this.log.trace(`Tree cache miss: ${cacheKey}.`);
 
@@ -362,6 +626,13 @@ export class ComparisonPanelManager implements vscode.Disposable {
     }
 
     const controller = new AbortController();
+    const cancellationHandler = (): void =>
+      controller.abort(cancellationSignal?.reason ?? new DOMException("Cancelled.", "AbortError"));
+    if (cancellationSignal?.aborted) {
+      cancellationHandler();
+    } else {
+      cancellationSignal?.addEventListener("abort", cancellationHandler, { once: true });
+    }
     const timeout = setTimeout(
       () => controller.abort(new Error("Content-tree loading timed out.")),
       30_000,
@@ -376,6 +647,7 @@ export class ComparisonPanelManager implements vscode.Disposable {
       })
       .finally(() => {
         clearTimeout(timeout);
+        cancellationSignal?.removeEventListener("abort", cancellationHandler);
         if (this.pendingTreeLevels.get(cacheKey) === request) {
           this.pendingTreeLevels.delete(cacheKey);
         }
@@ -474,11 +746,24 @@ export class ComparisonPanelManager implements vscode.Disposable {
   }
 
   private cancelRequests(): void {
+    this.cancelSubtreeLoads();
     for (const controller of this.requestControllers) {
       controller.abort();
     }
     this.requestControllers.clear();
     this.pendingTreeLevels.clear();
+  }
+
+  private cancelSubtreeLoad(rowKey: string): void {
+    this.subtreeLoadControllers.get(rowKey)?.abort(
+      new DOMException("Subtree loading was cancelled.", "AbortError"),
+    );
+  }
+
+  private cancelSubtreeLoads(): void {
+    for (const controller of this.subtreeLoadControllers.values()) {
+      controller.abort(new DOMException("Subtree loading was cancelled.", "AbortError"));
+    }
   }
 
   dispose(): void {
@@ -500,6 +785,86 @@ function errorMessage(error: unknown): string {
     return error.message;
   }
   return "An unknown error occurred while loading the content tree.";
+}
+
+function isAbortError(error: unknown): boolean {
+  return error instanceof Error && error.name === "AbortError";
+}
+
+function throwIfAborted(signal: AbortSignal): void {
+  if (signal.aborted) {
+    throw signal.reason ?? new DOMException("The operation was cancelled.", "AbortError");
+  }
+}
+
+function normalizeItemId(itemId: string): string {
+  return itemId.replace(/[{}-]/g, "").toLowerCase();
+}
+
+async function mapWithConcurrency<TInput, TOutput>(
+  values: readonly TInput[],
+  concurrency: number,
+  mapper: (value: TInput) => Promise<TOutput>,
+): Promise<readonly TOutput[]> {
+  const results = new Array<TOutput>(values.length);
+  let nextIndex = 0;
+  const workers = Array.from(
+    { length: Math.min(concurrency, values.length) },
+    async () => {
+      while (nextIndex < values.length) {
+        const index = nextIndex;
+        nextIndex += 1;
+        results[index] = await mapper(values[index]);
+      }
+    },
+  );
+  await Promise.all(workers);
+  return results;
+}
+
+async function waitForTraversalSides(
+  sideLoads: readonly Promise<void>[],
+  controller: AbortController,
+): Promise<void> {
+  const guardedLoads = sideLoads.map(async (load) => {
+    try {
+      await load;
+    } catch (error: unknown) {
+      if (!controller.signal.aborted) {
+        controller.abort(error);
+      }
+      throw error;
+    }
+  });
+  const results = await Promise.allSettled(guardedLoads);
+  const failures = results.filter(
+    (result): result is PromiseRejectedResult => result.status === "rejected",
+  );
+  const failure = failures.find((result) => !isAbortError(result.reason)) ?? failures[0];
+  if (failure) {
+    throw failure.reason;
+  }
+}
+
+function awaitWithCancellation<T>(promise: Promise<T>, signal: AbortSignal): Promise<T> {
+  throwIfAborted(signal);
+  return new Promise<T>((resolve, reject) => {
+    const cancellationHandler = (): void => {
+      signal.removeEventListener("abort", cancellationHandler);
+      reject(signal.reason ?? new DOMException("The operation was cancelled.", "AbortError"));
+    };
+    signal.addEventListener("abort", cancellationHandler, { once: true });
+    void promise.then(
+      (value) => {
+        signal.removeEventListener("abort", cancellationHandler);
+        resolve(value);
+      },
+      (error: unknown) => {
+        signal.removeEventListener("abort", cancellationHandler);
+        reject(error);
+      },
+    );
+  });
 }
 
 function locatorDescription(locator: AuthoringItemLocator): string {
