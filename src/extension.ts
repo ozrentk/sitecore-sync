@@ -29,14 +29,17 @@ class EmptyTreeDataProvider implements vscode.TreeDataProvider<never> {
 }
 
 export function activate(context: vscode.ExtensionContext): void {
+  const log = vscode.window.createOutputChannel("XM Cloud Sync", { log: true });
   const connectionStore = new ConnectionStore(context.globalState, context.secrets);
   const connectionProvider = new ConnectionTreeProvider(connectionStore);
   const comparisonPanelManager = new ComparisonPanelManager(
     context.extensionUri,
     context.workspaceState,
     connectionStore,
+    log,
   );
   context.subscriptions.push(
+    log,
     connectionStore,
     connectionProvider,
     comparisonPanelManager,
@@ -64,6 +67,9 @@ export function activate(context: vscode.ExtensionContext): void {
     }),
     vscode.commands.registerCommand("xmCloudSync.openComparison", async () => {
       await comparisonPanelManager.open();
+    }),
+    vscode.commands.registerCommand("xmCloudSync.showLogs", () => {
+      log.show(true);
     }),
     vscode.commands.registerCommand("xmCloudSync.compareWithConnection", async (argument) => {
       if (!(argument instanceof ConnectionTreeItem)) {

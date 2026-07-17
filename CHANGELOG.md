@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.2.2
+
+- Added lazy loading for both XM Cloud authoring content trees.
+- Loaded the root and all paginated direct children when a comparison opens.
+- Loaded and cached one additional level when an item is expanded.
+- Added inline loading, retry, and error states without refreshing on item selection.
+- Added a dedicated XM Cloud Sync diagnostic log output channel.
+
 ## 0.2.1
 
 - Added **Compare with…** to the connection context menu.

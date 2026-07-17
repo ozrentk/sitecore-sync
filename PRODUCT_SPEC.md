@@ -70,6 +70,8 @@ Fields are leaf nodes and have comparison states. Selecting a differing textual 
 
 Selecting an item never refreshes it. Loaded item metadata, fields, versions, languages, and children are cached. Collapsing and re-expanding a loaded node reuses the cache.
 
+When a comparison opens, each side loads the configured root item and all of its direct children. Expanding a child loads exactly one additional level. Direct-child collections are followed through every Authoring GraphQL page before the level is displayed as complete. Loading and errors are shown inline in the affected tree without opening another pane.
+
 Context commands for the MVP:
 
 - `Refresh Item`
