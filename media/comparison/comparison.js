@@ -6,7 +6,6 @@ function emptyTreeState(connectionId) {
     root: undefined,
     loading: false,
     error: undefined,
-    selectedItemId: undefined,
   };
 }
 
@@ -17,12 +16,23 @@ const state = {
     left: emptyTreeState(undefined),
     right: emptyTreeState(undefined),
   },
+  expandedRows: new Set(),
+  selectedRowKey: undefined,
+  rootRowKey: undefined,
+  loadedItems: {
+    left: new Map(),
+    right: new Map(),
+  },
 };
 
 const leftSelect = document.getElementById("left-connection");
 const rightSelect = document.getElementById("right-connection");
 const swapButton = document.getElementById("swap");
 const workspace = document.getElementById("workspace");
+
+function normalizeItemId(itemId) {
+  return itemId.replace(/[{}-]/g, "").toLowerCase();
+}
 
 function connectionById(id) {
   return state.connections.find((connection) => connection.id === id);
@@ -58,24 +68,20 @@ function createButton(label, onClick) {
   return button;
 }
 
-function createStatus(message, buttonLabel, onClick) {
-  const status = document.createElement("div");
-  status.className = "tree-status";
-  const text = document.createElement("p");
-  text.textContent = message;
-  status.append(text);
-  if (buttonLabel && onClick) {
-    status.append(createButton(buttonLabel, onClick));
+function requestRoot(side) {
+  const connectionId = state.trees[side].connectionId;
+  if (connectionId) {
+    vscode.postMessage({ type: "loadRoot", side, connectionId });
   }
-  return status;
 }
 
-function requestRoot(side, connectionId) {
-  vscode.postMessage({ type: "loadRoot", side, connectionId });
-}
-
-function requestChildren(side, connectionId, itemId) {
-  vscode.postMessage({ type: "loadChildren", side, connectionId, itemId });
+function requestChildren(side, node) {
+  const connectionId = state.trees[side].connectionId;
+  if (connectionId) {
+    node.loading = true;
+    node.error = undefined;
+    vscode.postMessage({ type: "loadChildren", side, connectionId, itemId: node.itemId });
+  }
 }
 
 function createTreeNode(item) {
@@ -83,7 +89,6 @@ function createTreeNode(item) {
     ...item,
     children: [],
     childrenLoaded: false,
-    expanded: false,
     loading: false,
     error: undefined,
   };
@@ -93,7 +98,7 @@ function findNode(node, itemId) {
   if (!node) {
     return undefined;
   }
-  if (node.itemId === itemId) {
+  if (normalizeItemId(node.itemId) === normalizeItemId(itemId)) {
     return node;
   }
   for (const child of node.children) {
@@ -105,36 +110,277 @@ function findNode(node, itemId) {
   return undefined;
 }
 
-function renderNode(node, side, connectionId, depth) {
-  const container = document.createElement("div");
-  container.className = "tree-node";
+function indexLoadedItems(node, index) {
+  if (!node) {
+    return;
+  }
+  index.set(normalizeItemId(node.itemId), node);
+  for (const child of node.children) {
+    indexLoadedItems(child, index);
+  }
+}
 
-  const row = document.createElement("div");
-  row.className = "tree-row";
-  row.style.setProperty("--tree-depth", String(depth));
-  if (state.trees[side].selectedItemId === node.itemId) {
-    row.classList.add("selected");
+function refreshLoadedItemIndexes() {
+  const left = new Map();
+  const right = new Map();
+  indexLoadedItems(state.trees.left.root, left);
+  indexLoadedItems(state.trees.right.root, right);
+  state.loadedItems = { left, right };
+}
+
+function createPair(left, right, relationship = "identity") {
+  const leftId = left ? normalizeItemId(left.itemId) : undefined;
+  const rightId = right ? normalizeItemId(right.itemId) : undefined;
+  const sameId = leftId !== undefined && leftId === rightId;
+  const flags = [];
+
+  if (!left) {
+    flags.push("onlyRight");
+  } else if (!right) {
+    flags.push("onlyLeft");
+  } else if (!sameId) {
+    flags.push("onlyLeft", "onlyRight", "idMismatch");
+  } else {
+    if (left.path !== right.path) {
+      flags.push("pathMismatch");
+    }
+    if (left.name !== right.name || left.displayName !== right.displayName) {
+      flags.push("nameMismatch");
+    }
+    if (left.hasChildren !== right.hasChildren) {
+      flags.push("childPresenceMismatch");
+    }
   }
 
+  const key = relationship === "root"
+    ? `root:${leftId ?? "missing"}:${rightId ?? "missing"}`
+    : sameId
+      ? `id:${leftId}`
+      : left && right
+        ? `path:${left.path}:${leftId}:${rightId}`
+        : left
+          ? `left:${leftId}`
+          : `right:${rightId}`;
+
+  return { key, left, right, flags };
+}
+
+function pairChildren(leftChildren, rightChildren) {
+  const rightById = new Map(
+    rightChildren.map((item) => [normalizeItemId(item.itemId), item]),
+  );
+  const usedRight = new Set();
+  const rows = [];
+
+  for (const left of leftChildren) {
+    const normalizedId = normalizeItemId(left.itemId);
+    const right = rightById.get(normalizedId) ?? state.loadedItems.right.get(normalizedId);
+    if (right) {
+      usedRight.add(right);
+    }
+    rows.push(createPair(left, right));
+  }
+
+  const unmatchedRightByPath = new Map();
+  for (const right of rightChildren) {
+    if (
+      !usedRight.has(right) &&
+      !state.loadedItems.left.has(normalizeItemId(right.itemId))
+    ) {
+      const matches = unmatchedRightByPath.get(right.path) ?? [];
+      matches.push(right);
+      unmatchedRightByPath.set(right.path, matches);
+    }
+  }
+
+  for (let index = 0; index < rows.length; index += 1) {
+    const row = rows[index];
+    if (row.right || !row.left) {
+      continue;
+    }
+    const pathMatches = unmatchedRightByPath.get(row.left.path);
+    const right = pathMatches?.shift();
+    if (right) {
+      usedRight.add(right);
+      rows[index] = createPair(row.left, right, "pathConflict");
+    }
+  }
+
+  const rowByRight = new Map();
+  for (const row of rows) {
+    if (row.right) {
+      rowByRight.set(row.right, row);
+    }
+  }
+
+  for (let rightIndex = 0; rightIndex < rightChildren.length; rightIndex += 1) {
+    const right = rightChildren[rightIndex];
+    if (
+      usedRight.has(right) ||
+      state.loadedItems.left.has(normalizeItemId(right.itemId))
+    ) {
+      continue;
+    }
+
+    const row = createPair(undefined, right);
+    let nextKnownRow;
+    for (let nextIndex = rightIndex + 1; nextIndex < rightChildren.length; nextIndex += 1) {
+      nextKnownRow = rowByRight.get(rightChildren[nextIndex]);
+      if (nextKnownRow) {
+        break;
+      }
+    }
+
+    if (nextKnownRow) {
+      rows.splice(rows.indexOf(nextKnownRow), 0, row);
+    } else {
+      rows.push(row);
+    }
+    rowByRight.set(right, row);
+  }
+
+  return rows;
+}
+
+function pairCanExpand(pair) {
+  return pair.left?.hasChildren === true || pair.right?.hasChildren === true;
+}
+
+function nodeReady(node) {
+  return !node || !node.hasChildren || node.childrenLoaded || Boolean(node.error);
+}
+
+function pairReady(pair) {
+  return nodeReady(pair.left) && nodeReady(pair.right);
+}
+
+function pairLoading(pair) {
+  return pair.left?.loading === true || pair.right?.loading === true;
+}
+
+function pairHasError(pair) {
+  return Boolean(pair.left?.error || pair.right?.error);
+}
+
+function loadMissingPairLevels(pair) {
+  for (const side of ["left", "right"]) {
+    const node = pair[side];
+    if (node?.hasChildren && !node.childrenLoaded && !node.loading && !node.error) {
+      requestChildren(side, node);
+    }
+  }
+}
+
+function createConnectionIdentity(side) {
+  const connectionId = state.selection[`${side}ConnectionId`];
+  const connection = connectionById(connectionId);
+  const identity = document.createElement("div");
+  identity.className = "column-identity";
+  const name = document.createElement("div");
+  name.className = "column-name";
+  name.textContent = connection?.name ?? `${side} connection`;
+  const url = document.createElement("div");
+  url.className = "column-url";
+  url.textContent = connection?.serverUrl ?? "No connection selected";
+  url.title = connection?.serverUrl ?? "";
+  identity.append(name, url);
+  return identity;
+}
+
+function createRootStatus(side) {
+  const tree = state.trees[side];
+  const status = document.createElement("div");
+  status.className = "root-status";
+  if (tree.error) {
+    const message = document.createElement("span");
+    message.className = "error-text";
+    message.textContent = tree.error;
+    status.append(message, createButton("Retry", () => requestRoot(side)));
+  } else if (tree.loading) {
+    const spinner = document.createElement("span");
+    spinner.className = "spinner";
+    status.append(spinner, document.createTextNode("Loading content tree…"));
+  } else if (tree.root) {
+    status.textContent = "Ready";
+  } else {
+    status.textContent = "Waiting to load content tree…";
+  }
+  return status;
+}
+
+const flagPresentation = {
+  onlyLeft: { label: "L", title: "Item exists only on the left by ID" },
+  onlyRight: { label: "R", title: "Item exists only on the right by ID" },
+  idMismatch: { label: "ID", title: "The same path has different item IDs" },
+  pathMismatch: { label: "PATH", title: "The same item ID has different paths" },
+  nameMismatch: { label: "NAME", title: "The item name or display name differs" },
+  childPresenceMismatch: { label: "TREE", title: "Child presence differs" },
+};
+
+function createDifferenceBadges(flags) {
+  const badges = document.createElement("span");
+  badges.className = "difference-badges";
+  for (const flag of flags) {
+    const presentation = flagPresentation[flag];
+    const badge = document.createElement("span");
+    badge.className = `difference-badge ${flag}`;
+    badge.textContent = presentation.label;
+    badge.title = presentation.title;
+    badges.append(badge);
+  }
+  return badges;
+}
+
+function createItemCell(node, side, pair, depth) {
+  const cell = document.createElement("button");
+  cell.type = "button";
+  cell.className = `comparison-cell ${side}`;
+  cell.style.setProperty("--tree-depth", String(depth));
+  cell.addEventListener("click", () => {
+    state.selectedRowKey = pair.key;
+    render();
+  });
+
+  if (!node) {
+    cell.classList.add("missing");
+    cell.textContent = "—";
+    cell.title = `Item is missing on the ${side}.`;
+    return cell;
+  }
+
+  cell.title = `${node.path}\nItem ID: ${node.itemId}`;
+  const name = document.createElement("span");
+  name.className = "item-name";
+  name.textContent = node.displayName || node.name;
+  const path = document.createElement("span");
+  path.className = "item-path";
+  path.textContent = node.path;
+  cell.append(name, path);
+  return cell;
+}
+
+function createRowControl(pair) {
+  const control = document.createElement("div");
+  control.className = "row-control";
   const disclosure = document.createElement("button");
-  disclosure.className = "disclosure";
+  disclosure.className = "paired-disclosure";
   disclosure.type = "button";
-  if (node.hasChildren) {
-    disclosure.disabled = node.loading;
-    disclosure.textContent = node.loading ? "" : node.expanded ? "▾" : "▸";
-    disclosure.title = node.expanded ? "Collapse item" : "Expand item";
+
+  if (pairCanExpand(pair)) {
+    const expanded = state.expandedRows.has(pair.key);
+    disclosure.textContent = pairLoading(pair) ? "" : expanded ? "▾" : "▸";
+    disclosure.title = expanded ? "Collapse both sides" : "Expand both sides";
     disclosure.setAttribute("aria-label", disclosure.title);
-    disclosure.setAttribute("aria-expanded", String(node.expanded));
-    if (node.loading) {
+    disclosure.setAttribute("aria-expanded", String(expanded));
+    if (pairLoading(pair)) {
       disclosure.classList.add("loading");
-      disclosure.setAttribute("aria-label", "Loading children");
     }
     disclosure.addEventListener("click", () => {
-      node.expanded = !node.expanded;
-      if (node.expanded && !node.childrenLoaded && !node.loading) {
-        node.loading = true;
-        node.error = undefined;
-        requestChildren(side, connectionId, node.itemId);
+      if (expanded) {
+        state.expandedRows.delete(pair.key);
+      } else {
+        state.expandedRows.add(pair.key);
+        loadMissingPairLevels(pair);
       }
       render();
     });
@@ -143,94 +389,131 @@ function renderNode(node, side, connectionId, depth) {
     disclosure.setAttribute("aria-hidden", "true");
   }
 
-  const itemButton = document.createElement("button");
-  itemButton.className = "tree-item";
-  itemButton.type = "button";
-  itemButton.title = `${node.path}\nItem ID: ${node.itemId}`;
-  const name = document.createElement("span");
-  name.className = "tree-item-name";
-  name.textContent = node.displayName || node.name;
-  const path = document.createElement("span");
-  path.className = "tree-item-path";
-  path.textContent = node.path;
-  itemButton.append(name, path);
-  itemButton.addEventListener("click", () => {
-    state.trees[side].selectedItemId = node.itemId;
-    render();
-  });
-
-  row.append(disclosure, itemButton);
-  container.append(row);
-
-  if (node.expanded) {
-    if (node.error) {
-      const error = document.createElement("div");
-      error.className = "tree-inline-error";
-      error.style.setProperty("--tree-depth", String(depth + 1));
-      const message = document.createElement("span");
-      message.textContent = node.error;
-      const retry = document.createElement("button");
-      retry.type = "button";
-      retry.textContent = "Retry";
-      retry.addEventListener("click", () => {
-        node.loading = true;
-        node.error = undefined;
-        requestChildren(side, connectionId, node.itemId);
-        render();
-      });
-      error.append(message, retry);
-      container.append(error);
-    } else if (node.childrenLoaded) {
-      for (const child of node.children) {
-        container.append(renderNode(child, side, connectionId, depth + 1));
-      }
-    }
-  }
-
-  return container;
+  control.append(disclosure, createDifferenceBadges(pair.flags));
+  return control;
 }
 
-function createSide(sideLabel, side, connectionId) {
-  const connection = connectionById(connectionId);
-  const tree = state.trees[side];
-  const section = document.createElement("section");
-  section.className = "side";
-
-  const header = document.createElement("div");
-  header.className = "side-header";
-  const identity = document.createElement("div");
-  identity.className = "side-identity";
-  const title = document.createElement("div");
-  title.className = "side-title";
-  title.textContent = connection?.name ?? `${sideLabel} connection`;
-  const url = document.createElement("div");
-  url.className = "server-url";
-  url.textContent = connection?.serverUrl ?? "No connection selected";
-  url.title = connection?.serverUrl ?? "";
-  identity.append(title, url);
-  header.append(identity);
-  section.append(header);
-
-  const treeContainer = document.createElement("div");
-  treeContainer.className = "content-tree";
-  treeContainer.setAttribute("role", "tree");
-  treeContainer.setAttribute("aria-label", `${sideLabel} XM Cloud content tree`);
-  if (tree.loading && !tree.root) {
-    treeContainer.append(createStatus("Loading content tree…"));
-  } else if (tree.error && !tree.root) {
-    treeContainer.append(
-      createStatus(tree.error, "Retry", () => requestRoot(side, connectionId)),
-    );
-  } else if (tree.root) {
-    treeContainer.append(renderNode(tree.root, side, connectionId, 0));
-  } else {
-    treeContainer.append(createStatus("Waiting to load content tree…"));
+function createInlineSideStatus(side, node) {
+  const status = document.createElement("div");
+  status.className = `inline-side-status ${side}`;
+  if (!node || !node.hasChildren || node.childrenLoaded) {
+    return status;
   }
-  section.append(treeContainer);
-  return section;
+  if (node.error) {
+    const error = document.createElement("span");
+    error.className = "error-text";
+    error.textContent = node.error;
+    const retry = document.createElement("button");
+    retry.type = "button";
+    retry.textContent = "Retry";
+    retry.addEventListener("click", () => {
+      requestChildren(side, node);
+      render();
+    });
+    status.append(error, retry);
+  } else {
+    const spinner = document.createElement("span");
+    spinner.className = "spinner";
+    status.append(spinner, document.createTextNode("Loading children…"));
+  }
+  return status;
+}
+
+function renderPair(pair, depth) {
+  const fragment = document.createDocumentFragment();
+  const row = document.createElement("div");
+  row.className = "comparison-row";
+  row.setAttribute("role", "treeitem");
+  row.setAttribute("aria-level", String(depth + 1));
+  if (pair.flags.length) {
+    row.classList.add("different");
+  } else {
+    row.classList.add("same");
+  }
+  if (state.selectedRowKey === pair.key) {
+    row.classList.add("selected");
+  }
+  row.append(
+    createItemCell(pair.left, "left", pair, depth),
+    createRowControl(pair),
+    createItemCell(pair.right, "right", pair, depth),
+  );
+  fragment.append(row);
+
+  if (!state.expandedRows.has(pair.key)) {
+    return fragment;
+  }
+
+  loadMissingPairLevels(pair);
+  if (!pairReady(pair) || pairHasError(pair)) {
+    const statusRow = document.createElement("div");
+    statusRow.className = "comparison-inline-status";
+    statusRow.append(
+      createInlineSideStatus("left", pair.left),
+      document.createElement("div"),
+      createInlineSideStatus("right", pair.right),
+    );
+    fragment.append(statusRow);
+    return fragment;
+  }
+
+  const children = pairChildren(
+    pair.left?.children ?? [],
+    pair.right?.children ?? [],
+  );
+  for (const childPair of children) {
+    fragment.append(renderPair(childPair, depth + 1));
+  }
+  return fragment;
+}
+
+function createComparisonWorkspace() {
+  const comparison = document.createElement("section");
+  comparison.className = "comparison";
+
+  const header = document.createElement("header");
+  header.className = "comparison-header";
+  const differenceHeading = document.createElement("div");
+  differenceHeading.className = "difference-heading";
+  differenceHeading.textContent = "Difference";
+  header.append(
+    createConnectionIdentity("left"),
+    differenceHeading,
+    createConnectionIdentity("right"),
+  );
+  comparison.append(header);
+
+  const leftRoot = state.trees.left.root;
+  const rightRoot = state.trees.right.root;
+  const tree = document.createElement("div");
+  tree.className = "paired-tree";
+  tree.setAttribute("role", "tree");
+  tree.setAttribute("aria-label", "XM Cloud structural comparison");
+
+  if (!leftRoot || !rightRoot) {
+    const rootStatuses = document.createElement("div");
+    rootStatuses.className = "root-statuses";
+    rootStatuses.append(
+      createRootStatus("left"),
+      document.createElement("div"),
+      createRootStatus("right"),
+    );
+    tree.append(rootStatuses);
+  } else {
+    const rootPair = createPair(leftRoot, rightRoot, "root");
+    if (state.rootRowKey !== rootPair.key) {
+      state.rootRowKey = rootPair.key;
+      state.expandedRows.add(rootPair.key);
+    }
+    tree.append(renderPair(rootPair, 0));
+  }
+
+  comparison.append(tree);
+  return comparison;
 }
 
 function render() {
+  refreshLoadedItemIndexes();
   renderOptions(leftSelect, state.selection.leftConnectionId);
   renderOptions(rightSelect, state.selection.rightConnectionId);
   swapButton.disabled = state.connections.length < 2;
@@ -251,18 +534,22 @@ function render() {
     return;
   }
 
-  workspace.replaceChildren(
-    createSide("Left", "left", state.selection.leftConnectionId),
-    createSide("Right", "right", state.selection.rightConnectionId),
-  );
+  workspace.replaceChildren(createComparisonWorkspace());
 }
 
 function updateTreeConnections() {
+  let changed = false;
   for (const side of ["left", "right"]) {
     const connectionId = state.selection[`${side}ConnectionId`];
     if (state.trees[side].connectionId !== connectionId) {
       state.trees[side] = emptyTreeState(connectionId);
+      changed = true;
     }
+  }
+  if (changed) {
+    state.expandedRows.clear();
+    state.selectedRowKey = undefined;
+    state.rootRowKey = undefined;
   }
 }
 
@@ -276,7 +563,6 @@ function applyLoadedLevel(message) {
     const root = createTreeNode(message.level.item);
     root.children = message.level.children.map(createTreeNode);
     root.childrenLoaded = true;
-    root.expanded = true;
     tree.root = root;
     tree.loading = false;
     tree.error = undefined;
@@ -290,7 +576,6 @@ function applyLoadedLevel(message) {
   Object.assign(node, message.level.item);
   node.children = message.level.children.map(createTreeNode);
   node.childrenLoaded = true;
-  node.expanded = true;
   node.loading = false;
   node.error = undefined;
 }
@@ -309,7 +594,6 @@ function applyLoading(message) {
   if (node) {
     node.loading = true;
     node.error = undefined;
-    node.expanded = true;
   }
 }
 
@@ -327,7 +611,6 @@ function applyLoadFailure(message) {
   if (node) {
     node.loading = false;
     node.error = message.message;
-    node.expanded = true;
   }
 }
 
