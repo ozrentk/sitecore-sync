@@ -1,0 +1,23 @@
+# Changelog
+
+## 0.1.2
+
+- Collapsed exact duplicate sites returned by the Authoring API.
+- Reported the number of duplicate API records omitted from connection results.
+
+## 0.1.1
+
+- Added expandable and searchable site details with site name, root path, and root item ID.
+
+## 0.1.0
+
+- Added multiple persistent XM Cloud connections.
+- Added secure automation-client credentials using VS Code SecretStorage.
+- Added authenticated connection testing against the Authoring GraphQL API.
+- Added connection removal with confirmation.
+
+## 0.0.1
+
+- Added the initial installable VS Code extension shell.
+- Added the XM Cloud Sync activity view and placeholder commands.
+- Added debug, watch, compile, and VSIX packaging workflows.
