@@ -27,6 +27,8 @@ You need at least two XM Cloud connections to compare content. You can also righ
 
 The comparison tab loads the authoring root and its immediate children on both sides. Expanding an item loads its complete set of direct children using paginated Authoring GraphQL requests. Loaded levels are cached for the lifetime of the extension, while clicking an item only selects it and never causes a refresh. Field-level diff is the next comparison milestone.
 
+Loaded items are displayed in one paired-row tree so the left and right sides share selection, expansion, and scrolling. Items are matched by normalized Sitecore item ID. The comparison marks left-only and right-only items, same-path items with different IDs, and differences in path, name, or child presence. The left hierarchy supplies the primary row order; right-only items are inserted near their closest loaded right-side neighbour.
+
 Connection secrets, access tokens, and Authoring API requests remain in the extension host and are never exposed to the webview.
 
 Run **XM Cloud Sync: Show Logs** to open the extension's diagnostic log. It records comparison loading, caching, and errors without recording client secrets or access tokens.

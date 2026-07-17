@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.2.3
+
+- Replaced independent content trees with one synchronized paired-row comparison tree.
+- Matched loaded items by normalized Sitecore item ID.
+- Added left-only, right-only, ID, path, name, and child-presence difference flags.
+- Paired same-path items with different IDs as explicit identity conflicts.
+- Synchronized selection, expansion, loading, retry, and child alignment across both sides.
+
 ## 0.2.2
 
 - Added lazy loading for both XM Cloud authoring content trees.
