@@ -52,6 +52,11 @@ export function activate(context: vscode.ExtensionContext): void {
     { dispose: () => authoringClient.clear() },
     comparisonPanelManager,
     vscode.window.registerTreeDataProvider("xmCloudSync.connections", connectionProvider),
+    vscode.window.registerWebviewViewProvider(
+      "xmCloudSync.fieldDiff",
+      comparisonPanelManager.fieldDiffViewProvider,
+      { webviewOptions: { retainContextWhenHidden: true } },
+    ),
   );
 
   const providers = viewIds.map((viewId) => {

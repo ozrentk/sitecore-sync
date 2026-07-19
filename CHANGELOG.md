@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.4.0
+
+- Moved detailed field rows out of the structural comparison tree into a dedicated **Field Diff** bottom-panel tab.
+- Added **Show Detailed Field Diff** to the item context menu and synchronized the panel with item selection only while the panel is visible.
+- Added current-selection filters for equal Standard Template fields and matching fields.
+- Kept field scope, value source, local override, metadata, and native textual-diff details in the new paired field table.
+
 ## 0.3.1
 
 - Grouped each expanded item's template and fields in an attached border below the item row.

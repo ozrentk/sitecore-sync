@@ -25,9 +25,9 @@ Run **XM Cloud Sync: Open Comparison** from the Command Palette or use the diff 
 
 One XM Cloud connection is sufficient. Select the same connection on both sides to compare languages such as `en` and `de`, or select different connections to compare environments. **Compare with…** also offers the selected connection itself for cross-language comparison.
 
-The comparison tab loads the authoring root and its immediate children on both sides. Expanding an item loads its latest numbered version, complete field set, template metadata, and direct children using paginated Authoring GraphQL requests. Loaded details are cached for the lifetime of the extension, while clicking an item only selects it and never causes a refresh.
+The comparison tab loads the authoring root and its immediate children on both sides. Expanding an item loads its latest numbered version, complete field set, template metadata, and direct children using paginated Authoring GraphQL requests. Loaded details are cached for the lifetime of the extension, while clicking an item only selects it and never causes a refresh. Expanded rows contain child items only, keeping the structural tree compact.
 
-Fields are paired by normalized field ID in one flat list inside a thin attached border beneath their item. Child items remain ordinary rows below that field group. Shared fields carry an `S` marker, unversioned fields carry `U`, and the common versioned fields are unmarked. Equal Standard Template fields are hidden by default; differing Standard Template fields remain visible, and **Show all fields** reveals the hidden equal rows. Item tooltips summarize Standard Template and Standard Value usage, while populated local overrides are marked directly on their field rows. Field rows report missing fields plus name, type, scope, value, and value-source differences. Selecting a differing textual field opens VS Code's native text diff.
+Right-click an item and choose **Show Detailed Field Diff** to open the **Field Diff** tab in VS Code's bottom panel. The panel follows item selection only while it is visible and stops synchronizing when closed. It displays the complete paired field table with item, connection, language, template, path, and latest-version context. Fields are paired by normalized field ID. Shared fields carry an `S` marker, unversioned fields carry `U`, and the common versioned fields are unmarked. Equal Standard Template fields are hidden by default, while differing Standard Template fields remain visible; **Show equal Standard Template fields** reveals them. **Show differences only** hides matching fields. These filters apply to the currently selected item rather than being stored per item. Populated local overrides are marked on field rows, and textual fields can open VS Code's native text diff.
 
 Loaded items are displayed in one paired-row tree so the left and right sides share selection, expansion, and scrolling. Items are matched by normalized Sitecore item ID. The comparison marks left-only and right-only items, same-path items with different IDs, and differences in path, name, or child presence. The left hierarchy supplies the primary row order; right-only items are inserted near their closest loaded right-side neighbour.
 
@@ -62,7 +62,7 @@ All Sitecore OAuth and Authoring GraphQL traffic passes through a shared request
 
 Run **XM Cloud Sync: Show Logs** to open the extension's diagnostic log. It records comparison loading, caching, errors, retry attempts, and cooldown waits without recording client secrets, access tokens, request bodies, or query parameters.
 
-The comparison webview is separated into `media/comparison/comparison.html`, `comparison.css`, and `comparison.js`. Extension-host lifecycle and state messaging remain in `src/comparison/comparisonPanel.ts`.
+The comparison webview is separated into `media/comparison/comparison.html`, `comparison.css`, and `comparison.js`. The bottom-panel field view lives in `media/fieldDiff`, with its provider in `src/comparison/fieldDiffView.ts`. Extension-host lifecycle and state messaging remain in `src/comparison/comparisonPanel.ts`.
 
 ## Debug during development
 

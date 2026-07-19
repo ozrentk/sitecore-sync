@@ -31,7 +31,6 @@ const state = {
   },
   refreshOperations: new Map(),
   subtreeLoadOperations: new Map(),
-  showAllStandardFields: false,
   textNormalization: "none",
 };
 
@@ -42,7 +41,6 @@ const rightSelect = document.getElementById("right-connection");
 const leftLanguageSelect = document.getElementById("left-language");
 const rightLanguageSelect = document.getElementById("right-language");
 const swapButton = document.getElementById("swap");
-const showAllFieldsInput = document.getElementById("show-all-fields");
 const workspace = document.getElementById("workspace");
 
 function normalizeItemId(itemId) {
@@ -771,7 +769,30 @@ function showContextMenu(event, pair, forceDisabled = false) {
     ? "This subtree overlaps another operation or is still loading."
     : "Refresh the selected item and every loaded descendant level.";
   refresh.addEventListener("click", () => startSubtreeRefresh(pair));
+
+  const detailedDiff = document.createElement("button");
+  detailedDiff.className = "context-menu-item";
+  detailedDiff.type = "button";
+  detailedDiff.textContent = "Show Detailed Field Diff";
+  detailedDiff.disabled = disabled || (!pair.left && !pair.right);
+  detailedDiff.title = detailedDiff.disabled
+    ? "Field details are unavailable while this item is locked."
+    : "Open the Field Diff panel for this item.";
+  detailedDiff.addEventListener("click", () => {
+    state.selectedRowKey = pair.key;
+    vscode.postMessage({
+      type: "showDetailedFieldDiff",
+      leftItemId: pair.left?.itemId,
+      rightItemId: pair.right?.itemId,
+      leftName: pair.left?.displayName || pair.left?.name,
+      rightName: pair.right?.displayName || pair.right?.name,
+    });
+    closeContextMenu();
+    render();
+  });
   menu.append(
+    detailedDiff,
+    createContextMenuSeparator(),
     itemAction,
     expandLoaded,
     load,
@@ -1157,6 +1178,13 @@ function renderPair(pair, depth, ancestorRefreshing = false) {
     state.selectedRowKey = pair.key;
     document.querySelector(".comparison-row.selected")?.classList.remove("selected");
     row.classList.add("selected");
+    vscode.postMessage({
+      type: "selectFieldDiffItem",
+      leftItemId: pair.left?.itemId,
+      rightItemId: pair.right?.itemId,
+      leftName: pair.left?.displayName || pair.left?.name,
+      rightName: pair.right?.displayName || pair.right?.name,
+    });
   });
   row.addEventListener("dblclick", (event) => {
     if (refreshing || event.target.closest(".paired-disclosure, .difference-legend")) {
@@ -1178,36 +1206,6 @@ function renderPair(pair, depth, ancestorRefreshing = false) {
 
   if (!refreshing) {
     loadMissingPairLevels(pair);
-  }
-
-  const detailsReady = [pair.left, pair.right].every((node) =>
-    !node || node.detailsLoaded || Boolean(node.detailsError),
-  );
-  const showDetails = state.detailExpandedRows.has(pair.key) || detailsReady;
-  const fieldGroup = document.createElement("div");
-  fieldGroup.className = "field-group";
-  if (showDetails && !detailsReady) {
-    fieldGroup.append(createDetailsStatus(pair));
-  } else if (showDetails) {
-    fieldGroup.append(createTemplateRow(pair, depth + 1));
-    const fieldPairs = pairFields(
-      pair.left?.details?.fields ?? [],
-      pair.right?.details?.fields ?? [],
-    );
-    for (const fieldPair of fieldPairs) {
-      if (
-        !state.showAllStandardFields &&
-        fieldPair.isStandardTemplate &&
-        !fieldPair.flags.length
-      ) {
-        continue;
-      }
-      fieldGroup.append(createFieldRow(fieldPair, pair, depth + 1));
-    }
-  }
-  if (showDetails) {
-    row.classList.add("has-field-group");
-    fragment.append(fieldGroup);
   }
 
   if (!pairReady(pair) || pairHasError(pair)) {
@@ -1272,7 +1270,6 @@ function render() {
   renderOptions(rightSelect, state.selection.rightConnectionId);
   renderLanguageOptions("left", leftLanguageSelect, state.selection.leftLanguage);
   renderLanguageOptions("right", rightLanguageSelect, state.selection.rightLanguage);
-  showAllFieldsInput.checked = state.showAllStandardFields;
   swapButton.disabled = state.connections.length < 1;
 
   if (state.connections.length < 1) {
@@ -1450,11 +1447,6 @@ rightLanguageSelect.addEventListener("change", () => {
     side: "right",
     language: rightLanguageSelect.value,
   });
-});
-
-showAllFieldsInput.addEventListener("change", () => {
-  state.showAllStandardFields = showAllFieldsInput.checked;
-  render();
 });
 
 swapButton.addEventListener("click", () => {
