@@ -900,6 +900,49 @@ function createDifferenceBadges(flags) {
   return badges;
 }
 
+function createOperationalWarning(pair) {
+  const failures = [];
+  for (const side of ["left", "right"]) {
+    const node = pair[side];
+    const label = side === "left" ? "Left" : "Right";
+    if (node?.error) {
+      failures.push(`${label} child loading failed: ${node.error}`);
+    }
+    if (node?.detailsError) {
+      failures.push(`${label} field loading failed: ${node.detailsError}`);
+    }
+  }
+  if (!failures.length) {
+    return undefined;
+  }
+
+  const warning = document.createElement("span");
+  warning.className = "operational-warning";
+  warning.textContent = "⚠";
+  warning.title = failures.join("\n");
+  warning.setAttribute("aria-label", failures.join(". "));
+  return warning;
+}
+
+function fieldComparisonStatus(pair) {
+  const nodes = [pair.left, pair.right].filter(Boolean);
+  if (nodes.some((node) => node.detailsError)) {
+    return "Failed";
+  }
+  if (nodes.some((node) => node.detailsLoading)) {
+    return "Loading";
+  }
+  if (!nodes.every((node) => node.detailsLoaded)) {
+    return "Not loaded";
+  }
+  return pairFields(
+    pair.left?.details?.fields ?? [],
+    pair.right?.details?.fields ?? [],
+  ).some((fieldPair) => fieldPair.flags.length)
+    ? "Different"
+    : "Equal";
+}
+
 function createConnectionFooter() {
   const footer = document.createElement("footer");
   footer.className = "connection-footer";
@@ -935,7 +978,11 @@ function createItemCell(node, side, depth, pair) {
   }
 
   const displayName = node.displayName || node.name;
-  const tooltipLines = [node.path, `Item ID: ${node.itemId}`];
+  const tooltipLines = [
+    node.path,
+    `Item ID: ${node.itemId}`,
+    `Field comparison: ${fieldComparisonStatus(pair)}`,
+  ];
   if (displayName !== node.name) {
     tooltipLines.push(`Item name: ${node.name}`);
   }
@@ -1199,7 +1246,12 @@ function createRowControl(pair, refreshing, refreshRoot) {
     disclosure.setAttribute("aria-hidden", "true");
   }
 
-  control.append(disclosure, createDifferenceBadges(pair.flags));
+  const warning = createOperationalWarning(pair);
+  control.append(disclosure);
+  if (warning) {
+    control.append(warning);
+  }
+  control.append(createDifferenceBadges(pair.flags));
   return control;
 }
 
