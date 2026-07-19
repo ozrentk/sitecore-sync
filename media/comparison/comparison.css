@@ -44,18 +44,6 @@ select {
   justify-items: center;
 }
 
-.show-all-fields {
-  display: flex;
-  gap: 5px;
-  align-items: center;
-  color: var(--vscode-descriptionForeground);
-  font-size: 11px;
-  white-space: nowrap;
-}
-
-.show-all-fields input {
-  margin: 0;
-}
 
 select {
   width: 100%;
@@ -354,28 +342,6 @@ select:focus {
   margin-left: 5px;
   color: var(--vscode-editorWarning-foreground);
   vertical-align: 1px;
-}
-
-.field-group {
-  min-width: 708px;
-  margin: 0 6px 4px;
-  overflow: hidden;
-  border: 1px solid color-mix(in srgb, var(--vscode-panel-border) 78%, transparent);
-  border-top: 0;
-  border-radius: 0 0 3px 3px;
-}
-
-.comparison-row.has-field-group {
-  border-bottom-color: transparent;
-}
-
-.field-group > :last-child {
-  border-bottom: 0;
-}
-
-.field-group .comparison-row,
-.field-group .comparison-inline-status {
-  min-width: 708px;
 }
 
 .field-flags {

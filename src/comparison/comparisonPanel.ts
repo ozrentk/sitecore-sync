@@ -7,6 +7,11 @@ import {
   type AuthoringLanguage,
   type AuthoringTreeLevel,
 } from "../sitecore/authoringClient";
+import {
+  FieldDiffViewProvider,
+  fieldDiffViewId,
+  type FieldDiffSelection,
+} from "./fieldDiffView";
 
 const selectionKey = "sitecoreXmCloudSync.comparisonSelection.v1";
 const defaultLanguage = "en";
@@ -34,6 +39,8 @@ interface WebviewMessage {
   readonly rightRefreshPlan?: unknown;
   readonly language?: unknown;
   readonly fieldId?: unknown;
+  readonly leftName?: unknown;
+  readonly rightName?: unknown;
 }
 
 interface RefreshPlanEntry {
@@ -81,6 +88,8 @@ export class ComparisonPanelManager implements vscode.Disposable {
   private readonly subtreeLoadControllers = new Map<string, AbortController>();
   private readonly pendingSubtreeConfirmations = new Set<string>();
   private readonly fieldDiffProvider = new FieldDiffContentProvider();
+  private selectedFieldDiffItem: FieldDiffSelection | undefined;
+  readonly fieldDiffViewProvider: FieldDiffViewProvider;
 
   constructor(
     private readonly extensionUri: vscode.Uri,
@@ -89,7 +98,17 @@ export class ComparisonPanelManager implements vscode.Disposable {
     private readonly authoringClient: AuthoringContentClient,
     private readonly log: vscode.LogOutputChannel,
   ) {
+    this.fieldDiffViewProvider = new FieldDiffViewProvider(
+      extensionUri,
+      () => {
+        void this.refreshFieldDiffView();
+      },
+      async (fieldId) => {
+        await this.openSelectedFieldDiff(fieldId);
+      },
+    );
     this.disposables.push(
+      this.fieldDiffViewProvider,
       vscode.workspace.registerTextDocumentContentProvider(
         "xm-cloud-sync-field",
         this.fieldDiffProvider,
@@ -97,6 +116,7 @@ export class ComparisonPanelManager implements vscode.Disposable {
       vscode.workspace.onDidChangeConfiguration((event) => {
         if (event.affectsConfiguration("xmCloudSync.textNormalization")) {
           void this.postState();
+          void this.refreshFieldDiffView();
         }
       }),
       connectionStore.onDidChange(() => {
@@ -170,6 +190,7 @@ export class ComparisonPanelManager implements vscode.Disposable {
 
     if (message.type === "swapConnections") {
       this.cancelSubtreeLoads();
+      await this.clearFieldDiffSelection();
       const selection = this.getSelection();
       await this.saveSelection({
         leftConnectionId: selection.rightConnectionId,
@@ -188,6 +209,7 @@ export class ComparisonPanelManager implements vscode.Disposable {
       typeof message.connectionId === "string"
     ) {
       this.cancelSubtreeLoads();
+      await this.clearFieldDiffSelection();
       const connectionId = this.connectionStore.get(message.connectionId)?.id;
       const selection = this.getSelection();
       await this.saveSelection(this.normalizeSelection({
@@ -208,6 +230,7 @@ export class ComparisonPanelManager implements vscode.Disposable {
       message.language.trim()
     ) {
       this.cancelSubtreeLoads();
+      await this.clearFieldDiffSelection();
       const selection = this.getSelection();
       await this.saveSelection({
         ...selection,
@@ -269,6 +292,26 @@ export class ComparisonPanelManager implements vscode.Disposable {
       } catch (error: unknown) {
         await vscode.window.showErrorMessage(`Unable to open field diff: ${errorMessage(error)}`);
       }
+      return;
+    }
+
+    if (
+      (message.type === "selectFieldDiffItem" || message.type === "showDetailedFieldDiff") &&
+      (typeof message.leftItemId === "string" || typeof message.rightItemId === "string")
+    ) {
+      if (message.type === "selectFieldDiffItem" && !this.fieldDiffViewProvider.visible) {
+        return;
+      }
+      this.selectedFieldDiffItem = {
+        leftItemId: typeof message.leftItemId === "string" ? message.leftItemId : undefined,
+        rightItemId: typeof message.rightItemId === "string" ? message.rightItemId : undefined,
+        leftName: typeof message.leftName === "string" ? message.leftName : undefined,
+        rightName: typeof message.rightName === "string" ? message.rightName : undefined,
+      };
+      if (message.type === "showDetailedFieldDiff") {
+        await vscode.commands.executeCommand(`${fieldDiffViewId}.focus`);
+      }
+      await this.refreshFieldDiffView();
       return;
     }
 
@@ -561,6 +604,7 @@ export class ComparisonPanelManager implements vscode.Disposable {
 
   private async refreshStateAndTrees(): Promise<void> {
     this.cancelSubtreeLoads();
+    await this.clearFieldDiffSelection();
     await this.postState();
     await this.loadInitialTrees();
   }
@@ -726,19 +770,45 @@ export class ComparisonPanelManager implements vscode.Disposable {
     rightItemId: string,
     fieldId: string,
   ): Promise<void> {
-    const selection = this.getSelection();
-    if (!selection.leftConnectionId || !selection.rightConnectionId) {
+    await this.openFieldDiffForAvailableSides(leftItemId, rightItemId, fieldId);
+  }
+
+  private async clearFieldDiffSelection(): Promise<void> {
+    this.selectedFieldDiffItem = undefined;
+    await this.fieldDiffViewProvider.clear();
+  }
+
+  private async openSelectedFieldDiff(fieldId: string): Promise<void> {
+    const selected = this.selectedFieldDiffItem;
+    if (!selected) {
       return;
     }
+    await this.openFieldDiffForAvailableSides(
+      selected.leftItemId,
+      selected.rightItemId,
+      fieldId,
+    );
+  }
+
+  private async openFieldDiffForAvailableSides(
+    leftItemId: string | undefined,
+    rightItemId: string | undefined,
+    fieldId: string,
+  ): Promise<void> {
+    const selection = this.getSelection();
     const [leftDetails, rightDetails] = await Promise.all([
-      this.getItemDetails(selection.leftConnectionId, selection.leftLanguage, leftItemId),
-      this.getItemDetails(selection.rightConnectionId, selection.rightLanguage, rightItemId),
+      leftItemId && selection.leftConnectionId
+        ? this.getItemDetails(selection.leftConnectionId, selection.leftLanguage, leftItemId)
+        : undefined,
+      rightItemId && selection.rightConnectionId
+        ? this.getItemDetails(selection.rightConnectionId, selection.rightLanguage, rightItemId)
+        : undefined,
     ]);
     const normalizedFieldId = normalizeItemId(fieldId);
-    const leftField = leftDetails.fields.find(
+    const leftField = leftDetails?.fields.find(
       (field) => normalizeItemId(field.fieldId) === normalizedFieldId,
     );
-    const rightField = rightDetails.fields.find(
+    const rightField = rightDetails?.fields.find(
       (field) => normalizeItemId(field.fieldId) === normalizedFieldId,
     );
     const fieldName = leftField?.label || rightField?.label || leftField?.name || rightField?.name || "Field";
@@ -762,6 +832,60 @@ export class ComparisonPanelManager implements vscode.Disposable {
       `${fieldName}: ${selection.leftLanguage} ↔ ${selection.rightLanguage}`,
       { preview: true },
     );
+  }
+
+  private async refreshFieldDiffView(): Promise<void> {
+    if (!this.fieldDiffViewProvider.visible) {
+      return;
+    }
+    const selected = this.selectedFieldDiffItem;
+    if (!selected) {
+      await this.fieldDiffViewProvider.clear();
+      return;
+    }
+    const selection = this.getSelection();
+    await this.fieldDiffViewProvider.showLoading(selected);
+    try {
+      const [leftDetails, rightDetails] = await Promise.all([
+        selected.leftItemId && selection.leftConnectionId
+          ? this.getItemDetails(
+              selection.leftConnectionId,
+              selection.leftLanguage,
+              selected.leftItemId,
+            )
+          : undefined,
+        selected.rightItemId && selection.rightConnectionId
+          ? this.getItemDetails(
+              selection.rightConnectionId,
+              selection.rightLanguage,
+              selected.rightItemId,
+            )
+          : undefined,
+      ]);
+      if (selected !== this.selectedFieldDiffItem || !this.fieldDiffViewProvider.visible) {
+        return;
+      }
+      await this.fieldDiffViewProvider.showSnapshot({
+        ...selected,
+        leftConnectionName: selection.leftConnectionId
+          ? this.connectionStore.get(selection.leftConnectionId)?.name
+          : undefined,
+        rightConnectionName: selection.rightConnectionId
+          ? this.connectionStore.get(selection.rightConnectionId)?.name
+          : undefined,
+        leftDetails,
+        rightDetails,
+        textNormalization: vscode.workspace
+          .getConfiguration("xmCloudSync")
+          .get<"none" | "lineEndings">("textNormalization", "none"),
+      });
+    } catch (error: unknown) {
+      if (selected === this.selectedFieldDiffItem) {
+        await this.fieldDiffViewProvider.showError(
+          `Unable to load field details: ${errorMessage(error)}`,
+        );
+      }
+    }
   }
 
   private async loadInitialTrees(): Promise<void> {

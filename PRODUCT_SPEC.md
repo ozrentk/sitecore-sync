@@ -51,11 +51,11 @@ The `Sitecore Sync` activity view contains:
 
 The activity view is the launcher and connection-management surface. The primary comparison workspace opens as a single document-style VS Code webview tab. It can be opened from the view title or Command Palette. A connection's **Compare with…** context action places that connection on the left and prompts for the right-side connection. The same connection can be selected on both sides for cross-language comparison.
 
-The comparison tab's sticky top bar contains independent left and right connection and language selectors, a swap action, and **Show all fields**. The comparison tab remembers its selections per workspace and updates when connections are added or removed.
+The comparison tab's sticky top bar contains independent left and right connection and language selectors plus a swap action. The comparison tab remembers its selections per workspace and updates when connections are added or removed.
 
 Later enhancement: double-clicking a configured site beneath a connection in the Connections pane should open or reveal the comparison tab and use that site's root as the relevant comparison-side starting point. The exact side-selection behavior and handling when the other connection has not yet been chosen remain to be designed.
 
-The comparison tab will contain the two synchronized content trees, field rows, text-diff launch actions, and sync-operation controls. Connection secrets and access tokens are never sent into the webview; API operations remain in the extension host.
+The comparison tab contains the synchronized content tree and sync-operation controls. Detailed field rows and text-diff launch actions live in the **Field Diff** bottom-panel tab. Connection secrets and access tokens are never sent into either webview; API operations remain in the extension host.
 
 Each side independently selects:
 
@@ -70,10 +70,10 @@ The MVP always compares the latest numbered version returned for the selected la
 An item can expand into:
 
 - Template metadata.
-- A flat field list with shared and unversioned scope markers.
+- A flat field list in the **Field Diff** panel with shared and unversioned scope markers.
 - Child items.
 
-Fields are leaf nodes and have comparison states. Selecting a differing textual field opens VS Code's native text diff editor with the left and right Authoring values. The comparison also records whether each value is stored, inherited, supplied by Standard Values, or resolved through fallback so equal text does not hide a different value source.
+Fields have comparison states but are not rendered as tree nodes. Right-clicking an item and choosing **Show Detailed Field Diff** opens its field table in a bottom-panel tab. While visible, that tab follows selection in the comparison tree; closing it stops synchronization. Selecting a differing textual field there opens VS Code's native text diff editor with the left and right Authoring values. The comparison also records whether each value is stored, inherited, supplied by Standard Values, or resolved through fallback so equal text does not hide a different value source.
 
 Selecting an item never refreshes it. Loaded item metadata, fields, versions, languages, and children are cached. Collapsing and re-expanding a loaded node reuses the cache.
 
@@ -168,7 +168,7 @@ For an ID present on both sides:
 
 Multiple difference flags can coexist.
 
-Field identity uses field ID rather than field name. Fields appear in one flat list inside a thin attached border immediately beneath the item row; the group omits its top border so it reads as part of the item, while child items remain ordinary rows below it. Shared and unversioned fields receive compact scope markers; versioned fields are unmarked because they are the common case. Equal fields inherited from the Standard Template are hidden by default, while differing Standard Template fields remain visible. A **Show all fields** control reveals the hidden equal fields. Hidden-field and Standard Value summaries belong in the item tooltip rather than a separate tree row. Populated local overrides on Standard Template fields are marked inline on their field rows.
+Field identity uses field ID rather than field name. Expanded tree rows show child items without inline field rows. The **Field Diff** bottom-panel tab shows one complete paired field table for the selected item, including item, connection, language, path, template, and latest-version context. Shared and unversioned fields receive compact scope markers; versioned fields are unmarked because they are the common case. Equal fields inherited from the Standard Template are hidden by default, while differing Standard Template fields remain visible. **Show equal Standard Template fields** reveals the hidden equal rows, and **Show differences only** hides every matching row. Both controls apply to the current selection and are not stored per item. Hidden-field and Standard Value summaries remain in the item tooltip. Populated local overrides on Standard Template fields are marked inline in the panel.
 
 TODO: Decide whether Authoring field queries should use `withLanguageFallback: true` or `false`. The decision must distinguish comparison of the stored localization state from comparison of the effective value visible through language fallback. Before settling it, verify missing-language behavior, `containsFallbackValue`, item-level fallback, field-level fallback, and how a fallback-derived source value should generate a synchronization operation. Do not let fallback silently hide a missing translation or cause a resolved fallback value to be written as if it were locally stored.
 
