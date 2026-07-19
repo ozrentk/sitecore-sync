@@ -234,6 +234,23 @@ select:focus {
   overflow: hidden;
 }
 
+.operational-warning {
+  display: inline-grid;
+  flex: 0 0 17px;
+  place-items: center;
+  width: 17px;
+  height: 17px;
+  color: var(--vscode-errorForeground);
+  background: color-mix(in srgb, var(--vscode-errorForeground) 12%, transparent);
+  border: 1px solid color-mix(in srgb, var(--vscode-errorForeground) 68%, black);
+  border-radius: 2px;
+  font-family: sans-serif;
+  font-size: 12px;
+  line-height: 15px;
+  cursor: help;
+  user-select: none;
+}
+
 .difference-legend {
   display: inline-flex;
   padding: 0;

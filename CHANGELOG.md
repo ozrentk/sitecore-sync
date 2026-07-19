@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.5.2
+
+- Added field-comparison lifecycle status to item tooltips without introducing visible equal, unchecked, or field-loading markers.
+- Added a single `⚠` operational marker for field-detail or child-loading failures, with side, category, and error details in its tooltip.
+
 ## 0.5.1
 
 - Included loaded leaf and unexpanded descendant items in ancestor-subtree field invalidation without eagerly loading their child levels.

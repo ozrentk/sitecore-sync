@@ -31,7 +31,7 @@ Right-click an item and choose **Show Detailed Field Diff** to open the **Field 
 
 Loaded items are displayed in one paired-row tree so the left and right sides share selection, expansion, and scrolling. Items are matched by normalized Sitecore item ID. The comparison marks left-only and right-only items, same-path items with different IDs, and differences in path, name, or child presence. The left hierarchy supplies the primary row order; right-only items are inserted near their closest loaded right-side neighbour.
 
-Tree rows show only the item display name so deeply nested content remains readable. The tooltip contains the full path and item ID. When the display name differs from the underlying item name, the display name is blue and the tooltip also includes the item name.
+Tree rows show only the item display name so deeply nested content remains readable. The tooltip contains the full path, item ID, and field-comparison lifecycle state: not loaded, loading, equal, different, or failed. Equal, unchecked, and background field-loading states remain visually unmarked. When the display name differs from the underlying item name, the display name is blue and the tooltip also includes the item name. A single red `⚠` marker identifies field-detail or child-loading failures; its tooltip lists the affected side, failure category, and error message.
 
 Right-click a paired row and choose **Refresh Item** to re-read only its template, latest version, and fields without replacing its loaded child tree. Choose **Refresh Subtree** to invalidate and re-read that item plus every descendant level already present in the lazy snapshot. Subtree refresh proceeds from parent levels to child levels so the visible hierarchy remains coherent. The affected rows are temporarily locked; a refresh in a completely disjoint subtree can run at the same time. Unloaded descendants remain lazy and are not fetched solely because of a subtree refresh. If the visible **Field Diff** panel is showing an item covered by either command, it refreshes immediately from the new field snapshot.
 
@@ -55,8 +55,9 @@ The paired-row context menu shows **Expand Item** or **Collapse Item** according
 | `TPL` | The paired items use different templates. |
 | `LNG` | The selected language has a numbered version on only one side. |
 | `C` | One or more paired fields differ. |
+| `⚠` | Field-detail or child loading failed. This is an operational state, not a content difference. |
 
-Identity symbols (`L`, `R`, or `ID`) form one blue group. Structural and content symbols form one orange group. Each symbol retains its own tooltip, and multiple symbols can coexist. Field rows use descriptive badges such as `Type`, `Scope`, `Source`, and `≠` instead of overloading the item-level `T` symbol.
+Identity symbols (`L`, `R`, or `ID`) form one blue group. Structural and content symbols form one orange group. Operational failure uses a separate red `⚠` marker and does not affect difference filtering or synchronization. Each symbol retains its own tooltip, and multiple symbols can coexist. Field rows use descriptive badges such as `Type`, `Scope`, `Source`, and `≠` instead of overloading the item-level `T` symbol.
 
 Connection secrets, access tokens, and Authoring API requests remain in the extension host and are never exposed to the webview.
 
