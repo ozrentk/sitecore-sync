@@ -333,6 +333,7 @@ select:focus {
 
 .field-type,
 .field-scope,
+.field-provenance,
 .field-difference {
   padding: 0 4px;
   border: 1px solid var(--vscode-panel-border);
@@ -346,6 +347,35 @@ select:focus {
   margin-left: 5px;
   color: var(--vscode-charts-blue, var(--vscode-textLink-foreground));
   vertical-align: 1px;
+}
+
+.field-provenance {
+  display: inline-block;
+  margin-left: 5px;
+  color: var(--vscode-editorWarning-foreground);
+  vertical-align: 1px;
+}
+
+.field-group {
+  min-width: 708px;
+  margin: 0 6px 4px;
+  overflow: hidden;
+  border: 1px solid color-mix(in srgb, var(--vscode-panel-border) 78%, transparent);
+  border-top: 0;
+  border-radius: 0 0 3px 3px;
+}
+
+.comparison-row.has-field-group {
+  border-bottom-color: transparent;
+}
+
+.field-group > :last-child {
+  border-bottom: 0;
+}
+
+.field-group .comparison-row,
+.field-group .comparison-inline-status {
+  min-width: 708px;
 }
 
 .field-flags {
@@ -367,11 +397,6 @@ select:focus {
   text-decoration: underline;
 }
 
-.hidden-fields-status {
-  min-height: 25px;
-  font-style: italic;
-  opacity: .75;
-}
 
 .comparison-inline-status {
   min-height: 30px;

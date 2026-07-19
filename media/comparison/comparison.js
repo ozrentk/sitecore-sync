@@ -832,7 +832,7 @@ function createConnectionFooter() {
   return footer;
 }
 
-function createItemCell(node, side, depth) {
+function createItemCell(node, side, depth, pair) {
   const cell = document.createElement("button");
   cell.type = "button";
   cell.className = `comparison-cell ${side}`;
@@ -849,6 +849,28 @@ function createItemCell(node, side, depth) {
   const tooltipLines = [node.path, `Item ID: ${node.itemId}`];
   if (displayName !== node.name) {
     tooltipLines.push(`Item name: ${node.name}`);
+  }
+  if (node.detailsLoaded) {
+    const standardTemplateFields = node.details.fields.filter((field) => field.isStandardTemplate);
+    const standardValueCount = node.details.fields.filter(
+      (field) => field.containsStandardValue,
+    ).length;
+    const populatedStandardOverrides = standardTemplateFields.filter(
+      (field) => fieldSource(field) === "stored" && field.value !== "",
+    ).length;
+    const pairedFields = pairFields(
+      pair.left?.details?.fields ?? [],
+      pair.right?.details?.fields ?? [],
+    );
+    const hiddenEqualStandardFields = pairedFields.filter(
+      (fieldPair) => fieldPair.isStandardTemplate && !fieldPair.flags.length,
+    ).length;
+    tooltipLines.push(
+      `Standard Template fields: ${standardTemplateFields.length}`,
+      `Using Standard Values: ${standardValueCount}`,
+      `Populated Standard Template overrides: ${populatedStandardOverrides}`,
+      `Equal Standard Template fields hidden by default: ${hiddenEqualStandardFields}`,
+    );
   }
   cell.title = tooltipLines.join("\n");
   const name = document.createElement("span");
@@ -948,6 +970,17 @@ function createFieldCell(field, side, depth, fieldPair) {
       ? "Shared across all languages and versions"
       : "Unversioned: one value per language";
     name.append(scope);
+  }
+  if (
+    field.isStandardTemplate &&
+    fieldSource(field) === "stored" &&
+    field.value !== ""
+  ) {
+    const override = document.createElement("span");
+    override.className = "field-provenance override";
+    override.textContent = "Override";
+    override.title = "This populated Standard Template field uses a local item value";
+    name.append(override);
   }
   const value = document.createElement("span");
   value.className = "field-value";
@@ -1133,9 +1166,9 @@ function renderPair(pair, depth, ancestorRefreshing = false) {
   });
   row.addEventListener("contextmenu", (event) => showContextMenu(event, pair, refreshing));
   row.append(
-    createItemCell(pair.left, "left", depth),
+    createItemCell(pair.left, "left", depth, pair),
     createRowControl(pair, refreshing, refreshRoot),
-    createItemCell(pair.right, "right", depth),
+    createItemCell(pair.right, "right", depth, pair),
   );
   fragment.append(row);
 
@@ -1151,39 +1184,30 @@ function renderPair(pair, depth, ancestorRefreshing = false) {
     !node || node.detailsLoaded || Boolean(node.detailsError),
   );
   const showDetails = state.detailExpandedRows.has(pair.key) || detailsReady;
+  const fieldGroup = document.createElement("div");
+  fieldGroup.className = "field-group";
   if (showDetails && !detailsReady) {
-    fragment.append(createDetailsStatus(pair));
+    fieldGroup.append(createDetailsStatus(pair));
   } else if (showDetails) {
-    fragment.append(createTemplateRow(pair, depth + 1));
+    fieldGroup.append(createTemplateRow(pair, depth + 1));
     const fieldPairs = pairFields(
       pair.left?.details?.fields ?? [],
       pair.right?.details?.fields ?? [],
     );
-    let hiddenStandardFieldCount = 0;
     for (const fieldPair of fieldPairs) {
       if (
         !state.showAllStandardFields &&
         fieldPair.isStandardTemplate &&
         !fieldPair.flags.length
       ) {
-        hiddenStandardFieldCount += 1;
         continue;
       }
-      fragment.append(createFieldRow(fieldPair, pair, depth + 1));
+      fieldGroup.append(createFieldRow(fieldPair, pair, depth + 1));
     }
-    if (hiddenStandardFieldCount) {
-      const hiddenRow = document.createElement("div");
-      hiddenRow.className = "comparison-inline-status hidden-fields-status";
-      const message = `${hiddenStandardFieldCount} equal Standard Template field${hiddenStandardFieldCount === 1 ? "" : "s"} hidden`;
-      const left = document.createElement("div");
-      left.className = "inline-side-status";
-      left.textContent = message;
-      const right = document.createElement("div");
-      right.className = "inline-side-status";
-      right.textContent = message;
-      hiddenRow.append(left, document.createElement("div"), right);
-      fragment.append(hiddenRow);
-    }
+  }
+  if (showDetails) {
+    row.classList.add("has-field-group");
+    fragment.append(fieldGroup);
   }
 
   if (!pairReady(pair) || pairHasError(pair)) {

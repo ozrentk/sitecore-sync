@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.3.1
+
+- Grouped each expanded item's template and fields in an attached border below the item row.
+- Removed the separate hidden-Standard-fields count row and moved field summaries into item tooltips.
+- Marked populated local overrides on visible Standard Template field rows.
+
 ## 0.3.0
 
 - Added lazy, paginated item-field comparison with template, value, type, scope, and value-source differences.
