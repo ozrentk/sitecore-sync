@@ -207,7 +207,12 @@ function requestChildren(side, node) {
 
 function requestItemDetails(side, node) {
   const connectionId = state.trees[side].connectionId;
-  if (connectionId && !node.detailsLoaded && !node.detailsLoading) {
+  if (
+    connectionId &&
+    !node.detailsLoaded &&
+    !node.detailsLoading &&
+    !node.detailsError
+  ) {
     node.detailsLoading = true;
     node.detailsError = undefined;
     vscode.postMessage({ type: "loadItemDetails", side, connectionId, itemId: node.itemId });
@@ -388,7 +393,7 @@ function pairChildren(leftChildren, rightChildren) {
 }
 
 function pairCanExpand(pair) {
-  return Boolean(pair.left || pair.right);
+  return pair.left?.hasChildren === true || pair.right?.hasChildren === true;
 }
 
 function nodeReady(node) {
@@ -406,8 +411,7 @@ function pairLevelsLoaded(pair) {
 }
 
 function pairLoading(pair) {
-  return pair.left?.loading === true || pair.right?.loading === true ||
-    pair.left?.detailsLoading === true || pair.right?.detailsLoading === true;
+  return pair.left?.loading === true || pair.right?.loading === true;
 }
 
 function pairHasError(pair) {

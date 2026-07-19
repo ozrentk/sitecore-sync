@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.4.1
+
+- Removed expand controls from items that have no children on either comparison side.
+- Stopped failed background field-detail requests from immediately retrying on every render.
+- Kept background field-detail loading from replacing the child disclosure with a blinking spinner.
+
 ## 0.4.0
 
 - Moved detailed field rows out of the structural comparison tree into a dedicated **Field Diff** bottom-panel tab.
