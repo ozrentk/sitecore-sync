@@ -51,13 +51,13 @@ The paired-row context menu shows **Expand Item** or **Collapse Item** according
 | `ID` | Items have the same path but different item IDs. This badge replaces the otherwise redundant `LR` group for that row. |
 | `P` | The same item ID has different paths on the left and right sides. |
 | `N` | The same item ID has a different item name or display name. |
-| `T` | The two items disagree about whether they have child items. |
-| `TPL` | The paired items use different templates. |
-| `LNG` | The selected language has a numbered version on only one side. |
-| `C` | One or more paired fields differ. |
+| `C` | The two items disagree about whether they have child items. |
+| `T` | The paired items use different templates. |
+| `V` | Selected-language version availability differs between the items. |
+| `*` | At least one field differs between these items. |
 | `⚠` | Field-detail or child loading failed. This is an operational state, not a content difference. |
 
-Identity symbols (`L`, `R`, or `ID`) form one blue group. Structural and content symbols form one orange group. Operational failure uses a separate red `⚠` marker and does not affect difference filtering or synchronization. Each symbol retains its own tooltip, and multiple symbols can coexist. Field rows use descriptive badges such as `Type`, `Scope`, `Source`, and `≠` instead of overloading the item-level `T` symbol.
+Identity symbols (`L`, `R`, or `ID`) form one blue group. Structural and content symbols form one orange group. Operational failure uses a separate red `⚠` marker and does not affect difference filtering or synchronization. Each symbol retains its own tooltip, and multiple symbols can coexist. Field rows use descriptive badges such as `Type`, `Scope`, `Source`, and `≠`; these are independent of the compact item-level symbols.
 
 Connection secrets, access tokens, and Authoring API requests remain in the extension host and are never exposed to the webview.
 

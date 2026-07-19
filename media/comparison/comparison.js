@@ -458,10 +458,10 @@ const flagPresentation = {
   idMismatch: { label: "ID", title: "The same path has different item IDs" },
   pathMismatch: { label: "P", title: "The same item ID has different paths" },
   nameMismatch: { label: "N", title: "The item name or display name differs" },
-  childPresenceMismatch: { label: "T", title: "Child presence differs" },
-  templateMismatch: { label: "TPL", title: "Item templates differ" },
-  languageAvailabilityMismatch: { label: "LNG", title: "The selected language exists on only one side" },
-  contentMismatch: { label: "C", title: "One or more fields differ" },
+  childPresenceMismatch: { label: "C", title: "Child presence differs" },
+  templateMismatch: { label: "T", title: "Item templates differ" },
+  languageAvailabilityMismatch: { label: "V", title: "Selected-language version availability differs" },
+  contentMismatch: { label: "*", title: "At least one field differs between these items" },
 };
 
 function createLegendGroup(flags, kind) {
