@@ -44,6 +44,11 @@ select {
   justify-items: center;
 }
 
+.toolbar-buttons {
+  display: flex;
+  gap: 5px;
+}
+
 
 select {
   width: 100%;
@@ -74,7 +79,8 @@ select:focus {
   background: var(--vscode-button-hoverBackground);
 }
 
-.swap:disabled {
+.swap:disabled,
+.primary:disabled {
   opacity: .5;
   cursor: default;
 }

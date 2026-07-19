@@ -41,6 +41,7 @@ const rightSelect = document.getElementById("right-connection");
 const leftLanguageSelect = document.getElementById("left-language");
 const rightLanguageSelect = document.getElementById("right-language");
 const swapButton = document.getElementById("swap");
+const refreshAllButton = document.getElementById("refresh-all");
 const workspace = document.getElementById("workspace");
 
 function normalizeItemId(itemId) {
@@ -553,13 +554,13 @@ function expandLoadedSubtree(rowKey, includeDetails = false) {
     return;
   }
   const visit = (pair) => {
+    if (includeDetails) {
+      state.detailExpandedRows.add(pair.key);
+    }
     if (!pairCanExpand(pair) || !pairLevelsLoaded(pair)) {
       return;
     }
     state.expandedRows.add(pair.key);
-    if (includeDetails) {
-      state.detailExpandedRows.add(pair.key);
-    }
     for (const childPair of pairChildren(
       pair.left?.children ?? [],
       pair.right?.children ?? [],
@@ -659,6 +660,55 @@ function startSubtreeRefresh(pair) {
     rightRefreshPlan: buildRefreshPlan(pair.right),
   });
   closeContextMenu();
+  render();
+}
+
+function startItemRefresh(pair) {
+  const itemIds = new Set(
+    [pair.left, pair.right]
+      .filter(Boolean)
+      .map((node) => normalizeItemId(node.itemId)),
+  );
+  if (!itemIds.size || hasRefreshOverlap(itemIds) || subtreeIsLoading(pair.left) || subtreeIsLoading(pair.right)) {
+    return;
+  }
+
+  state.refreshOperations.set(pair.key, { itemIds });
+  clearSingleNodeDetails(pair.left);
+  clearSingleNodeDetails(pair.right);
+  vscode.postMessage({
+    type: "refreshItem",
+    rowKey: pair.key,
+    leftItemId: pair.left?.itemId,
+    rightItemId: pair.right?.itemId,
+  });
+  closeContextMenu();
+  render();
+}
+
+function startRefreshAll() {
+  const leftRoot = state.trees.left.root;
+  const rightRoot = state.trees.right.root;
+  if (leftRoot || rightRoot) {
+    const rootPair = createPair(leftRoot, rightRoot, "root");
+    const itemIds = refreshIdsForPair(rootPair);
+    if (
+      hasRefreshOverlap(itemIds) ||
+      subtreeIsLoading(rootPair.left) ||
+      subtreeIsLoading(rootPair.right)
+    ) {
+      return;
+    }
+    vscode.postMessage({
+      type: "refreshAll",
+      rowKey: rootPair.key,
+      leftItemId: leftRoot?.itemId,
+      rightItemId: rightRoot?.itemId,
+    });
+    return;
+  }
+  requestRoot("left");
+  requestRoot("right");
   render();
 }
 
@@ -764,15 +814,25 @@ function showContextMenu(event, pair, forceDisabled = false) {
     : "Confirm, then load every descendant below this item and expand the completed subtree.";
   load.addEventListener("click", () => startSubtreeLoad(pair));
 
-  const refresh = document.createElement("button");
-  refresh.className = "context-menu-item";
-  refresh.type = "button";
-  refresh.textContent = "Refresh Subtree";
-  refresh.disabled = disabled;
-  refresh.title = disabled
+  const refreshItem = document.createElement("button");
+  refreshItem.className = "context-menu-item";
+  refreshItem.type = "button";
+  refreshItem.textContent = "Refresh Item";
+  refreshItem.disabled = disabled;
+  refreshItem.title = disabled
+    ? "This item overlaps another operation or is still loading."
+    : "Refresh this item's template, version, and fields without changing its loaded children.";
+  refreshItem.addEventListener("click", () => startItemRefresh(pair));
+
+  const refreshSubtree = document.createElement("button");
+  refreshSubtree.className = "context-menu-item";
+  refreshSubtree.type = "button";
+  refreshSubtree.textContent = "Refresh Subtree";
+  refreshSubtree.disabled = disabled;
+  refreshSubtree.title = disabled
     ? "This subtree overlaps another operation or is still loading."
     : "Refresh the selected item and every loaded descendant level.";
-  refresh.addEventListener("click", () => startSubtreeRefresh(pair));
+  refreshSubtree.addEventListener("click", () => startSubtreeRefresh(pair));
 
   const detailedDiff = document.createElement("button");
   detailedDiff.className = "context-menu-item";
@@ -801,7 +861,8 @@ function showContextMenu(event, pair, forceDisabled = false) {
     expandLoaded,
     load,
     createContextMenuSeparator(),
-    refresh,
+    refreshItem,
+    refreshSubtree,
   );
   document.body.append(menu);
   contextMenu = menu;
@@ -919,6 +980,16 @@ function clearNodeDetails(node) {
   for (const child of node.children) {
     clearNodeDetails(child);
   }
+}
+
+function clearSingleNodeDetails(node) {
+  if (!node) {
+    return;
+  }
+  node.details = undefined;
+  node.detailsLoaded = false;
+  node.detailsLoading = false;
+  node.detailsError = undefined;
 }
 
 function createDetailCell(text, side, depth, className = "") {
@@ -1204,6 +1275,15 @@ function renderPair(pair, depth, ancestorRefreshing = false) {
   );
   fragment.append(row);
 
+  if (!refreshing && state.detailExpandedRows.has(pair.key)) {
+    for (const side of ["left", "right"]) {
+      const node = pair[side];
+      if (node) {
+        requestItemDetails(side, node);
+      }
+    }
+  }
+
   if (!state.expandedRows.has(pair.key)) {
     return fragment;
   }
@@ -1275,6 +1355,10 @@ function render() {
   renderLanguageOptions("left", leftLanguageSelect, state.selection.leftLanguage);
   renderLanguageOptions("right", rightLanguageSelect, state.selection.rightLanguage);
   swapButton.disabled = state.connections.length < 1;
+  refreshAllButton.disabled =
+    (!state.trees.left.root && !state.trees.right.root) ||
+    state.refreshOperations.size > 0 ||
+    state.subtreeLoadOperations.size > 0;
 
   if (state.connections.length < 1) {
     const empty = document.createElement("div");
@@ -1457,6 +1541,8 @@ swapButton.addEventListener("click", () => {
   vscode.postMessage({ type: "swapConnections" });
 });
 
+refreshAllButton.addEventListener("click", startRefreshAll);
+
 window.addEventListener("message", (event) => {
   const message = event.data;
   if (message?.type === "stateChanged") {
@@ -1484,6 +1570,10 @@ window.addEventListener("message", (event) => {
     applyItemDetailsMessage(message, "failed");
   } else if (message?.type === "subtreeRefreshFinished") {
     state.refreshOperations.delete(message.rowKey);
+  } else if (message?.type === "itemRefreshFinished") {
+    state.refreshOperations.delete(message.rowKey);
+  } else if (message?.type === "refreshAllRequested") {
+    startRefreshAll();
   } else if (message?.type === "subtreeLoadStarted") {
     const pair = findLoadedPair(message.rowKey);
     if (pair) {

@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.5.0
+
+- Added **Refresh Item** for reloading a paired item's template, version, and fields without replacing its loaded children.
+- Implemented confirmed, cancellable **Refresh All** traversal for every item and field beneath the configured root and exposed it in the comparison toolbar.
+- Refreshed the visible **Field Diff** panel immediately when its selected item is covered by an item, subtree, or all-data refresh.
+- Prevented superseded in-flight field-detail requests from restoring stale cache entries after refresh invalidation.
+
 ## 0.4.2
 
 - Treated a null filtered-field collection on an existing Authoring item as zero non-Standard fields.
