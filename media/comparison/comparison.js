@@ -575,11 +575,14 @@ function buildRefreshPlan(node, depth = 0, plan = []) {
   if (!node) {
     return plan;
   }
-  plan.push({ itemId: node.itemId, path: node.path, depth });
+  plan.push({
+    itemId: node.itemId,
+    path: node.path,
+    depth,
+    loadLevel: depth === 0 || node.childrenLoaded,
+  });
   for (const child of node.children) {
-    if (child.childrenLoaded) {
-      buildRefreshPlan(child, depth + 1, plan);
-    }
+    buildRefreshPlan(child, depth + 1, plan);
   }
   return plan;
 }

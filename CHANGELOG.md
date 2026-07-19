@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.5.1
+
+- Included loaded leaf and unexpanded descendant items in ancestor-subtree field invalidation without eagerly loading their child levels.
+- Refreshed the visible **Field Diff** panel when its selected item is covered by an ancestor-subtree refresh.
+
 ## 0.5.0
 
 - Added **Refresh Item** for reloading a paired item's template, version, and fields without replacing its loaded children.
