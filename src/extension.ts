@@ -1,6 +1,10 @@
 import * as vscode from "vscode";
 import { ComparisonPanelManager } from "./comparison/comparisonPanel";
-import { addConnection, removeConnection, testConnection } from "./connections/connectionCommands";
+import {
+  addConnection,
+  removeConnection,
+  testConnection,
+} from "./connections/connectionCommands";
 import { ConnectionStore } from "./connections/connectionStore";
 import { ConnectionTreeItem, ConnectionTreeProvider } from "./connections/connectionTreeProvider";
 import { AuthoringContentClient } from "./sitecore/authoringClient";
@@ -81,11 +85,10 @@ export function activate(context: vscode.ExtensionContext): void {
       }
 
       const candidates = connectionStore
-        .list()
-        .filter((connection) => connection.id !== argument.connection.id);
+        .list();
       if (candidates.length === 0) {
         await vscode.window.showInformationMessage(
-          "You need at least two XM Cloud connections to compare content.",
+          "Add an XM Cloud connection before opening a comparison.",
         );
         return;
       }
@@ -94,6 +97,9 @@ export function activate(context: vscode.ExtensionContext): void {
         candidates.map((connection) => ({
           label: connection.name,
           description: connection.serverUrl,
+          detail: connection.id === argument.connection.id
+            ? "Same connection; select different languages in the comparison tab"
+            : undefined,
           connectionId: connection.id,
         })),
         {

@@ -11,10 +11,18 @@
   <header class="toolbar">
     <div class="selector">
       <select id="left-connection" aria-label="Left XM Cloud connection"></select>
+      <select id="left-language" aria-label="Left content language"></select>
     </div>
-    <button id="swap" class="swap" type="button" title="Swap left and right connections" aria-label="Swap connections">⇄</button>
+    <div class="toolbar-actions">
+      <button id="swap" class="swap" type="button" title="Swap left and right selections" aria-label="Swap selections">⇄</button>
+      <label class="show-all-fields" title="Show equal fields inherited from the Standard Template">
+        <input id="show-all-fields" type="checkbox">
+        Show all fields
+      </label>
+    </div>
     <div class="selector">
       <select id="right-connection" aria-label="Right XM Cloud connection"></select>
+      <select id="right-language" aria-label="Right content language"></select>
     </div>
   </header>
   <main id="workspace" class="workspace" aria-live="polite"></main>

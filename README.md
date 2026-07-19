@@ -21,11 +21,13 @@ If the Authoring API returns identical site records, the extension displays the 
 
 ## Open a comparison
 
-Run **XM Cloud Sync: Open Comparison** from the Command Palette or use the diff icon in the XM Cloud Sync activity view. The comparison opens as a document-style tab with independent left and right connection selectors and a swap button. Choices are remembered per workspace.
+Run **XM Cloud Sync: Open Comparison** from the Command Palette or use the diff icon in the XM Cloud Sync activity view. The comparison opens as a document-style tab with independent left and right connection and language selectors plus a swap button. Choices are remembered per workspace.
 
-You need at least two XM Cloud connections to compare content. You can also right-click a connection and choose **Compare with…**; the selected connection becomes the left side and a Quick Pick selects the right side.
+One XM Cloud connection is sufficient. Select the same connection on both sides to compare languages such as `en` and `de`, or select different connections to compare environments. **Compare with…** also offers the selected connection itself for cross-language comparison.
 
-The comparison tab loads the authoring root and its immediate children on both sides. Expanding an item loads its complete set of direct children using paginated Authoring GraphQL requests. Loaded levels are cached for the lifetime of the extension, while clicking an item only selects it and never causes a refresh. Field-level diff is the next comparison milestone.
+The comparison tab loads the authoring root and its immediate children on both sides. Expanding an item loads its latest numbered version, complete field set, template metadata, and direct children using paginated Authoring GraphQL requests. Loaded details are cached for the lifetime of the extension, while clicking an item only selects it and never causes a refresh.
+
+Fields are paired by normalized field ID in one flat list. Shared fields carry an `S` marker, unversioned fields carry `U`, and the common versioned fields are unmarked. Equal Standard Template fields are hidden by default; differing Standard Template fields remain visible, and **Show all fields** reveals the hidden equal rows. Field rows report missing fields plus name, type, scope, value, and value-source differences. Selecting a differing textual field opens VS Code's native text diff.
 
 Loaded items are displayed in one paired-row tree so the left and right sides share selection, expansion, and scrolling. Items are matched by normalized Sitecore item ID. The comparison marks left-only and right-only items, same-path items with different IDs, and differences in path, name, or child presence. The left hierarchy supplies the primary row order; right-only items are inserted near their closest loaded right-side neighbour.
 
@@ -48,8 +50,11 @@ The paired-row context menu shows **Expand Item** or **Collapse Item** according
 | `P` | The same item ID has different paths on the left and right sides. |
 | `N` | The same item ID has a different item name or display name. |
 | `T` | The two items disagree about whether they have child items. |
+| `TPL` | The paired items use different templates. |
+| `LNG` | The selected language has a numbered version on only one side. |
+| `C` | One or more paired fields differ. |
 
-Identity symbols (`L`, `R`, or `ID`) form one blue group. Structural symbols (`P`, `N`, and `T`) form one orange group without spacing between their equal-width characters. Each symbol retains its own tooltip. Multiple groups can appear on the same row when several differences coexist. A row without a badge is structurally equal based on the metadata currently loaded by the comparison. Field values, templates, languages, and versions are not yet included in this structural legend and will receive additional comparison states as those features are implemented.
+Identity symbols (`L`, `R`, or `ID`) form one blue group. Structural and content symbols form one orange group. Each symbol retains its own tooltip, and multiple symbols can coexist. Field rows use descriptive badges such as `Type`, `Scope`, `Source`, and `≠` instead of overloading the item-level `T` symbol.
 
 Connection secrets, access tokens, and Authoring API requests remain in the extension host and are never exposed to the webview.
 

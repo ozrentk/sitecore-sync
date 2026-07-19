@@ -2,7 +2,9 @@ import * as vscode from "vscode";
 import type { ConnectionStore } from "../connections/connectionStore";
 import {
   AuthoringContentClient,
+  type AuthoringItemDetails,
   type AuthoringItemLocator,
+  type AuthoringLanguage,
   type AuthoringTreeLevel,
 } from "../sitecore/authoringClient";
 
@@ -16,6 +18,8 @@ type TreeSide = "left" | "right";
 interface ComparisonSelection {
   readonly leftConnectionId?: string;
   readonly rightConnectionId?: string;
+  readonly leftLanguage: string;
+  readonly rightLanguage: string;
 }
 
 interface WebviewMessage {
@@ -28,6 +32,8 @@ interface WebviewMessage {
   readonly rightItemId?: unknown;
   readonly leftRefreshPlan?: unknown;
   readonly rightRefreshPlan?: unknown;
+  readonly language?: unknown;
+  readonly fieldId?: unknown;
 }
 
 interface RefreshPlanEntry {
@@ -41,15 +47,40 @@ interface TraversalEntry {
   readonly requestedItemId?: string;
 }
 
+class FieldDiffContentProvider implements vscode.TextDocumentContentProvider {
+  private readonly contents = new Map<string, string>();
+  private nextDocumentId = 1;
+
+  provideTextDocumentContent(uri: vscode.Uri): string {
+    return this.contents.get(uri.toString()) ?? "";
+  }
+
+  create(value: string, label: string): vscode.Uri {
+    const safeLabel = label.replace(/[^a-zA-Z0-9._-]+/g, "-").replace(/^-+|-+$/g, "") || "field";
+    const uri = vscode.Uri.from({
+      scheme: "xm-cloud-sync-field",
+      path: `/${this.nextDocumentId}-${safeLabel}.txt`,
+    });
+    this.nextDocumentId += 1;
+    this.contents.set(uri.toString(), value);
+    return uri;
+  }
+}
+
 export class ComparisonPanelManager implements vscode.Disposable {
   private panel: vscode.WebviewPanel | undefined;
   private panelDisposables: vscode.Disposable[] = [];
   private readonly disposables: vscode.Disposable[] = [];
   private readonly treeLevelCache = new Map<string, AuthoringTreeLevel>();
   private readonly pendingTreeLevels = new Map<string, Promise<AuthoringTreeLevel>>();
+  private readonly languageCache = new Map<string, readonly AuthoringLanguage[]>();
+  private readonly pendingLanguages = new Map<string, Promise<readonly AuthoringLanguage[]>>();
+  private readonly itemDetailsCache = new Map<string, AuthoringItemDetails>();
+  private readonly pendingItemDetails = new Map<string, Promise<AuthoringItemDetails>>();
   private readonly requestControllers = new Set<AbortController>();
   private readonly subtreeLoadControllers = new Map<string, AbortController>();
   private readonly pendingSubtreeConfirmations = new Set<string>();
+  private readonly fieldDiffProvider = new FieldDiffContentProvider();
 
   constructor(
     private readonly extensionUri: vscode.Uri,
@@ -59,6 +90,15 @@ export class ComparisonPanelManager implements vscode.Disposable {
     private readonly log: vscode.LogOutputChannel,
   ) {
     this.disposables.push(
+      vscode.workspace.registerTextDocumentContentProvider(
+        "xm-cloud-sync-field",
+        this.fieldDiffProvider,
+      ),
+      vscode.workspace.onDidChangeConfiguration((event) => {
+        if (event.affectsConfiguration("xmCloudSync.textNormalization")) {
+          void this.postState();
+        }
+      }),
       connectionStore.onDidChange(() => {
         void this.refreshStateAndTrees();
       }),
@@ -134,6 +174,8 @@ export class ComparisonPanelManager implements vscode.Disposable {
       await this.saveSelection({
         leftConnectionId: selection.rightConnectionId,
         rightConnectionId: selection.leftConnectionId,
+        leftLanguage: selection.rightLanguage,
+        rightLanguage: selection.leftLanguage,
       });
       await this.postState();
       await this.loadInitialTrees();
@@ -153,7 +195,26 @@ export class ComparisonPanelManager implements vscode.Disposable {
         ...(message.side === "left"
           ? { leftConnectionId: connectionId }
           : { rightConnectionId: connectionId }),
-      }, message.side));
+      }));
+      await this.postState();
+      await this.loadInitialTrees();
+      return;
+    }
+
+    if (
+      message.type === "selectLanguage" &&
+      (message.side === "left" || message.side === "right") &&
+      typeof message.language === "string" &&
+      message.language.trim()
+    ) {
+      this.cancelSubtreeLoads();
+      const selection = this.getSelection();
+      await this.saveSelection({
+        ...selection,
+        ...(message.side === "left"
+          ? { leftLanguage: message.language }
+          : { rightLanguage: message.language }),
+      });
       await this.postState();
       await this.loadInitialTrees();
       return;
@@ -184,6 +245,30 @@ export class ComparisonPanelManager implements vscode.Disposable {
         { itemId: message.itemId },
         message.itemId,
       );
+      return;
+    }
+
+    if (
+      message.type === "loadItemDetails" &&
+      (message.side === "left" || message.side === "right") &&
+      typeof message.connectionId === "string" &&
+      typeof message.itemId === "string"
+    ) {
+      await this.loadAndPostItemDetails(message.side, message.connectionId, message.itemId);
+      return;
+    }
+
+    if (
+      message.type === "openFieldDiff" &&
+      typeof message.leftItemId === "string" &&
+      typeof message.rightItemId === "string" &&
+      typeof message.fieldId === "string"
+    ) {
+      try {
+        await this.openFieldDiff(message.leftItemId, message.rightItemId, message.fieldId);
+      } catch (error: unknown) {
+        await vscode.window.showErrorMessage(`Unable to open field diff: ${errorMessage(error)}`);
+      }
       return;
     }
 
@@ -431,10 +516,16 @@ export class ComparisonPanelManager implements vscode.Disposable {
       return;
     }
 
-    for (const { connectionId, plan } of sides) {
+    for (const { side, connectionId, plan } of sides) {
+      const language = this.sideLanguage(side);
       for (const entry of plan) {
-        this.treeLevelCache.delete(this.treeCacheKey(connectionId, { itemId: entry.itemId }));
-        this.treeLevelCache.delete(this.treeCacheKey(connectionId, { path: entry.path }));
+        this.treeLevelCache.delete(
+          this.treeCacheKey(connectionId, language, { itemId: entry.itemId }),
+        );
+        this.treeLevelCache.delete(
+          this.treeCacheKey(connectionId, language, { path: entry.path }),
+        );
+        this.itemDetailsCache.delete(this.itemDetailsCacheKey(connectionId, language, entry.itemId));
       }
     }
 
@@ -474,14 +565,214 @@ export class ComparisonPanelManager implements vscode.Disposable {
     await this.loadInitialTrees();
   }
 
+  private async loadAndPostLanguages(side: TreeSide, connectionId: string): Promise<void> {
+    if (!this.panel) {
+      return;
+    }
+    await this.panel.webview.postMessage({ type: "languagesLoading", side, connectionId });
+    try {
+      const languages = await this.getLanguages(connectionId);
+      if (!this.panel || !this.isCurrentSelection(side, connectionId, this.sideLanguage(side))) {
+        return;
+      }
+      await this.panel.webview.postMessage({
+        type: "languagesLoaded",
+        side,
+        connectionId,
+        languages,
+      });
+    } catch (error: unknown) {
+      if (this.panel) {
+        await this.panel.webview.postMessage({
+          type: "languagesLoadFailed",
+          side,
+          connectionId,
+          message: errorMessage(error),
+        });
+      }
+    }
+  }
+
+  private async getLanguages(connectionId: string): Promise<readonly AuthoringLanguage[]> {
+    const cached = this.languageCache.get(connectionId);
+    if (cached) {
+      return cached;
+    }
+    const pending = this.pendingLanguages.get(connectionId);
+    if (pending) {
+      return pending;
+    }
+    const connection = this.connectionStore.get(connectionId);
+    const clientSecret = await this.connectionStore.getClientSecret(connectionId);
+    if (!connection || !clientSecret) {
+      throw new Error("The XM Cloud connection or its secret is missing.");
+    }
+    const controller = new AbortController();
+    const timeout = setTimeout(
+      () => controller.abort(new Error("Language loading timed out.")),
+      30_000,
+    );
+    this.requestControllers.add(controller);
+    let request: Promise<readonly AuthoringLanguage[]>;
+    request = this.authoringClient
+      .loadLanguages(connection, clientSecret, controller.signal)
+      .then((languages) => {
+        this.languageCache.set(connectionId, languages);
+        return languages;
+      })
+      .finally(() => {
+        clearTimeout(timeout);
+        if (this.pendingLanguages.get(connectionId) === request) {
+          this.pendingLanguages.delete(connectionId);
+        }
+        this.requestControllers.delete(controller);
+      });
+    this.pendingLanguages.set(connectionId, request);
+    return request;
+  }
+
+  private async loadAndPostItemDetails(
+    side: TreeSide,
+    connectionId: string,
+    itemId: string,
+  ): Promise<void> {
+    const language = this.sideLanguage(side);
+    if (!this.panel || !this.isCurrentSelection(side, connectionId, language)) {
+      return;
+    }
+    await this.panel.webview.postMessage({
+      type: "itemDetailsLoading",
+      side,
+      connectionId,
+      language,
+      itemId,
+    });
+    try {
+      const details = await this.getItemDetails(connectionId, language, itemId);
+      if (!this.panel || !this.isCurrentSelection(side, connectionId, language)) {
+        return;
+      }
+      await this.panel.webview.postMessage({
+        type: "itemDetailsLoaded",
+        side,
+        connectionId,
+        language,
+        itemId,
+        details,
+      });
+    } catch (error: unknown) {
+      if (this.panel && this.isCurrentSelection(side, connectionId, language)) {
+        await this.panel.webview.postMessage({
+          type: "itemDetailsLoadFailed",
+          side,
+          connectionId,
+          language,
+          itemId,
+          message: errorMessage(error),
+        });
+      }
+    }
+  }
+
+  private async getItemDetails(
+    connectionId: string,
+    language: string,
+    itemId: string,
+  ): Promise<AuthoringItemDetails> {
+    const cacheKey = this.itemDetailsCacheKey(connectionId, language, itemId);
+    const cached = this.itemDetailsCache.get(cacheKey);
+    if (cached) {
+      return cached;
+    }
+    const pending = this.pendingItemDetails.get(cacheKey);
+    if (pending) {
+      return pending;
+    }
+    const connection = this.connectionStore.get(connectionId);
+    const clientSecret = await this.connectionStore.getClientSecret(connectionId);
+    if (!connection || !clientSecret) {
+      throw new Error("The XM Cloud connection or its secret is missing.");
+    }
+    const controller = new AbortController();
+    const timeout = setTimeout(
+      () => controller.abort(new Error("Item-detail loading timed out.")),
+      30_000,
+    );
+    this.requestControllers.add(controller);
+    let request: Promise<AuthoringItemDetails>;
+    request = this.authoringClient
+      .loadItemDetails(connection, clientSecret, itemId, language, controller.signal)
+      .then((details) => {
+        this.itemDetailsCache.set(cacheKey, details);
+        return details;
+      })
+      .finally(() => {
+        clearTimeout(timeout);
+        if (this.pendingItemDetails.get(cacheKey) === request) {
+          this.pendingItemDetails.delete(cacheKey);
+        }
+        this.requestControllers.delete(controller);
+      });
+    this.pendingItemDetails.set(cacheKey, request);
+    return request;
+  }
+
+  private itemDetailsCacheKey(connectionId: string, language: string, itemId: string): string {
+    return `${connectionId}:${language.toLowerCase()}:${normalizeItemId(itemId)}`;
+  }
+
+  private async openFieldDiff(
+    leftItemId: string,
+    rightItemId: string,
+    fieldId: string,
+  ): Promise<void> {
+    const selection = this.getSelection();
+    if (!selection.leftConnectionId || !selection.rightConnectionId) {
+      return;
+    }
+    const [leftDetails, rightDetails] = await Promise.all([
+      this.getItemDetails(selection.leftConnectionId, selection.leftLanguage, leftItemId),
+      this.getItemDetails(selection.rightConnectionId, selection.rightLanguage, rightItemId),
+    ]);
+    const normalizedFieldId = normalizeItemId(fieldId);
+    const leftField = leftDetails.fields.find(
+      (field) => normalizeItemId(field.fieldId) === normalizedFieldId,
+    );
+    const rightField = rightDetails.fields.find(
+      (field) => normalizeItemId(field.fieldId) === normalizedFieldId,
+    );
+    const fieldName = leftField?.label || rightField?.label || leftField?.name || rightField?.name || "Field";
+    const normalization = vscode.workspace
+      .getConfiguration("xmCloudSync")
+      .get<"none" | "lineEndings">("textNormalization", "none");
+    const normalize = (value: string): string =>
+      normalization === "lineEndings" ? value.replace(/\r\n?|\n/g, "\n") : value;
+    const leftUri = this.fieldDiffProvider.create(
+      normalize(leftField?.value ?? ""),
+      `${selection.leftLanguage}-${fieldName}`,
+    );
+    const rightUri = this.fieldDiffProvider.create(
+      normalize(rightField?.value ?? ""),
+      `${selection.rightLanguage}-${fieldName}`,
+    );
+    await vscode.commands.executeCommand(
+      "vscode.diff",
+      leftUri,
+      rightUri,
+      `${fieldName}: ${selection.leftLanguage} ↔ ${selection.rightLanguage}`,
+      { preview: true },
+    );
+  }
+
   private async loadInitialTrees(): Promise<void> {
-    if (!this.panel || this.connectionStore.list().length < 2) {
+    if (!this.panel || this.connectionStore.list().length < 1) {
       return;
     }
 
     const selection = this.getSelection();
     const requests: Promise<void>[] = [];
     if (selection.leftConnectionId) {
+      requests.push(this.loadAndPostLanguages("left", selection.leftConnectionId));
       requests.push(
         this.loadTreeLevel(
           "left",
@@ -491,6 +782,7 @@ export class ComparisonPanelManager implements vscode.Disposable {
       );
     }
     if (selection.rightConnectionId) {
+      requests.push(this.loadAndPostLanguages("right", selection.rightConnectionId));
       requests.push(
         this.loadTreeLevel(
           "right",
@@ -522,10 +814,11 @@ export class ComparisonPanelManager implements vscode.Disposable {
     requestedItemId?: string,
     cancellationSignal?: AbortSignal,
   ): Promise<AuthoringTreeLevel> {
+    const language = this.sideLanguage(side);
     if (cancellationSignal) {
       throwIfAborted(cancellationSignal);
     }
-    if (!this.panel || !this.isCurrentConnection(side, connectionId)) {
+    if (!this.panel || !this.isCurrentSelection(side, connectionId, language)) {
       throw new DOMException("The comparison selection changed.", "AbortError");
     }
 
@@ -533,6 +826,7 @@ export class ComparisonPanelManager implements vscode.Disposable {
       type: "treeLoading",
       side,
       connectionId,
+      language,
       requestedItemId,
     });
     this.log.debug(
@@ -540,17 +834,18 @@ export class ComparisonPanelManager implements vscode.Disposable {
     );
 
     try {
-      const level = await this.getTreeLevel(connectionId, locator, cancellationSignal);
+      const level = await this.getTreeLevel(connectionId, language, locator, cancellationSignal);
       if (cancellationSignal) {
         throwIfAborted(cancellationSignal);
       }
-      if (!this.panel || !this.isCurrentConnection(side, connectionId)) {
+      if (!this.panel || !this.isCurrentSelection(side, connectionId, language)) {
         throw new DOMException("The comparison selection changed.", "AbortError");
       }
       await this.panel.webview.postMessage({
         type: "treeLoaded",
         side,
         connectionId,
+        language,
         requestedItemId,
         level,
       });
@@ -563,6 +858,7 @@ export class ComparisonPanelManager implements vscode.Disposable {
         await this.reportTreeLoadFailure(
           side,
           connectionId,
+          language,
           locator,
           requestedItemId,
           error,
@@ -575,17 +871,19 @@ export class ComparisonPanelManager implements vscode.Disposable {
   private async reportTreeLoadFailure(
     side: TreeSide,
     connectionId: string,
+    language: string,
     locator: AuthoringItemLocator,
     requestedItemId: string | undefined,
     error: unknown,
   ): Promise<void> {
-    if (!this.panel || !this.isCurrentConnection(side, connectionId)) {
+    if (!this.panel || !this.isCurrentSelection(side, connectionId, language)) {
       return;
     }
     await this.panel.webview.postMessage({
       type: "treeLoadFailed",
       side,
       connectionId,
+      language,
       requestedItemId,
       message: errorMessage(error),
     });
@@ -597,10 +895,11 @@ export class ComparisonPanelManager implements vscode.Disposable {
 
   private async getTreeLevel(
     connectionId: string,
+    language: string,
     locator: AuthoringItemLocator,
     cancellationSignal?: AbortSignal,
   ): Promise<AuthoringTreeLevel> {
-    const cacheKey = this.treeCacheKey(connectionId, locator);
+    const cacheKey = this.treeCacheKey(connectionId, language, locator);
     const cached = this.treeLevelCache.get(cacheKey);
     if (cached) {
       this.log.trace(`Tree cache hit: ${cacheKey}.`);
@@ -640,7 +939,7 @@ export class ComparisonPanelManager implements vscode.Disposable {
     this.requestControllers.add(controller);
     let request: Promise<AuthoringTreeLevel>;
     request = this.authoringClient
-      .loadTreeLevel(connection, clientSecret, locator, defaultLanguage, controller.signal)
+      .loadTreeLevel(connection, clientSecret, locator, language, controller.signal)
       .then((level) => {
         this.treeLevelCache.set(cacheKey, level);
         return level;
@@ -657,26 +956,38 @@ export class ComparisonPanelManager implements vscode.Disposable {
     return request;
   }
 
-  private treeCacheKey(connectionId: string, locator: AuthoringItemLocator): string {
+  private treeCacheKey(
+    connectionId: string,
+    language: string,
+    locator: AuthoringItemLocator,
+  ): string {
     const locatorKey = "path" in locator ? `path:${locator.path}` : `id:${locator.itemId}`;
-    return `${connectionId}:${defaultLanguage}:${locatorKey}`;
+    return `${connectionId}:${language.toLowerCase()}:${locatorKey}`;
   }
 
-  private isCurrentConnection(side: "left" | "right", connectionId: string): boolean {
+  private isCurrentSelection(
+    side: "left" | "right",
+    connectionId: string,
+    language: string,
+  ): boolean {
     const selection = this.getSelection();
     return side === "left"
-      ? selection.leftConnectionId === connectionId
-      : selection.rightConnectionId === connectionId;
+      ? selection.leftConnectionId === connectionId && selection.leftLanguage === language
+      : selection.rightConnectionId === connectionId && selection.rightLanguage === language;
+  }
+
+  private sideLanguage(side: TreeSide): string {
+    const selection = this.getSelection();
+    return side === "left" ? selection.leftLanguage : selection.rightLanguage;
   }
 
   private getSelection(): ComparisonSelection {
-    const stored = this.workspaceState.get<ComparisonSelection>(selectionKey, {});
+    const stored = this.workspaceState.get<Partial<ComparisonSelection>>(selectionKey, {});
     return this.normalizeSelection(stored);
   }
 
   private normalizeSelection(
-    selection: ComparisonSelection,
-    changedSide?: "left" | "right",
+    selection: Partial<ComparisonSelection>,
   ): ComparisonSelection {
     const connectionIds = this.connectionStore.list().map((connection) => connection.id);
     const validIds = new Set(connectionIds);
@@ -687,17 +998,14 @@ export class ComparisonPanelManager implements vscode.Disposable {
     let rightConnectionId: string | undefined =
       selection.rightConnectionId && validIds.has(selection.rightConnectionId)
         ? selection.rightConnectionId
-        : connectionIds.find((id) => id !== leftConnectionId);
+        : connectionIds.find((id) => id !== leftConnectionId) ?? leftConnectionId;
 
-    if (leftConnectionId === rightConnectionId) {
-      if (changedSide === "left") {
-        rightConnectionId = connectionIds.find((id) => id !== leftConnectionId);
-      } else {
-        leftConnectionId = connectionIds.find((id) => id !== rightConnectionId);
-      }
-    }
-
-    return { leftConnectionId, rightConnectionId };
+    return {
+      leftConnectionId,
+      rightConnectionId,
+      leftLanguage: selection.leftLanguage?.trim() || defaultLanguage,
+      rightLanguage: selection.rightLanguage?.trim() || defaultLanguage,
+    };
   }
 
   private async saveSelection(selection: ComparisonSelection): Promise<void> {
@@ -719,6 +1027,9 @@ export class ComparisonPanelManager implements vscode.Disposable {
       type: "stateChanged",
       connections,
       selection: this.getSelection(),
+      textNormalization: vscode.workspace
+        .getConfiguration("xmCloudSync")
+        .get<"none" | "lineEndings">("textNormalization", "none"),
     });
   }
 
@@ -752,6 +1063,8 @@ export class ComparisonPanelManager implements vscode.Disposable {
     }
     this.requestControllers.clear();
     this.pendingTreeLevels.clear();
+    this.pendingLanguages.clear();
+    this.pendingItemDetails.clear();
   }
 
   private cancelSubtreeLoad(rowKey: string): void {
@@ -769,6 +1082,8 @@ export class ComparisonPanelManager implements vscode.Disposable {
   dispose(): void {
     this.cancelRequests();
     this.treeLevelCache.clear();
+    this.languageCache.clear();
+    this.itemDetailsCache.clear();
     this.panel?.dispose();
     this.disposePanelSubscriptions();
     for (const disposable of this.disposables) {

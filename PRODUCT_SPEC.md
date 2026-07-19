@@ -49,9 +49,9 @@ The `Sitecore Sync` activity view contains:
 - Connections.
 - Sync operations.
 
-The activity view is the launcher and connection-management surface. The primary comparison workspace opens as a single document-style VS Code webview tab. It can be opened from the view title or Command Palette. A connection's **Compare with…** context action places that connection on the left and prompts for the right-side connection. At least two distinct connections are required.
+The activity view is the launcher and connection-management surface. The primary comparison workspace opens as a single document-style VS Code webview tab. It can be opened from the view title or Command Palette. A connection's **Compare with…** context action places that connection on the left and prompts for the right-side connection. The same connection can be selected on both sides for cross-language comparison.
 
-The comparison tab's sticky top bar contains independent left and right connection selectors and a swap action. The comparison tab remembers its selected connections per workspace and updates when connections are added or removed.
+The comparison tab's sticky top bar contains independent left and right connection and language selectors, a swap action, and **Show all fields**. The comparison tab remembers its selections per workspace and updates when connections are added or removed.
 
 Later enhancement: double-clicking a configured site beneath a connection in the Connections pane should open or reveal the comparison tab and use that site's root as the relevant comparison-side starting point. The exact side-selection behavior and handling when the other connection has not yet been chosen remain to be designed.
 
@@ -62,19 +62,18 @@ Each side independently selects:
 - Connection.
 - Root path.
 - Language.
-- Version or version-selection mode.
+
+The MVP always compares the latest numbered version returned for the selected language. Version selection is deferred.
 
 ## Tree structure and interaction
 
 An item can expand into:
 
-- Item metadata.
-- Shared fields.
-- Language/unversioned fields.
-- Language/version groups and their versioned fields.
+- Template metadata.
+- A flat field list with shared and unversioned scope markers.
 - Child items.
 
-Fields are leaf nodes and have comparison states. Selecting a differing textual field opens VS Code's native text diff editor with the left and right raw values.
+Fields are leaf nodes and have comparison states. Selecting a differing textual field opens VS Code's native text diff editor with the left and right Authoring values. The comparison also records whether each value is stored, inherited, supplied by Standard Values, or resolved through fallback so equal text does not hide a different value source.
 
 Selecting an item never refreshes it. Loaded item metadata, fields, versions, languages, and children are cached. Collapsing and re-expanding a loaded node reuses the cache.
 
@@ -169,7 +168,9 @@ For an ID present on both sides:
 
 Multiple difference flags can coexist.
 
-Field identity uses field ID rather than field name. Fields are grouped into shared, language/unversioned, and language/versioned groups.
+Field identity uses field ID rather than field name. Fields appear in one flat list. Shared and unversioned fields receive compact scope markers; versioned fields are unmarked because they are the common case. Equal fields inherited from the Standard Template are hidden by default, while differing Standard Template fields remain visible. A **Show all fields** control reveals the hidden equal fields.
+
+TODO: Decide whether Authoring field queries should use `withLanguageFallback: true` or `false`. The decision must distinguish comparison of the stored localization state from comparison of the effective value visible through language fallback. Before settling it, verify missing-language behavior, `containsFallbackValue`, item-level fallback, field-level fallback, and how a fallback-derived source value should generate a synchronization operation. Do not let fallback silently hide a missing translation or cause a resolved fallback value to be written as if it were locally stored.
 
 ## Text normalization
 

@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.3.0
+
+- Added lazy, paginated item-field comparison with template, value, type, scope, and value-source differences.
+- Added independent language selectors and latest-version resolution on both comparison sides.
+- Allowed the same XM Cloud connection on both sides for cross-language comparison.
+- Marked shared and unversioned fields while leaving common versioned fields unmarked.
+- Hid equal Standard Template fields by default and added **Show all fields**.
+- Added native VS Code text diffs for differing textual fields.
+- Included field snapshots in comparison caching and subtree refresh invalidation.
+- Kept language fallback disabled pending an explicit fallback-semantics investigation.
+
 ## 0.2.7
 
 - Added confirmed **Expand All…** to the paired-row context menu for large content trees.
