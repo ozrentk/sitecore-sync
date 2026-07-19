@@ -176,6 +176,13 @@ export class ComparisonPanelManager implements vscode.Disposable {
     await this.loadInitialTrees();
   }
 
+  async refreshAll(): Promise<boolean> {
+    if (!this.panel) {
+      return false;
+    }
+    return this.panel.webview.postMessage({ type: "refreshAllRequested" });
+  }
+
   private async handleMessage(message: WebviewMessage): Promise<void> {
     if (message.type === "ready") {
       await this.postState();
@@ -324,6 +331,32 @@ export class ComparisonPanelManager implements vscode.Disposable {
       return;
     }
 
+    if (
+      message.type === "refreshItem" &&
+      typeof message.rowKey === "string" &&
+      (typeof message.leftItemId === "string" || typeof message.rightItemId === "string")
+    ) {
+      await this.refreshItem(
+        message.rowKey,
+        typeof message.leftItemId === "string" ? message.leftItemId : undefined,
+        typeof message.rightItemId === "string" ? message.rightItemId : undefined,
+      );
+      return;
+    }
+
+    if (
+      message.type === "refreshAll" &&
+      typeof message.rowKey === "string" &&
+      (typeof message.leftItemId === "string" || typeof message.rightItemId === "string")
+    ) {
+      await this.confirmAndRefreshAll(
+        message.rowKey,
+        typeof message.leftItemId === "string" ? message.leftItemId : undefined,
+        typeof message.rightItemId === "string" ? message.rightItemId : undefined,
+      );
+      return;
+    }
+
     if (message.type === "loadSubtree" && typeof message.rowKey === "string") {
       await this.confirmAndLoadSubtree(
         message.rowKey,
@@ -365,10 +398,43 @@ export class ComparisonPanelManager implements vscode.Disposable {
     }
   }
 
+  private async confirmAndRefreshAll(
+    rowKey: string,
+    leftItemId: string | undefined,
+    rightItemId: string | undefined,
+  ): Promise<void> {
+    if (
+      this.pendingSubtreeConfirmations.has(rowKey) ||
+      this.subtreeLoadControllers.has(rowKey)
+    ) {
+      return;
+    }
+
+    this.pendingSubtreeConfirmations.add(rowKey);
+    try {
+      const selection = await vscode.window.showWarningMessage(
+        "Refresh All will re-read every item and field beneath the configured root on both sides. Large trees may take time and affect VS Code performance. Do you want to continue?",
+        { modal: true },
+        "Refresh All",
+      );
+      if (selection !== "Refresh All") {
+        return;
+      }
+
+      this.cancelRequests();
+      this.treeLevelCache.clear();
+      this.itemDetailsCache.clear();
+      await this.loadSubtree(rowKey, leftItemId, rightItemId, "refreshAll");
+    } finally {
+      this.pendingSubtreeConfirmations.delete(rowKey);
+    }
+  }
+
   private async loadSubtree(
     rowKey: string,
     leftItemId: string | undefined,
     rightItemId: string | undefined,
+    operation: "expand" | "refreshAll" = "expand",
   ): Promise<void> {
     if (
       !this.panel ||
@@ -401,13 +467,20 @@ export class ComparisonPanelManager implements vscode.Disposable {
     const controller = new AbortController();
     this.subtreeLoadControllers.set(rowKey, controller);
     await this.panel.webview.postMessage({ type: "subtreeLoadStarted", rowKey });
-    this.log.info(`Loading complete comparison subtree ${rowKey}.`);
+    const refreshingAll = operation === "refreshAll";
+    this.log.info(
+      refreshingAll
+        ? `Refreshing the complete comparison ${rowKey}.`
+        : `Loading complete comparison subtree ${rowKey}.`,
+    );
 
     try {
       await vscode.window.withProgress(
         {
           location: vscode.ProgressLocation.Notification,
-          title: "Loading XM Cloud comparison subtree",
+          title: refreshingAll
+            ? "Refreshing all XM Cloud comparison data"
+            : "Loading XM Cloud comparison subtree",
           cancellable: true,
         },
         async (progress, token) => {
@@ -449,7 +522,14 @@ export class ComparisonPanelManager implements vscode.Disposable {
           }
         },
       );
-      this.log.info(`Finished loading complete comparison subtree ${rowKey}.`);
+      if (refreshingAll) {
+        await this.refreshFieldDiffView();
+      }
+      this.log.info(
+        refreshingAll
+          ? `Finished refreshing the complete comparison ${rowKey}.`
+          : `Finished loading complete comparison subtree ${rowKey}.`,
+      );
       await this.panel?.webview.postMessage({ type: "subtreeLoadFinished", rowKey });
     } catch (error: unknown) {
       const cancelled = isAbortError(error);
@@ -457,11 +537,22 @@ export class ComparisonPanelManager implements vscode.Disposable {
         controller.abort(error);
       }
       if (cancelled) {
-        this.log.info(`Comparison subtree loading was cancelled for ${rowKey}.`);
+        this.log.info(
+          refreshingAll
+            ? `Complete comparison refresh was cancelled for ${rowKey}.`
+            : `Comparison subtree loading was cancelled for ${rowKey}.`,
+        );
       } else {
-        this.log.error(`Comparison subtree loading failed for ${rowKey}.`, error);
+        this.log.error(
+          refreshingAll
+            ? `Complete comparison refresh failed for ${rowKey}.`
+            : `Comparison subtree loading failed for ${rowKey}.`,
+          error,
+        );
         await vscode.window.showErrorMessage(
-          `Unable to load the complete comparison subtree: ${errorMessage(error)}`,
+          refreshingAll
+            ? `Unable to refresh all comparison data: ${errorMessage(error)}`
+            : `Unable to load the complete comparison subtree: ${errorMessage(error)}`,
         );
       }
       await this.panel?.webview.postMessage({
@@ -568,9 +659,13 @@ export class ComparisonPanelManager implements vscode.Disposable {
         this.treeLevelCache.delete(
           this.treeCacheKey(connectionId, language, { path: entry.path }),
         );
-        this.itemDetailsCache.delete(this.itemDetailsCacheKey(connectionId, language, entry.itemId));
+        this.invalidateItemDetails(connectionId, language, entry.itemId);
       }
     }
+
+    const fieldDiffRefresh = this.selectedFieldDiffItemMatchesPlans(leftPlan, rightPlan)
+      ? this.refreshFieldDiffView()
+      : Promise.resolve();
 
     this.log.info(
       `Refreshing comparison subtree ${rowKey} (${leftPlan.length} left level(s), ${rightPlan.length} right level(s)).`,
@@ -596,10 +691,102 @@ export class ComparisonPanelManager implements vscode.Disposable {
         }
         await Promise.all(requests);
       }
+      await fieldDiffRefresh;
       this.log.info(`Finished refreshing comparison subtree ${rowKey}.`);
     } finally {
       await this.panel?.webview.postMessage({ type: "subtreeRefreshFinished", rowKey });
     }
+  }
+
+  private async refreshItem(
+    rowKey: string,
+    leftItemId: string | undefined,
+    rightItemId: string | undefined,
+  ): Promise<void> {
+    if (!this.panel) {
+      return;
+    }
+    const selection = this.getSelection();
+    const sides = [
+      {
+        side: "left" as const,
+        connectionId: selection.leftConnectionId,
+        language: selection.leftLanguage,
+        itemId: leftItemId,
+      },
+      {
+        side: "right" as const,
+        connectionId: selection.rightConnectionId,
+        language: selection.rightLanguage,
+        itemId: rightItemId,
+      },
+    ].filter(
+      (entry): entry is {
+        readonly side: TreeSide;
+        readonly connectionId: string;
+        readonly language: string;
+        readonly itemId: string;
+      } => Boolean(entry.connectionId && entry.itemId),
+    );
+
+    this.log.info(`Refreshing comparison item ${rowKey}.`);
+    for (const { connectionId, language, itemId } of sides) {
+      this.invalidateItemDetails(connectionId, language, itemId);
+    }
+
+    try {
+      const requests = sides.map(({ side, connectionId, itemId }) =>
+        this.loadAndPostItemDetails(side, connectionId, itemId),
+      );
+      if (this.selectedFieldDiffItemMatchesIds(leftItemId, rightItemId)) {
+        requests.push(this.refreshFieldDiffView());
+      }
+      await Promise.all(requests);
+      this.log.info(`Finished refreshing comparison item ${rowKey}.`);
+    } finally {
+      await this.panel?.webview.postMessage({ type: "itemRefreshFinished", rowKey });
+    }
+  }
+
+  private invalidateItemDetails(
+    connectionId: string,
+    language: string,
+    itemId: string,
+  ): void {
+    const cacheKey = this.itemDetailsCacheKey(connectionId, language, itemId);
+    this.itemDetailsCache.delete(cacheKey);
+    this.pendingItemDetails.delete(cacheKey);
+  }
+
+  private selectedFieldDiffItemMatchesPlans(
+    leftPlan: readonly RefreshPlanEntry[],
+    rightPlan: readonly RefreshPlanEntry[],
+  ): boolean {
+    const leftItemId = this.selectedFieldDiffItem?.leftItemId;
+    const rightItemId = this.selectedFieldDiffItem?.rightItemId;
+    return Boolean(
+      (leftItemId && leftPlan.some(
+          (entry) => normalizeItemId(entry.itemId) === normalizeItemId(leftItemId),
+        )) ||
+      (rightItemId && rightPlan.some(
+        (entry) => normalizeItemId(entry.itemId) === normalizeItemId(rightItemId),
+      )),
+    );
+  }
+
+  private selectedFieldDiffItemMatchesIds(
+    leftItemId: string | undefined,
+    rightItemId: string | undefined,
+  ): boolean {
+    const selected = this.selectedFieldDiffItem;
+    return Boolean(
+      selected && (
+        (selected.leftItemId && leftItemId &&
+          normalizeItemId(selected.leftItemId) === normalizeItemId(leftItemId)) ||
+        (selected.rightItemId && rightItemId &&
+          normalizeItemId(selected.rightItemId) === normalizeItemId(rightItemId))
+      ),
+    );
   }
 
   private async refreshStateAndTrees(): Promise<void> {
@@ -747,7 +934,9 @@ export class ComparisonPanelManager implements vscode.Disposable {
     request = this.authoringClient
       .loadItemDetails(connection, clientSecret, itemId, language, controller.signal)
       .then((details) => {
-        this.itemDetailsCache.set(cacheKey, details);
+        if (this.pendingItemDetails.get(cacheKey) === request) {
+          this.itemDetailsCache.set(cacheKey, details);
+        }
         return details;
       })
       .finally(() => {
@@ -1065,7 +1254,9 @@ export class ComparisonPanelManager implements vscode.Disposable {
     request = this.authoringClient
       .loadTreeLevel(connection, clientSecret, locator, language, controller.signal)
       .then((level) => {
-        this.treeLevelCache.set(cacheKey, level);
+        if (this.pendingTreeLevels.get(cacheKey) === request) {
+          this.treeLevelCache.set(cacheKey, level);
+        }
         return level;
       })
       .finally(() => {

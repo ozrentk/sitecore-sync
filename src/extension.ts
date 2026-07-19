@@ -123,9 +123,12 @@ export function activate(context: vscode.ExtensionContext): void {
       for (const provider of providers) {
         provider.refresh();
       }
-      await vscode.window.showInformationMessage(
-        "Refresh All is ready for the XM Cloud traversal implementation.",
-      );
+      const requested = await comparisonPanelManager.refreshAll();
+      if (!requested) {
+        await vscode.window.showInformationMessage(
+          "Open an XM Cloud comparison before refreshing its loaded data.",
+        );
+      }
     }),
     vscode.commands.registerCommand("xmCloudSync.openProductSpec", async () => {
       const document = await vscode.workspace.openTextDocument(

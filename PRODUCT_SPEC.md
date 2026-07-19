@@ -87,7 +87,7 @@ When a comparison opens, each side loads the configured root item and all of its
 
 The two snapshots are rendered as one paired-row tree rather than two independently scrolling controls. A row owns the shared selection and expanded state. Expanding it loads the corresponding level on both available sides concurrently; a left-only or right-only row loads only its existing side.
 
-The paired-row context menu provides **Refresh Subtree**. It invalidates the selected level and all descendant levels currently present in the lazy snapshot, then re-reads them in parent-before-child order. Rows belonging to that loaded subtree are locked and visually marked until the refresh completes. Refreshes may run concurrently only when their loaded item sets do not overlap.
+The paired-row context menu provides **Refresh Item** and **Refresh Subtree**. Item refresh invalidates and re-reads the selected pair's template, latest version, and fields without replacing its loaded child tree. Subtree refresh invalidates the selected level and all descendant levels currently present in the lazy snapshot, then re-reads them in parent-before-child order. Rows belonging to the affected scope are locked and visually marked until refresh completes. If the visible **Field Diff** panel is showing an affected item, its snapshot refreshes immediately. Refreshes may run concurrently only when their loaded item sets do not overlap.
 
 Within loaded data, items are paired by normalized item ID regardless of their loaded path. Items with the same path but different IDs share a conflict row and retain both `Only left` and `Only right` identity flags. The left child order is primary, while right-only rows are inserted before the nearest following matched right-side item when possible.
 
@@ -97,7 +97,7 @@ Context commands for the MVP:
 - `Refresh Subtree`
 - `Refresh All`
 
-`Refresh All` will greedily re-read the entire configured root subtree. Internally it uses iterative, paginated traversal; pagination is a transport detail and does not make the visible operation lazy.
+`Refresh All` greedily re-reads the entire configured root subtree and its field data. It is available from the comparison toolbar and the global **XM Cloud Sync: Refresh All** command. A native warning requires confirmation before traversal starts, and cancellable notification progress reports loaded levels. Internally it uses iterative, paginated traversal; pagination is a transport detail and does not make the visible operation lazy.
 
 `Clear Connection Cache` is reserved for a later release.
 
