@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.5.3
+
+- Reassigned compact item-difference symbols to `C` for child presence, `T` for template, `V` for selected-language version availability, and `*` for field differences.
+- Clarified the field-difference tooltip as **At least one field differs between these items**.
+
 ## 0.5.2
 
 - Added field-comparison lifecycle status to item tooltips without introducing visible equal, unchecked, or field-loading markers.
