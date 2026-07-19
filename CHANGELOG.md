@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.4.2
+
+- Treated a null filtered-field collection on an existing Authoring item as zero non-Standard fields.
+- Kept a null item response as an explicit item lookup failure while classifying fields.
+
 ## 0.4.1
 
 - Removed expand controls from items that have no children on either comparison side.

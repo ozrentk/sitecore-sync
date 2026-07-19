@@ -329,9 +329,13 @@ export class AuthoringContentClient {
         { where, pageSize: 100, after: after ?? null },
         signal,
       );
-      const fields = payload.data?.item?.fields;
+      const item = payload.data?.item;
+      if (!item) {
+        throw new Error("The requested Authoring item was not found while classifying fields.");
+      }
+      const fields = item.fields;
       if (!fields) {
-        throw new Error("Authoring API response did not contain non-Standard fields.");
+        return fieldIds;
       }
       for (const field of fields.nodes ?? []) {
         if (typeof field.fieldId !== "string") {
