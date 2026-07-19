@@ -47,6 +47,7 @@ interface RefreshPlanEntry {
   readonly itemId: string;
   readonly path: string;
   readonly depth: number;
+  readonly loadLevel: boolean;
 }
 
 interface TraversalEntry {
@@ -678,7 +679,9 @@ export class ComparisonPanelManager implements vscode.Disposable {
       for (let depth = 0; depth <= maximumDepth; depth += 1) {
         const requests: Promise<void>[] = [];
         for (const { side, connectionId, plan } of sides) {
-          for (const entry of plan.filter((candidate) => candidate.depth === depth)) {
+          for (const entry of plan.filter(
+            (candidate) => candidate.depth === depth && candidate.loadLevel,
+          )) {
             requests.push(
               this.loadTreeLevel(
                 side,
@@ -1522,7 +1525,15 @@ function parseRefreshPlan(value: unknown): readonly RefreshPlanEntry[] {
     ) {
       return [];
     }
-    entries.push({ itemId: entry.itemId, path: entry.path, depth: entry.depth });
+    if (typeof entry.loadLevel !== "boolean") {
+      return [];
+    }
+    entries.push({
+      itemId: entry.itemId,
+      path: entry.path,
+      depth: entry.depth,
+      loadLevel: entry.loadLevel,
+    });
   }
   return entries;
 }
