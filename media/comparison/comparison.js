@@ -1,8 +1,9 @@
 const vscode = acquireVsCodeApi();
 
-function emptyTreeState(connectionId) {
+function emptyTreeState(connectionId, language) {
   return {
     connectionId,
+    language,
     root: undefined,
     loading: false,
     error: undefined,
@@ -12,11 +13,16 @@ function emptyTreeState(connectionId) {
 const state = {
   connections: [],
   selection: {},
+  languages: {
+    left: { connectionId: undefined, values: [], loading: false, error: undefined },
+    right: { connectionId: undefined, values: [], loading: false, error: undefined },
+  },
   trees: {
     left: emptyTreeState(undefined),
     right: emptyTreeState(undefined),
   },
   expandedRows: new Set(),
+  detailExpandedRows: new Set(),
   selectedRowKey: undefined,
   rootRowKey: undefined,
   loadedItems: {
@@ -25,17 +31,102 @@ const state = {
   },
   refreshOperations: new Map(),
   subtreeLoadOperations: new Map(),
+  showAllStandardFields: false,
+  textNormalization: "none",
 };
 
 let contextMenu;
 
 const leftSelect = document.getElementById("left-connection");
 const rightSelect = document.getElementById("right-connection");
+const leftLanguageSelect = document.getElementById("left-language");
+const rightLanguageSelect = document.getElementById("right-language");
 const swapButton = document.getElementById("swap");
+const showAllFieldsInput = document.getElementById("show-all-fields");
 const workspace = document.getElementById("workspace");
 
 function normalizeItemId(itemId) {
   return itemId.replace(/[{}-]/g, "").toLowerCase();
+}
+
+function normalizedFieldValue(value) {
+  return state.textNormalization === "lineEndings"
+    ? value.replace(/\r\n?|\n/g, "\n")
+    : value;
+}
+
+function fieldSource(field) {
+  if (!field) {
+    return "missing";
+  }
+  if (field.containsFallbackValue) {
+    return "fallback";
+  }
+  if (field.containsInheritedValue) {
+    return "inherited";
+  }
+  if (field.containsStandardValue) {
+    return "standard";
+  }
+  return "stored";
+}
+
+function hasSelectedLanguageVersion(details) {
+  return details.availableVersions.some((candidate) =>
+    candidate.language.toLowerCase() === details.language.toLowerCase() && candidate.version > 0,
+  );
+}
+
+function createFieldPair(left, right) {
+  const flags = [];
+  if (!left) {
+    flags.push("onlyRight");
+  } else if (!right) {
+    flags.push("onlyLeft");
+  } else {
+    if (left.name !== right.name || left.label !== right.label) {
+      flags.push("fieldNameMismatch");
+    }
+    if (left.typeKey.toLowerCase() !== right.typeKey.toLowerCase()) {
+      flags.push("fieldTypeMismatch");
+    }
+    if (left.scope !== right.scope) {
+      flags.push("fieldScopeMismatch");
+    }
+    if (normalizedFieldValue(left.value) !== normalizedFieldValue(right.value)) {
+      flags.push("fieldValueMismatch");
+    }
+    if (fieldSource(left) !== fieldSource(right)) {
+      flags.push("fieldSourceMismatch");
+    }
+  }
+  return {
+    key: normalizeItemId(left?.fieldId ?? right.fieldId),
+    left,
+    right,
+    flags,
+    isStandardTemplate: (left?.isStandardTemplate ?? true) && (right?.isStandardTemplate ?? true),
+  };
+}
+
+function pairFields(leftFields, rightFields) {
+  const rightById = new Map(
+    rightFields.map((field) => [normalizeItemId(field.fieldId), field]),
+  );
+  const usedRight = new Set();
+  const pairs = leftFields.map((left) => {
+    const right = rightById.get(normalizeItemId(left.fieldId));
+    if (right) {
+      usedRight.add(right);
+    }
+    return createFieldPair(left, right);
+  });
+  for (const right of rightFields) {
+    if (!usedRight.has(right)) {
+      pairs.push(createFieldPair(undefined, right));
+    }
+  }
+  return pairs;
 }
 
 function connectionById(id) {
@@ -63,6 +154,34 @@ function renderOptions(select, selectedId) {
   }
 }
 
+function renderLanguageOptions(side, select, selectedLanguage) {
+  const languageState = state.languages[side];
+  select.replaceChildren();
+  const values = [...languageState.values];
+  if (selectedLanguage && !values.some((language) => language.name === selectedLanguage)) {
+    values.unshift({ name: selectedLanguage, displayName: selectedLanguage });
+  }
+  if (!values.length) {
+    const option = document.createElement("option");
+    option.value = selectedLanguage || "en";
+    option.textContent = languageState.loading ? "Loading languages…" : selectedLanguage || "en";
+    select.append(option);
+    select.disabled = true;
+    return;
+  }
+  for (const language of values) {
+    const option = document.createElement("option");
+    option.value = language.name;
+    option.textContent = language.displayName && language.displayName !== language.name
+      ? `${language.displayName} (${language.name})`
+      : language.name;
+    option.selected = language.name === selectedLanguage;
+    select.append(option);
+  }
+  select.disabled = languageState.loading;
+  select.title = languageState.error || "Select content language";
+}
+
 function createButton(label, onClick) {
   const button = document.createElement("button");
   button.className = "primary";
@@ -88,6 +207,15 @@ function requestChildren(side, node) {
   }
 }
 
+function requestItemDetails(side, node) {
+  const connectionId = state.trees[side].connectionId;
+  if (connectionId && !node.detailsLoaded && !node.detailsLoading) {
+    node.detailsLoading = true;
+    node.detailsError = undefined;
+    vscode.postMessage({ type: "loadItemDetails", side, connectionId, itemId: node.itemId });
+  }
+}
+
 function createTreeNode(item) {
   return {
     ...item,
@@ -95,6 +223,10 @@ function createTreeNode(item) {
     childrenLoaded: false,
     loading: false,
     error: undefined,
+    details: undefined,
+    detailsLoaded: false,
+    detailsLoading: false,
+    detailsError: undefined,
   };
 }
 
@@ -153,6 +285,17 @@ function createPair(left, right, relationship = "identity") {
     }
     if (left.hasChildren !== right.hasChildren) {
       flags.push("childPresenceMismatch");
+    }
+    if (left.detailsLoaded && right.detailsLoaded) {
+      if (normalizeItemId(left.details.template.templateId) !== normalizeItemId(right.details.template.templateId)) {
+        flags.push("templateMismatch");
+      }
+      if (hasSelectedLanguageVersion(left.details) !== hasSelectedLanguageVersion(right.details)) {
+        flags.push("languageAvailabilityMismatch");
+      }
+      if (pairFields(left.details.fields, right.details.fields).some((fieldPair) => fieldPair.flags.length)) {
+        flags.push("contentMismatch");
+      }
     }
   }
 
@@ -247,7 +390,7 @@ function pairChildren(leftChildren, rightChildren) {
 }
 
 function pairCanExpand(pair) {
-  return pair.left?.hasChildren === true || pair.right?.hasChildren === true;
+  return Boolean(pair.left || pair.right);
 }
 
 function nodeReady(node) {
@@ -265,7 +408,8 @@ function pairLevelsLoaded(pair) {
 }
 
 function pairLoading(pair) {
-  return pair.left?.loading === true || pair.right?.loading === true;
+  return pair.left?.loading === true || pair.right?.loading === true ||
+    pair.left?.detailsLoading === true || pair.right?.detailsLoading === true;
 }
 
 function pairHasError(pair) {
@@ -275,6 +419,9 @@ function pairHasError(pair) {
 function loadMissingPairLevels(pair) {
   for (const side of ["left", "right"]) {
     const node = pair[side];
+    if (node && state.detailExpandedRows.has(pair.key)) {
+      requestItemDetails(side, node);
+    }
     if (node?.hasChildren && !node.childrenLoaded && !node.loading && !node.error) {
       requestChildren(side, node);
     }
@@ -309,6 +456,9 @@ const flagPresentation = {
   pathMismatch: { label: "P", title: "The same item ID has different paths" },
   nameMismatch: { label: "N", title: "The item name or display name differs" },
   childPresenceMismatch: { label: "T", title: "Child presence differs" },
+  templateMismatch: { label: "TPL", title: "Item templates differ" },
+  languageAvailabilityMismatch: { label: "LNG", title: "The selected language exists on only one side" },
+  contentMismatch: { label: "C", title: "One or more fields differ" },
 };
 
 function createLegendGroup(flags, kind) {
@@ -336,6 +486,7 @@ function togglePairExpansion(pair) {
     state.expandedRows.delete(pair.key);
   } else {
     state.expandedRows.add(pair.key);
+    state.detailExpandedRows.add(pair.key);
     loadMissingPairLevels(pair);
   }
   render();
@@ -350,6 +501,7 @@ function expandPairItem(pair) {
     return;
   }
   state.expandedRows.add(pair.key);
+  state.detailExpandedRows.add(pair.key);
   loadMissingPairLevels(pair);
   closeContextMenu();
   render();
@@ -393,7 +545,7 @@ function findLoadedPair(rowKey) {
   return visit(createPair(leftRoot, rightRoot, "root"));
 }
 
-function expandLoadedSubtree(rowKey) {
+function expandLoadedSubtree(rowKey, includeDetails = false) {
   const rootPair = findLoadedPair(rowKey);
   if (!rootPair) {
     return;
@@ -403,6 +555,9 @@ function expandLoadedSubtree(rowKey) {
       return;
     }
     state.expandedRows.add(pair.key);
+    if (includeDetails) {
+      state.detailExpandedRows.add(pair.key);
+    }
     for (const childPair of pairChildren(
       pair.left?.children ?? [],
       pair.right?.children ?? [],
@@ -472,7 +627,7 @@ function subtreeIsLoading(node) {
   if (!node) {
     return false;
   }
-  return node.loading || node.children.some(subtreeIsLoading);
+  return node.loading || node.detailsLoading || node.children.some(subtreeIsLoading);
 }
 
 function clearNodeLoadingState(node) {
@@ -480,6 +635,7 @@ function clearNodeLoadingState(node) {
     return;
   }
   node.loading = false;
+  node.detailsLoading = false;
   for (const child of node.children) {
     clearNodeLoadingState(child);
   }
@@ -492,6 +648,8 @@ function startSubtreeRefresh(pair) {
   }
 
   state.refreshOperations.set(pair.key, { itemIds });
+  clearNodeDetails(pair.left);
+  clearNodeDetails(pair.right);
   vscode.postMessage({
     type: "refreshSubtree",
     rowKey: pair.key,
@@ -639,6 +797,9 @@ function createDifferenceBadges(flags) {
     "pathMismatch",
     "nameMismatch",
     "childPresenceMismatch",
+    "templateMismatch",
+    "languageAvailabilityMismatch",
+    "contentMismatch",
   ].filter((flag) => flags.includes(flag));
 
   if (identityFlags.length) {
@@ -658,8 +819,9 @@ function createConnectionFooter() {
     const connection = connectionById(connectionId);
     const url = document.createElement("span");
     url.className = `connection-url ${side}`;
-    url.textContent = connection?.serverUrl ?? "";
-    url.title = connection?.serverUrl ?? "";
+    const language = state.selection[`${side}Language`] ?? "";
+    url.textContent = connection ? `${connection.serverUrl} · ${language}` : "";
+    url.title = connection ? `${connection.serverUrl}\nLanguage: ${language}` : "";
     footer.append(url);
     if (side === "left") {
       const gutter = document.createElement("span");
@@ -697,6 +859,186 @@ function createItemCell(node, side, depth) {
   }
   cell.append(name);
   return cell;
+}
+
+function clearNodeDetails(node) {
+  if (!node) {
+    return;
+  }
+  node.details = undefined;
+  node.detailsLoaded = false;
+  node.detailsLoading = false;
+  node.detailsError = undefined;
+  for (const child of node.children) {
+    clearNodeDetails(child);
+  }
+}
+
+function createDetailCell(text, side, depth, className = "") {
+  const cell = document.createElement("div");
+  cell.className = `comparison-cell detail-cell ${side} ${className}`.trim();
+  cell.style.setProperty("--tree-depth", String(depth));
+  cell.textContent = text || "—";
+  if (!text) {
+    cell.classList.add("missing");
+  }
+  return cell;
+}
+
+function createTemplateRow(pair, depth) {
+  const row = document.createElement("div");
+  row.className = "comparison-row detail-row template-row";
+  const left = pair.left?.details?.template;
+  const right = pair.right?.details?.template;
+  const different = left && right
+    ? normalizeItemId(left.templateId) !== normalizeItemId(right.templateId)
+    : Boolean(left || right);
+  if (different) {
+    row.classList.add("different");
+  }
+  const leftCell = createDetailCell(left ? `Template: ${left.name}` : "", "left", depth, "template-cell");
+  const rightCell = createDetailCell(right ? `Template: ${right.name}` : "", "right", depth, "template-cell");
+  if (left) {
+    leftCell.title = `Template ID: ${left.templateId}`;
+  }
+  if (right) {
+    rightCell.title = `Template ID: ${right.templateId}`;
+  }
+  const control = document.createElement("div");
+  control.className = "row-control detail-control";
+  control.textContent = different ? "TPL" : "";
+  control.title = different ? "Item templates differ" : "Templates match";
+  row.append(leftCell, control, rightCell);
+  return row;
+}
+
+function fieldTooltip(field) {
+  if (!field) {
+    return "Field is missing.";
+  }
+  return [
+    `Field ID: ${field.fieldId}`,
+    `Type: ${field.type}`,
+    `Scope: ${field.scope.toLowerCase()}`,
+    `Source: ${fieldSource(field)}`,
+    field.sectionName ? `Section: ${field.sectionName}` : undefined,
+    `Value: ${field.value || "(empty)"}`,
+  ].filter(Boolean).join("\n");
+}
+
+function createFieldCell(field, side, depth, fieldPair) {
+  const cell = document.createElement("button");
+  cell.type = "button";
+  cell.className = `comparison-cell detail-cell field-cell ${side}`;
+  cell.style.setProperty("--tree-depth", String(depth));
+  if (!field) {
+    cell.classList.add("missing");
+    cell.textContent = "—";
+    cell.title = `Field is missing on the ${side}.`;
+    return cell;
+  }
+  const name = document.createElement("span");
+  name.className = "field-name";
+  name.textContent = field.label || field.name;
+  if (field.scope !== "VERSIONED") {
+    const scope = document.createElement("span");
+    scope.className = `field-scope ${field.scope.toLowerCase()}`;
+    scope.textContent = field.scope === "SHARED" ? "S" : "U";
+    scope.title = field.scope === "SHARED"
+      ? "Shared across all languages and versions"
+      : "Unversioned: one value per language";
+    name.append(scope);
+  }
+  const value = document.createElement("span");
+  value.className = "field-value";
+  value.textContent = field.value || "(empty)";
+  cell.title = fieldTooltip(field);
+  if (fieldPair.flags.includes("fieldTypeMismatch")) {
+    const type = document.createElement("span");
+    type.className = "field-type";
+    type.textContent = field.type;
+    cell.append(name, type, value);
+  } else {
+    cell.append(name, value);
+  }
+  return cell;
+}
+
+const fieldFlagPresentation = {
+  onlyLeft: "L",
+  onlyRight: "R",
+  fieldNameMismatch: "Name",
+  fieldTypeMismatch: "Type",
+  fieldScopeMismatch: "Scope",
+  fieldValueMismatch: "≠",
+  fieldSourceMismatch: "Source",
+};
+
+function createFieldRow(fieldPair, itemPair, depth) {
+  const row = document.createElement("div");
+  row.className = "comparison-row detail-row field-row";
+  if (fieldPair.flags.length) {
+    row.classList.add("different");
+  }
+  const control = document.createElement("div");
+  control.className = "row-control detail-control field-flags";
+  for (const flag of fieldPair.flags) {
+    const badge = document.createElement("span");
+    badge.className = "field-difference";
+    badge.textContent = fieldFlagPresentation[flag];
+    badge.title = flag.replace(/^field/, "Field ").replace(/Mismatch$/, " differs");
+    control.append(badge);
+  }
+  const leftCell = createFieldCell(fieldPair.left, "left", depth, fieldPair);
+  const rightCell = createFieldCell(fieldPair.right, "right", depth, fieldPair);
+  const canDiff = fieldPair.flags.length &&
+    (fieldPair.left?.textual || fieldPair.right?.textual) &&
+    itemPair.left && itemPair.right;
+  if (canDiff) {
+    for (const cell of [leftCell, rightCell]) {
+      cell.classList.add("diff-launch");
+      cell.title += "\nClick to open text diff.";
+      cell.addEventListener("click", () => {
+        vscode.postMessage({
+          type: "openFieldDiff",
+          leftItemId: itemPair.left.itemId,
+          rightItemId: itemPair.right.itemId,
+          fieldId: fieldPair.left?.fieldId ?? fieldPair.right.fieldId,
+        });
+      });
+    }
+  }
+  row.append(leftCell, control, rightCell);
+  return row;
+}
+
+function createDetailsStatus(pair) {
+  const row = document.createElement("div");
+  row.className = "comparison-inline-status detail-status";
+  for (const side of ["left", "right"]) {
+    const node = pair[side];
+    const status = document.createElement("div");
+    status.className = `inline-side-status ${side}`;
+    if (node?.detailsError) {
+      const message = document.createElement("span");
+      message.className = "error-text";
+      message.textContent = node.detailsError;
+      const retry = document.createElement("button");
+      retry.type = "button";
+      retry.textContent = "Retry";
+      retry.addEventListener("click", () => requestItemDetails(side, node));
+      status.append(message, retry);
+    } else if (node?.detailsLoading || (node && !node.detailsLoaded)) {
+      const spinner = document.createElement("span");
+      spinner.className = "spinner";
+      status.append(spinner, document.createTextNode("Loading fields…"));
+    }
+    row.append(status);
+    if (side === "left") {
+      row.append(document.createElement("div"));
+    }
+  }
+  return row;
 }
 
 function createRowControl(pair, refreshing, refreshRoot) {
@@ -804,6 +1146,46 @@ function renderPair(pair, depth, ancestorRefreshing = false) {
   if (!refreshing) {
     loadMissingPairLevels(pair);
   }
+
+  const detailsReady = [pair.left, pair.right].every((node) =>
+    !node || node.detailsLoaded || Boolean(node.detailsError),
+  );
+  const showDetails = state.detailExpandedRows.has(pair.key) || detailsReady;
+  if (showDetails && !detailsReady) {
+    fragment.append(createDetailsStatus(pair));
+  } else if (showDetails) {
+    fragment.append(createTemplateRow(pair, depth + 1));
+    const fieldPairs = pairFields(
+      pair.left?.details?.fields ?? [],
+      pair.right?.details?.fields ?? [],
+    );
+    let hiddenStandardFieldCount = 0;
+    for (const fieldPair of fieldPairs) {
+      if (
+        !state.showAllStandardFields &&
+        fieldPair.isStandardTemplate &&
+        !fieldPair.flags.length
+      ) {
+        hiddenStandardFieldCount += 1;
+        continue;
+      }
+      fragment.append(createFieldRow(fieldPair, pair, depth + 1));
+    }
+    if (hiddenStandardFieldCount) {
+      const hiddenRow = document.createElement("div");
+      hiddenRow.className = "comparison-inline-status hidden-fields-status";
+      const message = `${hiddenStandardFieldCount} equal Standard Template field${hiddenStandardFieldCount === 1 ? "" : "s"} hidden`;
+      const left = document.createElement("div");
+      left.className = "inline-side-status";
+      left.textContent = message;
+      const right = document.createElement("div");
+      right.className = "inline-side-status";
+      right.textContent = message;
+      hiddenRow.append(left, document.createElement("div"), right);
+      fragment.append(hiddenRow);
+    }
+  }
+
   if (!pairReady(pair) || pairHasError(pair)) {
     const statusRow = document.createElement("div");
     statusRow.className = "comparison-inline-status";
@@ -851,6 +1233,7 @@ function createComparisonWorkspace() {
     if (state.rootRowKey !== rootPair.key) {
       state.rootRowKey = rootPair.key;
       state.expandedRows.add(rootPair.key);
+      state.detailExpandedRows.add(rootPair.key);
     }
     tree.append(renderPair(rootPair, 0));
   }
@@ -863,15 +1246,18 @@ function render() {
   refreshLoadedItemIndexes();
   renderOptions(leftSelect, state.selection.leftConnectionId);
   renderOptions(rightSelect, state.selection.rightConnectionId);
-  swapButton.disabled = state.connections.length < 2;
+  renderLanguageOptions("left", leftLanguageSelect, state.selection.leftLanguage);
+  renderLanguageOptions("right", rightLanguageSelect, state.selection.rightLanguage);
+  showAllFieldsInput.checked = state.showAllStandardFields;
+  swapButton.disabled = state.connections.length < 1;
 
-  if (state.connections.length < 2) {
+  if (state.connections.length < 1) {
     const empty = document.createElement("div");
     empty.className = "empty comparison-empty";
     const content = document.createElement("div");
     content.className = "empty-content";
     const message = document.createElement("p");
-    message.textContent = "You need at least two XM Cloud connections to compare content.";
+    message.textContent = "Add an XM Cloud connection to compare content.";
     content.append(
       message,
       createButton("Add Connection", () => vscode.postMessage({ type: "addConnection" })),
@@ -888,13 +1274,26 @@ function updateTreeConnections() {
   let changed = false;
   for (const side of ["left", "right"]) {
     const connectionId = state.selection[`${side}ConnectionId`];
-    if (state.trees[side].connectionId !== connectionId) {
-      state.trees[side] = emptyTreeState(connectionId);
+    const language = state.selection[`${side}Language`];
+    if (
+      state.trees[side].connectionId !== connectionId ||
+      state.trees[side].language !== language
+    ) {
+      state.trees[side] = emptyTreeState(connectionId, language);
       changed = true;
+    }
+    if (state.languages[side].connectionId !== connectionId) {
+      state.languages[side] = {
+        connectionId,
+        values: [],
+        loading: false,
+        error: undefined,
+      };
     }
   }
   if (changed) {
     state.expandedRows.clear();
+    state.detailExpandedRows.clear();
     state.selectedRowKey = undefined;
     state.rootRowKey = undefined;
     state.refreshOperations.clear();
@@ -905,7 +1304,7 @@ function updateTreeConnections() {
 
 function applyLoadedLevel(message) {
   const tree = state.trees[message.side];
-  if (!tree || tree.connectionId !== message.connectionId) {
+  if (!tree || tree.connectionId !== message.connectionId || tree.language !== message.language) {
     return;
   }
 
@@ -932,7 +1331,7 @@ function applyLoadedLevel(message) {
 
 function applyLoading(message) {
   const tree = state.trees[message.side];
-  if (!tree || tree.connectionId !== message.connectionId) {
+  if (!tree || tree.connectionId !== message.connectionId || tree.language !== message.language) {
     return;
   }
   if (!message.requestedItemId) {
@@ -949,7 +1348,7 @@ function applyLoading(message) {
 
 function applyLoadFailure(message) {
   const tree = state.trees[message.side];
-  if (!tree || tree.connectionId !== message.connectionId) {
+  if (!tree || tree.connectionId !== message.connectionId || tree.language !== message.language) {
     return;
   }
   if (!message.requestedItemId) {
@@ -961,6 +1360,39 @@ function applyLoadFailure(message) {
   if (node) {
     node.loading = false;
     node.error = message.message;
+  }
+}
+
+function applyLanguagesMessage(message, status) {
+  const languageState = state.languages[message.side];
+  if (!languageState || languageState.connectionId !== message.connectionId) {
+    return;
+  }
+  languageState.loading = status === "loading";
+  languageState.error = status === "failed" ? message.message : undefined;
+  if (status === "loaded") {
+    languageState.values = message.languages;
+  }
+}
+
+function applyItemDetailsMessage(message, status) {
+  const tree = state.trees[message.side];
+  if (
+    !tree ||
+    tree.connectionId !== message.connectionId ||
+    tree.language !== message.language
+  ) {
+    return;
+  }
+  const node = findNode(tree.root, message.itemId);
+  if (!node) {
+    return;
+  }
+  node.detailsLoading = status === "loading";
+  node.detailsError = status === "failed" ? message.message : undefined;
+  if (status === "loaded") {
+    node.details = message.details;
+    node.detailsLoaded = true;
   }
 }
 
@@ -980,6 +1412,27 @@ rightSelect.addEventListener("change", () => {
   });
 });
 
+leftLanguageSelect.addEventListener("change", () => {
+  vscode.postMessage({
+    type: "selectLanguage",
+    side: "left",
+    language: leftLanguageSelect.value,
+  });
+});
+
+rightLanguageSelect.addEventListener("change", () => {
+  vscode.postMessage({
+    type: "selectLanguage",
+    side: "right",
+    language: rightLanguageSelect.value,
+  });
+});
+
+showAllFieldsInput.addEventListener("change", () => {
+  state.showAllStandardFields = showAllFieldsInput.checked;
+  render();
+});
+
 swapButton.addEventListener("click", () => {
   vscode.postMessage({ type: "swapConnections" });
 });
@@ -989,13 +1442,26 @@ window.addEventListener("message", (event) => {
   if (message?.type === "stateChanged") {
     state.connections = message.connections;
     state.selection = message.selection;
+    state.textNormalization = message.textNormalization || "none";
     updateTreeConnections();
+  } else if (message?.type === "languagesLoading") {
+    applyLanguagesMessage(message, "loading");
+  } else if (message?.type === "languagesLoaded") {
+    applyLanguagesMessage(message, "loaded");
+  } else if (message?.type === "languagesLoadFailed") {
+    applyLanguagesMessage(message, "failed");
   } else if (message?.type === "treeLoading") {
     applyLoading(message);
   } else if (message?.type === "treeLoaded") {
     applyLoadedLevel(message);
   } else if (message?.type === "treeLoadFailed") {
     applyLoadFailure(message);
+  } else if (message?.type === "itemDetailsLoading") {
+    applyItemDetailsMessage(message, "loading");
+  } else if (message?.type === "itemDetailsLoaded") {
+    applyItemDetailsMessage(message, "loaded");
+  } else if (message?.type === "itemDetailsLoadFailed") {
+    applyItemDetailsMessage(message, "failed");
   } else if (message?.type === "subtreeRefreshFinished") {
     state.refreshOperations.delete(message.rowKey);
   } else if (message?.type === "subtreeLoadStarted") {
@@ -1015,13 +1481,13 @@ window.addEventListener("message", (event) => {
       operation.loadedLevels = message.loadedLevels;
     }
   } else if (message?.type === "subtreeLoadDepthLoaded") {
-    expandLoadedSubtree(message.rowKey);
+    expandLoadedSubtree(message.rowKey, true);
   } else if (message?.type === "subtreeLoadFinished") {
     const pair = findLoadedPair(message.rowKey);
     clearNodeLoadingState(pair?.left);
     clearNodeLoadingState(pair?.right);
     state.subtreeLoadOperations.delete(message.rowKey);
-    expandLoadedSubtree(message.rowKey);
+    expandLoadedSubtree(message.rowKey, true);
   } else {
     return;
   }

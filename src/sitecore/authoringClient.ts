@@ -1,6 +1,12 @@
 import type { XmCloudConnection } from "../connections/connection";
 import { print } from "graphql";
-import { testConnectionQuery, treeLevelQuery } from "./graphql/authoringQueries";
+import {
+  itemDetailsQuery,
+  languagesQuery,
+  nonStandardFieldIdsQuery,
+  testConnectionQuery,
+  treeLevelQuery,
+} from "./graphql/authoringQueries";
 import { SitecoreHttpClient, type SitecoreHttpLogger } from "./sitecoreHttpClient";
 
 const tokenEndpoint = "https://auth.sitecorecloud.io/oauth/token";
@@ -72,6 +78,81 @@ interface TreeLevelQueryResponse {
   readonly errors?: readonly GraphQlError[];
 }
 
+interface RawPageInfo {
+  readonly hasNextPage?: unknown;
+  readonly endCursor?: unknown;
+}
+
+interface RawLanguage {
+  readonly name?: unknown;
+  readonly displayName?: unknown;
+  readonly englishName?: unknown;
+  readonly nativeName?: unknown;
+}
+
+interface LanguagesQueryResponse {
+  readonly data?: {
+    readonly languages?: {
+      readonly nodes?: readonly RawLanguage[];
+      readonly pageInfo?: RawPageInfo;
+    };
+  };
+  readonly errors?: readonly GraphQlError[];
+}
+
+interface RawItemField {
+  readonly fieldId?: unknown;
+  readonly name?: unknown;
+  readonly label?: unknown;
+  readonly value?: unknown;
+  readonly containsFallbackValue?: unknown;
+  readonly containsInheritedValue?: unknown;
+  readonly containsStandardValue?: unknown;
+  readonly templateField?: {
+    readonly type?: unknown;
+    readonly typeKey?: unknown;
+    readonly versioning?: unknown;
+    readonly sortOrder?: unknown;
+    readonly section?: {
+      readonly name?: unknown;
+      readonly sortOrder?: unknown;
+    };
+  };
+}
+
+interface RawItemDetails {
+  readonly itemId?: unknown;
+  readonly path?: unknown;
+  readonly version?: unknown;
+  readonly language?: { readonly name?: unknown };
+  readonly template?: { readonly templateId?: unknown; readonly name?: unknown };
+  readonly versions?: readonly {
+    readonly language?: { readonly name?: unknown };
+    readonly version?: unknown;
+  }[];
+  readonly fields?: {
+    readonly nodes?: readonly RawItemField[];
+    readonly pageInfo?: RawPageInfo;
+  };
+}
+
+interface ItemDetailsQueryResponse {
+  readonly data?: { readonly item?: RawItemDetails | null };
+  readonly errors?: readonly GraphQlError[];
+}
+
+interface NonStandardFieldIdsQueryResponse {
+  readonly data?: {
+    readonly item?: {
+      readonly fields?: {
+        readonly nodes?: readonly { readonly fieldId?: unknown }[];
+        readonly pageInfo?: RawPageInfo;
+      };
+    } | null;
+  };
+  readonly errors?: readonly GraphQlError[];
+}
+
 export interface AuthoringTreeItem {
   readonly itemId: string;
   readonly name: string;
@@ -136,6 +217,162 @@ export class AuthoringContentClient {
     } while (after !== undefined);
 
     return { item, children };
+  }
+
+  async loadLanguages(
+    connection: XmCloudConnection,
+    clientSecret: string,
+    signal: AbortSignal,
+  ): Promise<readonly AuthoringLanguage[]> {
+    const accessToken = await this.getAccessToken(connection, clientSecret, signal);
+    const languages = new Map<string, AuthoringLanguage>();
+    const seenCursors = new Set<string>();
+    let after: string | undefined;
+
+    do {
+      const payload = await this.postGraphQl<LanguagesQueryResponse>(
+        connection.serverUrl,
+        accessToken,
+        "Sitecore Authoring languages query",
+        "XmCloudSyncLanguages",
+        print(languagesQuery),
+        { databaseName: "master", pageSize: 100, after: after ?? null },
+        signal,
+      );
+      const collection = payload.data?.languages;
+      if (!collection) {
+        throw new Error("Authoring API response did not contain the languages collection.");
+      }
+      for (const raw of collection.nodes ?? []) {
+        if (typeof raw.name !== "string") {
+          throw new Error("Authoring API returned an invalid language.");
+        }
+        languages.set(raw.name.toLowerCase(), {
+          name: raw.name,
+          displayName: typeof raw.displayName === "string" ? raw.displayName : raw.name,
+          englishName: typeof raw.englishName === "string" ? raw.englishName : raw.name,
+          nativeName: typeof raw.nativeName === "string" ? raw.nativeName : raw.name,
+        });
+      }
+      after = nextCursor(collection.pageInfo, "languages");
+      assertNewCursor(after, seenCursors, "languages");
+    } while (after !== undefined);
+
+    return [...languages.values()].sort((left, right) =>
+      left.name.localeCompare(right.name, undefined, { sensitivity: "base" }),
+    );
+  }
+
+  async loadItemDetails(
+    connection: XmCloudConnection,
+    clientSecret: string,
+    itemId: string,
+    language: string,
+    signal: AbortSignal,
+  ): Promise<AuthoringItemDetails> {
+    const accessToken = await this.getAccessToken(connection, clientSecret, signal);
+    const where = { database: "master", itemId, language };
+    const [rawDetails, nonStandardFieldIds] = await Promise.all([
+      this.loadItemDetailsPages(connection.serverUrl, accessToken, where, signal),
+      this.loadNonStandardFieldIds(connection.serverUrl, accessToken, where, signal),
+    ]);
+    return parseItemDetails(rawDetails, nonStandardFieldIds);
+  }
+
+  private async loadItemDetailsPages(
+    serverUrl: string,
+    accessToken: string,
+    where: Readonly<Record<string, unknown>>,
+    signal: AbortSignal,
+  ): Promise<RawItemDetails> {
+    const fields: RawItemField[] = [];
+    const seenCursors = new Set<string>();
+    let item: RawItemDetails | undefined;
+    let after: string | undefined;
+    do {
+      const payload = await this.postGraphQl<ItemDetailsQueryResponse>(
+        serverUrl,
+        accessToken,
+        "Sitecore Authoring item-details query",
+        "XmCloudSyncItemDetails",
+        print(itemDetailsQuery),
+        { where, pageSize: 100, after: after ?? null },
+        signal,
+      );
+      if (!payload.data?.item) {
+        throw new Error("The requested Authoring item was not found.");
+      }
+      item ??= payload.data.item;
+      fields.push(...(payload.data.item.fields?.nodes ?? []));
+      after = nextCursor(payload.data.item.fields?.pageInfo, "item fields");
+      assertNewCursor(after, seenCursors, "item fields");
+    } while (after !== undefined);
+    return { ...item, fields: { nodes: fields } };
+  }
+
+  private async loadNonStandardFieldIds(
+    serverUrl: string,
+    accessToken: string,
+    where: Readonly<Record<string, unknown>>,
+    signal: AbortSignal,
+  ): Promise<ReadonlySet<string>> {
+    const fieldIds = new Set<string>();
+    const seenCursors = new Set<string>();
+    let after: string | undefined;
+    do {
+      const payload = await this.postGraphQl<NonStandardFieldIdsQueryResponse>(
+        serverUrl,
+        accessToken,
+        "Sitecore Authoring non-Standard fields query",
+        "XmCloudSyncNonStandardFieldIds",
+        print(nonStandardFieldIdsQuery),
+        { where, pageSize: 100, after: after ?? null },
+        signal,
+      );
+      const fields = payload.data?.item?.fields;
+      if (!fields) {
+        throw new Error("Authoring API response did not contain non-Standard fields.");
+      }
+      for (const field of fields.nodes ?? []) {
+        if (typeof field.fieldId !== "string") {
+          throw new Error("Authoring API returned an invalid non-Standard field ID.");
+        }
+        fieldIds.add(normalizeGuid(field.fieldId));
+      }
+      after = nextCursor(fields.pageInfo, "non-Standard fields");
+      assertNewCursor(after, seenCursors, "non-Standard fields");
+    } while (after !== undefined);
+    return fieldIds;
+  }
+
+  private async postGraphQl<T extends { readonly errors?: readonly GraphQlError[] }>(
+    serverUrl: string,
+    accessToken: string,
+    requestName: string,
+    operationName: string,
+    query: string,
+    variables: Readonly<Record<string, unknown>>,
+    signal: AbortSignal,
+  ): Promise<T> {
+    const endpoint = new URL("/sitecore/api/authoring/graphql/v1/", serverUrl);
+    const response = await this.http.request(
+      endpoint,
+      {
+        method: "POST",
+        headers: {
+          authorization: `Bearer ${accessToken}`,
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({ operationName, query, variables }),
+      },
+      { name: requestName, signal, retryable: true },
+    );
+    const payload = await readJson<T>(response, "Authoring GraphQL endpoint");
+    if (!response.ok) {
+      throw new Error(`${requestName} failed (${response.status}).`);
+    }
+    throwForGraphQlErrors(payload.errors);
+    return payload;
   }
 
   clear(): void {
@@ -368,6 +605,43 @@ export class AuthoringContentClient {
   }
 }
 
+export interface AuthoringLanguage {
+  readonly name: string;
+  readonly displayName: string;
+  readonly englishName: string;
+  readonly nativeName: string;
+}
+
+export type AuthoringFieldScope = "VERSIONED" | "UNVERSIONED" | "SHARED";
+
+export interface AuthoringItemField {
+  readonly fieldId: string;
+  readonly name: string;
+  readonly label: string;
+  readonly value: string;
+  readonly type: string;
+  readonly typeKey: string;
+  readonly scope: AuthoringFieldScope;
+  readonly sortOrder: number;
+  readonly sectionName: string;
+  readonly sectionSortOrder: number;
+  readonly isStandardTemplate: boolean;
+  readonly containsFallbackValue: boolean;
+  readonly containsInheritedValue: boolean;
+  readonly containsStandardValue: boolean;
+  readonly textual: boolean;
+}
+
+export interface AuthoringItemDetails {
+  readonly itemId: string;
+  readonly path: string;
+  readonly language: string;
+  readonly version: number;
+  readonly template: { readonly templateId: string; readonly name: string };
+  readonly availableVersions: readonly { readonly language: string; readonly version: number }[];
+  readonly fields: readonly AuthoringItemField[];
+}
+
 function parseTreeItem(value: RawAuthoringTreeItem): AuthoringTreeItem {
   if (
     typeof value.itemId !== "string" ||
@@ -384,6 +658,116 @@ function parseTreeItem(value: RawAuthoringTreeItem): AuthoringTreeItem {
     path: value.path,
     hasChildren: value.hasChildren === true,
   };
+}
+
+function parseItemDetails(
+  value: RawItemDetails,
+  nonStandardFieldIds: ReadonlySet<string>,
+): AuthoringItemDetails {
+  if (
+    typeof value.itemId !== "string" ||
+    typeof value.path !== "string" ||
+    typeof value.language?.name !== "string" ||
+    typeof value.version !== "number" ||
+    typeof value.template?.templateId !== "string" ||
+    typeof value.template.name !== "string"
+  ) {
+    throw new Error("Authoring API returned invalid item details.");
+  }
+
+  const fields = (value.fields?.nodes ?? []).map((field): AuthoringItemField => {
+    const definition = field.templateField;
+    if (
+      typeof field.fieldId !== "string" ||
+      typeof field.name !== "string" ||
+      typeof field.value !== "string" ||
+      typeof definition?.type !== "string" ||
+      typeof definition.typeKey !== "string" ||
+      !isFieldScope(definition.versioning)
+    ) {
+      throw new Error("Authoring API returned an invalid item field.");
+    }
+    return {
+      fieldId: field.fieldId,
+      name: field.name,
+      label: typeof field.label === "string" && field.label ? field.label : field.name,
+      value: field.value,
+      type: definition.type,
+      typeKey: definition.typeKey,
+      scope: definition.versioning,
+      sortOrder: typeof definition.sortOrder === "number" ? definition.sortOrder : 0,
+      sectionName: typeof definition.section?.name === "string" ? definition.section.name : "",
+      sectionSortOrder:
+        typeof definition.section?.sortOrder === "number" ? definition.section.sortOrder : 0,
+      isStandardTemplate: !nonStandardFieldIds.has(normalizeGuid(field.fieldId)),
+      containsFallbackValue: field.containsFallbackValue === true,
+      containsInheritedValue: field.containsInheritedValue === true,
+      containsStandardValue: field.containsStandardValue === true,
+      textual: isTextualField(definition.typeKey, definition.type),
+    };
+  });
+
+  fields.sort((left, right) =>
+    left.sectionSortOrder - right.sectionSortOrder ||
+    left.sortOrder - right.sortOrder ||
+    left.name.localeCompare(right.name, undefined, { sensitivity: "base" }),
+  );
+
+  const availableVersions = (value.versions ?? [])
+    .filter(
+      (version): version is { readonly language: { readonly name: string }; readonly version: number } =>
+        typeof version.language?.name === "string" && typeof version.version === "number",
+    )
+    .map((version) => ({ language: version.language.name, version: version.version }));
+
+  return {
+    itemId: value.itemId,
+    path: value.path,
+    language: value.language.name,
+    version: value.version,
+    template: { templateId: value.template.templateId, name: value.template.name },
+    availableVersions,
+    fields,
+  };
+}
+
+function nextCursor(pageInfo: RawPageInfo | undefined, collectionName: string): string | undefined {
+  if (pageInfo?.hasNextPage !== true) {
+    return undefined;
+  }
+  if (typeof pageInfo.endCursor !== "string") {
+    throw new Error(`Authoring API reported another ${collectionName} page without a cursor.`);
+  }
+  return pageInfo.endCursor;
+}
+
+function assertNewCursor(
+  cursor: string | undefined,
+  seenCursors: Set<string>,
+  collectionName: string,
+): void {
+  if (!cursor) {
+    return;
+  }
+  if (seenCursors.has(cursor)) {
+    throw new Error(`Authoring API returned the same ${collectionName} cursor twice.`);
+  }
+  seenCursors.add(cursor);
+}
+
+function normalizeGuid(value: string): string {
+  return value.replace(/[{}-]/g, "").toLowerCase();
+}
+
+function isFieldScope(value: unknown): value is AuthoringFieldScope {
+  return value === "VERSIONED" || value === "UNVERSIONED" || value === "SHARED";
+}
+
+function isTextualField(typeKey: string, type: string): boolean {
+  const normalized = `${typeKey} ${type}`.toLowerCase();
+  return ["text", "html", "rich", "layout", "json", "xml", "code"].some((token) =>
+    normalized.includes(token),
+  );
 }
 
 function throwForGraphQlErrors(errors: readonly GraphQlError[] | undefined): void {
