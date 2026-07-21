@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.6.0
+
+- Added confirmed **Sync Subtree Left → Right…** and **Sync Subtree Right → Left…** actions to paired item rows.
+- Integrated Content Transfer and Item Transfer to preserve item IDs while synchronizing all descendants, languages, versions, and media chunks with `OverrideExistingItem`.
+- Added source-identity and destination-parent preflight checks, same-environment and path/ID conflict guards, asynchronous transfer-history tracking, and target refresh after completion.
+- Added secret-free execution journals beneath VS Code extension storage and retained pending transfer blobs instead of treating the polling window as failure.
+
 ## 0.5.3
 
 - Reassigned compact item-difference symbols to `C` for child presence, `T` for template, `V` for selected-language version availability, and `*` for field differences.

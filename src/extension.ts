@@ -40,6 +40,8 @@ export function activate(context: vscode.ExtensionContext): void {
   const authoringClient = new AuthoringContentClient(log);
   const comparisonPanelManager = new ComparisonPanelManager(
     context.extensionUri,
+    context.globalStorageUri,
+    String(context.extension.packageJSON.version ?? "unknown"),
     context.workspaceState,
     connectionStore,
     authoringClient,

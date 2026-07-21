@@ -41,6 +41,14 @@ For large Sitecore trees, right-click a paired item and choose **Expand All…**
 
 The paired-row context menu shows **Expand Item** or **Collapse Item** according to the selected row's current state, followed by **Expand Loaded Items** and **Expand All…**. A separator groups **Refresh Item** and **Refresh Subtree**. **Expand Loaded Items** recursively expands complete cached levels beneath the selected item without issuing Authoring API requests and does not change expansion elsewhere in the comparison. Partially loaded branches remain lazy.
 
+## Synchronize a subtree
+
+Right-click an item and choose **Sync Subtree Left → Right…** or **Sync Subtree Right → Left…**. After explicit confirmation, the extension transfers that item and all descendants with `OverrideExistingItem`. Content Transfer and Item Transfer preserve Sitecore item IDs and include every language and numbered version; the languages selected in the comparison only control the preflight lookup and refreshed comparison view.
+
+Subtree transfer is disabled when both sides point to the same XM Cloud environment or when the same path contains different item IDs. The complete `/sitecore` root is also excluded. The extension verifies that the source path still resolves to the item ID shown in the comparison and that the destination parent exists before starting the transfer.
+
+The progress notification remains open while Sitecore processes the transfer. Completed target blobs are cleaned up, while a transfer that remains pending is retained for later processing rather than being reported as failed. Finished transfers refresh the affected loaded target subtree. Every attempt writes a secret-free journal beneath the extension's global storage; the completion or error notification can open it directly.
+
 ### Difference legend
 
 | Badge | Meaning |

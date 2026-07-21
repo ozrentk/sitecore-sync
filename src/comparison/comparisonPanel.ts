@@ -41,6 +41,10 @@ interface WebviewMessage {
   readonly fieldId?: unknown;
   readonly leftName?: unknown;
   readonly rightName?: unknown;
+  readonly direction?: unknown;
+  readonly sourceItemId?: unknown;
+  readonly sourcePath?: unknown;
+  readonly targetRefreshPlan?: unknown;
 }
 
 interface RefreshPlanEntry {
@@ -88,12 +92,15 @@ export class ComparisonPanelManager implements vscode.Disposable {
   private readonly requestControllers = new Set<AbortController>();
   private readonly subtreeLoadControllers = new Map<string, AbortController>();
   private readonly pendingSubtreeConfirmations = new Set<string>();
+  private readonly syncingRows = new Set<string>();
   private readonly fieldDiffProvider = new FieldDiffContentProvider();
   private selectedFieldDiffItem: FieldDiffSelection | undefined;
   readonly fieldDiffViewProvider: FieldDiffViewProvider;
 
   constructor(
     private readonly extensionUri: vscode.Uri,
+    private readonly storageUri: vscode.Uri,
+    private readonly extensionVersion: string,
     private readonly workspaceState: vscode.Memento,
     private readonly connectionStore: ConnectionStore,
     private readonly authoringClient: AuthoringContentClient,
@@ -369,7 +376,195 @@ export class ComparisonPanelManager implements vscode.Disposable {
 
     if (message.type === "cancelSubtreeLoad" && typeof message.rowKey === "string") {
       this.cancelSubtreeLoad(message.rowKey);
+      return;
     }
+
+    if (
+      message.type === "syncSubtree" &&
+      typeof message.rowKey === "string" &&
+      (message.direction === "leftToRight" || message.direction === "rightToLeft") &&
+      typeof message.sourceItemId === "string" &&
+      typeof message.sourcePath === "string"
+    ) {
+      await this.syncSubtree(
+        message.rowKey,
+        message.direction,
+        message.sourceItemId,
+        message.sourcePath,
+        parseRefreshPlan(message.targetRefreshPlan),
+      );
+    }
+  }
+
+  private async syncSubtree(
+    rowKey: string,
+    direction: "leftToRight" | "rightToLeft",
+    sourceItemId: string,
+    sourcePath: string,
+    targetRefreshPlan: readonly RefreshPlanEntry[],
+  ): Promise<void> {
+    if (!this.panel || this.syncingRows.has(rowKey)) {
+      return;
+    }
+    const selection = this.getSelection();
+    const sourceSide: TreeSide = direction === "leftToRight" ? "left" : "right";
+    const targetSide: TreeSide = direction === "leftToRight" ? "right" : "left";
+    const sourceConnectionId = sourceSide === "left"
+      ? selection.leftConnectionId
+      : selection.rightConnectionId;
+    const targetConnectionId = targetSide === "left"
+      ? selection.leftConnectionId
+      : selection.rightConnectionId;
+    const sourceConnection = sourceConnectionId
+      ? this.connectionStore.get(sourceConnectionId)
+      : undefined;
+    const targetConnection = targetConnectionId
+      ? this.connectionStore.get(targetConnectionId)
+      : undefined;
+    if (!sourceConnection || !targetConnection) {
+      await vscode.window.showErrorMessage("Both comparison connections are required for sync.");
+      return;
+    }
+    if (sourcePath.replace(/\/$/u, "").toLowerCase() === authoringRootPath) {
+      await vscode.window.showInformationMessage(
+        "The complete /sitecore root cannot be synchronized as one subtree.",
+      );
+      return;
+    }
+    if (sourceConnection.serverUrl === targetConnection.serverUrl) {
+      await vscode.window.showInformationMessage(
+        "Subtree transfer is unavailable when both sides use the same XM Cloud environment.",
+      );
+      return;
+    }
+
+    const confirmed = await vscode.window.showWarningMessage(
+      `Sync ${sourcePath} and all descendants from “${sourceConnection.name}” to “${targetConnection.name}”? This transfers every language and version and overwrites matching target items using OverrideExistingItem.`,
+      { modal: true },
+      "Sync Subtree",
+    );
+    if (confirmed !== "Sync Subtree") {
+      return;
+    }
+
+    const [sourceSecret, targetSecret] = await Promise.all([
+      this.connectionStore.getClientSecret(sourceConnection.id),
+      this.connectionStore.getClientSecret(targetConnection.id),
+    ]);
+    if (!sourceSecret || !targetSecret) {
+      await vscode.window.showErrorMessage("A source or target client secret is missing.");
+      return;
+    }
+
+    const startedAt = new Date().toISOString();
+    const controller = new AbortController();
+    this.syncingRows.add(rowKey);
+    await this.panel.webview.postMessage({
+      type: "syncStarted",
+      rowKey,
+      targetItemIds: targetRefreshPlan.map((entry) => entry.itemId),
+    });
+    this.log.info(
+      `Synchronizing subtree ${sourcePath} from ${sourceConnection.name} to ${targetConnection.name}.`,
+    );
+    try {
+      const result = await vscode.window.withProgress(
+        {
+          location: vscode.ProgressLocation.Notification,
+          title: `Syncing ${sourcePath} to ${targetConnection.name}`,
+          cancellable: false,
+        },
+        () => this.authoringClient.transferSubtree(
+          sourceConnection,
+          sourceSecret,
+          targetConnection,
+          targetSecret,
+          sourcePath,
+          sourceItemId,
+          this.sideLanguage(sourceSide),
+          this.sideLanguage(targetSide),
+          controller.signal,
+        ),
+      );
+      const journalUri = await this.writeSyncJournal({
+        startedAt,
+        endedAt: new Date().toISOString(),
+        outcome: result.state === "Finished" ? "succeeded" : "pending",
+        sourceConnection: sourceConnection.name,
+        targetConnection: targetConnection.name,
+        sourcePath,
+        sourceItemId,
+        result,
+      });
+      if (result.state === "Finished") {
+        if (targetRefreshPlan.length) {
+          await this.refreshSubtree(
+            rowKey,
+            targetSide === "left" ? targetRefreshPlan : [],
+            targetSide === "right" ? targetRefreshPlan : [],
+          );
+        }
+        this.log.info(`Finished synchronizing subtree ${sourcePath}.`);
+        const action = await vscode.window.showInformationMessage(
+          `Synced ${sourcePath} to “${targetConnection.name}”.`,
+          "Open Journal",
+        );
+        if (action === "Open Journal") {
+          await vscode.window.showTextDocument(journalUri, { preview: false });
+        }
+      } else {
+        this.log.warn(`Subtree synchronization remains pending for ${sourcePath}.`);
+        const action = await vscode.window.showWarningMessage(
+          `Sitecore is still processing ${sourcePath}. The transfer was retained and may already be visible on “${targetConnection.name}”.`,
+          "Open Journal",
+        );
+        if (action === "Open Journal") {
+          await vscode.window.showTextDocument(journalUri, { preview: false });
+        }
+      }
+    } catch (error: unknown) {
+      this.log.error(`Unable to synchronize subtree ${sourcePath}.`, error);
+      const journalUri = await this.writeSyncJournal({
+        startedAt,
+        endedAt: new Date().toISOString(),
+        outcome: "failed",
+        sourceConnection: sourceConnection.name,
+        targetConnection: targetConnection.name,
+        sourcePath,
+        sourceItemId,
+        error: errorMessage(error),
+      });
+      const action = await vscode.window.showErrorMessage(
+        `Unable to sync subtree: ${errorMessage(error)}`,
+        "Open Journal",
+      );
+      if (action === "Open Journal") {
+        await vscode.window.showTextDocument(journalUri, { preview: false });
+      }
+    } finally {
+      controller.abort();
+      this.syncingRows.delete(rowKey);
+      await this.panel?.webview.postMessage({ type: "syncFinished", rowKey });
+    }
+  }
+
+  private async writeSyncJournal(entry: Readonly<Record<string, unknown>>): Promise<vscode.Uri> {
+    const journalDirectory = vscode.Uri.joinPath(this.storageUri, "journals");
+    await vscode.workspace.fs.createDirectory(journalDirectory);
+    const journalUri = vscode.Uri.joinPath(
+      journalDirectory,
+      `journal-${localJournalTimestamp(new Date())}.log`,
+    );
+    const content = JSON.stringify({
+      journalFormatVersion: 1,
+      extensionVersion: this.extensionVersion,
+      mode: "execute",
+      scope: "ItemAndDescendants",
+      mergeStrategy: "OverrideExistingItem",
+      ...entry,
+    }, null, 2);
+    await vscode.workspace.fs.writeFile(journalUri, new TextEncoder().encode(`${content}\n`));
+    return journalUri;
   }
 
   private async confirmAndLoadSubtree(
@@ -1418,6 +1613,19 @@ function errorMessage(error: unknown): string {
     return error.message;
   }
   return "An unknown error occurred while loading the content tree.";
+}
+
+function localJournalTimestamp(value: Date): string {
+  const pad = (part: number): string => part.toString().padStart(2, "0");
+  return [
+    value.getFullYear(),
+    pad(value.getMonth() + 1),
+    pad(value.getDate()),
+    "-",
+    pad(value.getHours()),
+    pad(value.getMinutes()),
+    pad(value.getSeconds()),
+  ].join("");
 }
 
 function isAbortError(error: unknown): boolean {

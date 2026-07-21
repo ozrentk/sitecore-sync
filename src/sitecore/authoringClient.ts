@@ -1,4 +1,5 @@
 import type { XmCloudConnection } from "../connections/connection";
+import { randomUUID } from "node:crypto";
 import { print } from "graphql";
 import {
   itemDetailsQuery,
@@ -25,6 +26,22 @@ interface AccessToken {
 
 interface GraphQlError {
   readonly message?: unknown;
+}
+
+export interface ContentTransferResult {
+  readonly state: "Finished" | "Pending";
+  readonly transferId: string;
+  readonly sourceItemId: string;
+  readonly sourceChildIds: readonly string[];
+  readonly chunkSets: readonly {
+    readonly chunkSetId: string;
+    readonly chunkCount: number;
+    readonly contentTransferFileName: string;
+  }[];
+  readonly itemTransferIds: readonly string[];
+  readonly destinationItemId?: string;
+  readonly destinationChildIds?: readonly string[];
+  readonly destinationVersions?: readonly { readonly language: string; readonly version: number }[];
 }
 
 interface TestQueryResponse {
@@ -181,6 +198,415 @@ export class AuthoringContentClient {
 
   constructor(log: SitecoreHttpLogger) {
     this.http = new SitecoreHttpClient(log);
+  }
+
+  async transferSubtree(
+    source: XmCloudConnection,
+    sourceSecret: string,
+    destination: XmCloudConnection,
+    destinationSecret: string,
+    itemPath: string,
+    expectedSourceItemId: string,
+    sourceLanguage: string,
+    destinationLanguage: string,
+    signal: AbortSignal,
+  ): Promise<ContentTransferResult> {
+    const sourceToken = await this.getAccessToken(source, sourceSecret, signal);
+    const destinationToken = await this.getAccessToken(destination, destinationSecret, signal);
+    const sourceItem = await this.loadTreeLevel(
+      source,
+      sourceSecret,
+      { path: itemPath },
+      sourceLanguage,
+      signal,
+    );
+    if (normalizeGuid(sourceItem.item.itemId) !== normalizeGuid(expectedSourceItemId)) {
+      throw new Error(
+        `Source freshness validation failed: ${itemPath} now resolves to item ${sourceItem.item.itemId}.`,
+      );
+    }
+
+    const destinationParentPath = itemPath.slice(0, itemPath.lastIndexOf("/"));
+    const destinationParent = await this.loadTreeLevel(
+      destination,
+      destinationSecret,
+      { path: destinationParentPath },
+      destinationLanguage,
+      signal,
+    );
+    const existingDestination = destinationParent.children.find(
+      (item) => item.path.localeCompare(itemPath, undefined, { sensitivity: "base" }) === 0,
+    );
+    if (
+      existingDestination &&
+      normalizeGuid(existingDestination.itemId) !== normalizeGuid(sourceItem.item.itemId)
+    ) {
+      throw new Error(
+        `The destination path already exists with a different item ID (${existingDestination.itemId}).`,
+      );
+    }
+
+    const transferId = randomUUID();
+    const sourceTransferBase = new URL("/sitecore/api/content/transfer/v1/transfers", source.serverUrl);
+    const destinationTransferBase = new URL(
+      "/sitecore/api/content/transfer/v1/transfers",
+      destination.serverUrl,
+    );
+    const itemTransferBase = new URL(
+      "/sitecore/shell/api/v3/ItemsTransfer/",
+      destination.serverUrl,
+    );
+    const completedChunkSets: Array<{
+      chunkSetId: string;
+      chunkCount: number;
+      contentTransferFileName: string;
+    }> = [];
+    const itemTransferIds: string[] = [];
+    const blobNamesToDelete: string[] = [];
+    const completedBlobNames = new Set<string>();
+
+    await this.requestWithoutBody(
+      sourceTransferBase,
+      sourceToken,
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          TransferId: transferId,
+          Configuration: {
+            DataTrees: [{
+              ItemPath: itemPath,
+              Scope: "ItemAndDescendants",
+              MergeStrategy: "OverrideExistingItem",
+            }],
+            Database: "master",
+          },
+        }),
+      },
+      "create content transfer",
+      signal,
+      false,
+    );
+
+    try {
+      const status = await this.pollJson(
+        new URL(`${sourceTransferBase.pathname}/${transferId}/status`, source.serverUrl),
+        sourceToken,
+        "poll content transfer",
+        (payload) => {
+          const state = stringProperty(payload, "State", "state");
+          if (state === "Failed") {
+            throw new Error("The source content transfer entered the Failed state.");
+          }
+          return state === "Completed";
+        },
+        signal,
+        300,
+      );
+      const chunkSets = arrayProperty(status, "ChunkSetsMetadata", "chunkSetsMetadata");
+      if (chunkSets.length === 0) {
+        throw new Error("The completed content transfer did not contain chunk-set metadata.");
+      }
+
+      for (const rawChunkSet of chunkSets) {
+        const chunkSetId = requiredStringProperty(rawChunkSet, "ChunkSetId", "chunkSetId");
+        const chunkCount = requiredNumberProperty(rawChunkSet, "ChunkCount", "chunkCount");
+        for (let chunkId = 0; chunkId < chunkCount; chunkId += 1) {
+          const sourceChunkUrl = new URL(
+            `${sourceTransferBase.pathname}/${transferId}/chunksets/${chunkSetId}/chunks/${chunkId}`,
+            source.serverUrl,
+          );
+          const chunkResponse = await this.http.request(
+            sourceChunkUrl,
+            { method: "GET", headers: { authorization: `Bearer ${sourceToken}` } },
+            { name: "retrieve content-transfer chunk", signal, retryable: true },
+          );
+          await assertSuccessfulResponse(chunkResponse, "Retrieve content-transfer chunk");
+          const disposition = chunkResponse.headers.get("content-disposition") ?? "";
+          const mediaMatch = /(?:^|;)\s*IsMedia\s*=\s*"?(true|false)"?/iu.exec(disposition);
+          if (!mediaMatch) {
+            throw new Error("A content-transfer chunk did not specify IsMedia.");
+          }
+          const chunk = await chunkResponse.arrayBuffer();
+          const destinationChunkUrl = new URL(
+            `${destinationTransferBase.pathname}/${transferId}/chunksets/${chunkSetId}/chunks/${chunkId}`,
+            destination.serverUrl,
+          );
+          destinationChunkUrl.searchParams.set("isMedia", mediaMatch[1].toLowerCase());
+          await this.requestWithoutBody(
+            destinationChunkUrl,
+            destinationToken,
+            {
+              method: "PUT",
+              headers: { "content-type": "application/octet-stream" },
+              body: chunk,
+            },
+            "save content-transfer chunk",
+            signal,
+            true,
+          );
+        }
+
+        const completion = await this.requestJsonObject(
+          new URL(
+            `${destinationTransferBase.pathname}/${transferId}/chunksets/${chunkSetId}/complete`,
+            destination.serverUrl,
+          ),
+          destinationToken,
+          { method: "POST" },
+          "complete content-transfer chunk set",
+          signal,
+          false,
+        );
+        const blobName = requiredStringProperty(
+          completion,
+          "ContentTransferFileName",
+          "contentTransferFileName",
+        );
+        blobNamesToDelete.push(blobName);
+        completedChunkSets.push({
+          chunkSetId,
+          chunkCount,
+          contentTransferFileName: blobName,
+        });
+      }
+    } finally {
+      await this.requestWithoutBody(
+        new URL(`${sourceTransferBase.pathname}/${transferId}`, source.serverUrl),
+        sourceToken,
+        { method: "DELETE" },
+        "delete source content transfer",
+        signal,
+        false,
+      );
+    }
+
+    try {
+      for (const blobName of blobNamesToDelete) {
+        const blobListUrl = new URL("sources/blobs", itemTransferBase);
+        await this.pollJson(
+          blobListUrl,
+          destinationToken,
+          "poll item-transfer blob",
+          (payload) => {
+            const serialized = JSON.stringify(payload);
+            return serialized.includes(blobName) && /Uploaded/iu.test(serialized);
+          },
+          signal,
+          150,
+        );
+
+        const startUrl = new URL("transfers/databases/master/sources", itemTransferBase);
+        startUrl.searchParams.set("blobName", blobName);
+        const startResponse = await this.http.request(
+          startUrl,
+          { method: "POST", headers: { authorization: `Bearer ${destinationToken}` } },
+          { name: "start item transfer", signal, retryable: false },
+        );
+        await assertSuccessfulResponse(startResponse, "Start item transfer");
+        const location = startResponse.headers.get("location");
+        if (!location) {
+          throw new Error("The Item Transfer API did not return a location header.");
+        }
+        const itemTransferId = location.split("/").filter(Boolean).at(-1);
+        if (!itemTransferId) {
+          throw new Error("The Item Transfer API returned an invalid location header.");
+        }
+        const decodedItemTransferId = decodeURIComponent(itemTransferId);
+        if (decodedItemTransferId !== blobName) {
+          throw new Error(
+            `The Item Transfer API location identified ${decodedItemTransferId}, expected ${blobName}.`,
+          );
+        }
+        itemTransferIds.push(decodedItemTransferId);
+        const itemTransferStatus = await this.pollItemTransfer(
+          new URL(`transfers/${encodeURIComponent(decodedItemTransferId)}`, itemTransferBase),
+          destinationToken,
+          decodedItemTransferId,
+          signal,
+        );
+        if (!itemTransferStatus) {
+          return {
+            state: "Pending",
+            transferId,
+            sourceItemId: normalizeGuid(sourceItem.item.itemId),
+            sourceChildIds: sourceItem.children.map((child) => normalizeGuid(child.itemId)),
+            chunkSets: completedChunkSets,
+            itemTransferIds,
+          };
+        }
+        completedBlobNames.add(blobName);
+      }
+
+      const destinationItem = await this.loadTreeLevel(
+        destination,
+        destinationSecret,
+        { itemId: sourceItem.item.itemId },
+        destinationLanguage,
+        signal,
+      );
+      const sourceChildIds = sourceItem.children.map((child) => normalizeGuid(child.itemId));
+      const destinationChildIds = destinationItem.children.map((child) => normalizeGuid(child.itemId));
+      for (const childId of sourceChildIds) {
+        if (!destinationChildIds.includes(childId)) {
+          throw new Error(`Destination verification did not find transferred child ${childId}.`);
+        }
+      }
+
+      return {
+        state: "Finished",
+        transferId,
+        sourceItemId: normalizeGuid(sourceItem.item.itemId),
+        sourceChildIds,
+        chunkSets: completedChunkSets,
+        itemTransferIds,
+        destinationItemId: normalizeGuid(destinationItem.item.itemId),
+        destinationChildIds,
+      };
+    } finally {
+      for (const blobName of completedBlobNames) {
+        await this.deleteItemTransferBlob(
+          new URL(`sources/blobs/${encodeURIComponent(blobName)}`, itemTransferBase),
+          destinationToken,
+          signal,
+        );
+      }
+    }
+  }
+
+  private async requestWithoutBody(
+    url: URL,
+    token: string,
+    init: RequestInit,
+    name: string,
+    signal: AbortSignal,
+    retryable: boolean,
+  ): Promise<void> {
+    const response = await this.http.request(
+      url,
+      { ...init, headers: { ...init.headers, authorization: `Bearer ${token}` } },
+      { name, signal, retryable },
+    );
+    await assertSuccessfulResponse(response, name);
+  }
+
+  private async requestJsonObject(
+    url: URL,
+    token: string,
+    init: RequestInit,
+    name: string,
+    signal: AbortSignal,
+    retryable: boolean,
+  ): Promise<unknown> {
+    const response = await this.http.request(
+      url,
+      { ...init, headers: { ...init.headers, authorization: `Bearer ${token}` } },
+      { name, signal, retryable },
+    );
+    await assertSuccessfulResponse(response, name);
+    return readJson<unknown>(response, name);
+  }
+
+  private async pollJson(
+    url: URL,
+    token: string,
+    name: string,
+    complete: (payload: unknown) => boolean,
+    signal: AbortSignal,
+    maxAttempts = 60,
+  ): Promise<unknown> {
+    for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+      const payload = await this.requestJsonObject(
+        url,
+        token,
+        { method: "GET" },
+        name,
+        signal,
+        true,
+      );
+      if (complete(payload)) {
+        return payload;
+      }
+      await abortableDelay(2_000, signal);
+    }
+    throw new Error(`${name} did not complete within ${maxAttempts * 2} seconds.`);
+  }
+
+  private async deleteItemTransferBlob(
+    url: URL,
+    token: string,
+    signal: AbortSignal,
+  ): Promise<void> {
+    const response = await this.http.request(
+      url,
+      { method: "DELETE", headers: { authorization: `Bearer ${token}` } },
+      { name: "delete item-transfer blob", signal, retryable: false },
+    );
+    if (response.status !== 404) {
+      await assertSuccessfulResponse(response, "Delete item-transfer blob");
+    }
+  }
+
+  private async pollItemTransfer(
+    url: URL,
+    token: string,
+    transferId: string,
+    signal: AbortSignal,
+  ): Promise<unknown | undefined> {
+    for (let attempt = 0; attempt < 60; attempt += 1) {
+      const response = await this.http.request(
+        url,
+        { method: "GET", headers: { authorization: `Bearer ${token}` } },
+        { name: "poll item transfer", signal, retryable: true },
+      );
+      if (response.status === 404) {
+        const listUrl = new URL(".", url);
+        listUrl.searchParams.set("page", "1");
+        listUrl.searchParams.set("pageSize", "50");
+        const list = await this.requestJsonObject(
+          listUrl,
+          token,
+          { method: "GET" },
+          "list item transfers while polling",
+          signal,
+          true,
+        );
+        const matchingTransfer = arrayProperty(list, "Transfers", "transfers").find((entry) =>
+          ["Id", "id", "SourceName", "sourceName"].some(
+            (name) => stringProperty(entry, name) === transferId,
+          ));
+        if (matchingTransfer) {
+          const listedState = stringProperty(
+            matchingTransfer,
+            "TransferState",
+            "transferState",
+          );
+          if (listedState === "Failed" || listedState === "Discarded") {
+            throw new Error(`Item transfer ${transferId} entered the ${listedState} state.`);
+          }
+          const historyId = stringProperty(matchingTransfer, "Id", "id");
+          const consumedDate = stringProperty(matchingTransfer, "ConsumedDate", "consumedDate");
+          if (listedState === "Finished" || consumedDate || /^consumed\./iu.test(historyId ?? "")) {
+            return matchingTransfer;
+          }
+        }
+        await abortableDelay(2_000, signal);
+        continue;
+      }
+      await assertSuccessfulResponse(response, "Poll item transfer");
+      const payload = await readJson<unknown>(response, "Item Transfer API");
+      const state = stringProperty(payload, "TransferState", "transferState");
+      if (state === "Failed" || state === "Discarded") {
+        throw new Error(`Item transfer ${transferId} entered the ${state} state.`);
+      }
+      const historyId = stringProperty(payload, "Id", "id");
+      const consumedDate = stringProperty(payload, "ConsumedDate", "consumedDate");
+      if (state === "Finished" || consumedDate || /^consumed\./iu.test(historyId ?? "")) {
+        return payload;
+      }
+      await abortableDelay(2_000, signal);
+    }
+    return undefined;
   }
 
   async loadTreeLevel(
@@ -357,6 +783,7 @@ export class AuthoringContentClient {
     query: string,
     variables: Readonly<Record<string, unknown>>,
     signal: AbortSignal,
+    retryable = true,
   ): Promise<T> {
     const endpoint = new URL("/sitecore/api/authoring/graphql/v1/", serverUrl);
     const response = await this.http.request(
@@ -369,7 +796,7 @@ export class AuthoringContentClient {
         },
         body: JSON.stringify({ operationName, query, variables }),
       },
-      { name: requestName, signal, retryable: true },
+      { name: requestName, signal, retryable },
     );
     const payload = await readJson<T>(response, "Authoring GraphQL endpoint");
     if (!response.ok) {
@@ -784,6 +1211,72 @@ function throwForGraphQlErrors(errors: readonly GraphQlError[] | undefined): voi
     .filter((message): message is string => typeof message === "string")
     .join("; ");
   throw new Error(messages || "Authoring API returned a GraphQL error.");
+}
+
+function property(value: unknown, ...names: readonly string[]): unknown {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return undefined;
+  }
+  const record = value as Readonly<Record<string, unknown>>;
+  for (const name of names) {
+    if (Object.prototype.hasOwnProperty.call(record, name)) {
+      return record[name];
+    }
+  }
+  return undefined;
+}
+
+function stringProperty(value: unknown, ...names: readonly string[]): string | undefined {
+  const candidate = property(value, ...names);
+  return typeof candidate === "string" ? candidate : undefined;
+}
+
+function requiredStringProperty(value: unknown, ...names: readonly string[]): string {
+  const candidate = stringProperty(value, ...names);
+  if (!candidate) {
+    throw new Error(`Transfer API response did not contain ${names[0]}.`);
+  }
+  return candidate;
+}
+
+function requiredNumberProperty(value: unknown, ...names: readonly string[]): number {
+  const candidate = property(value, ...names);
+  if (typeof candidate !== "number" || !Number.isInteger(candidate) || candidate < 0) {
+    throw new Error(`Transfer API response did not contain a valid ${names[0]}.`);
+  }
+  return candidate;
+}
+
+function arrayProperty(value: unknown, ...names: readonly string[]): readonly unknown[] {
+  const candidate = property(value, ...names);
+  return Array.isArray(candidate) ? candidate : [];
+}
+
+async function assertSuccessfulResponse(response: Response, operation: string): Promise<void> {
+  if (response.ok) {
+    return;
+  }
+  const details = (await response.text()).trim().slice(0, 1_000);
+  throw new Error(
+    `${operation} failed (${response.status})${details ? `: ${details}` : "."}`,
+  );
+}
+
+async function abortableDelay(milliseconds: number, signal: AbortSignal): Promise<void> {
+  if (signal.aborted) {
+    throw signal.reason;
+  }
+  await new Promise<void>((resolve, reject) => {
+    const timeout = setTimeout(resolve, milliseconds);
+    signal.addEventListener(
+      "abort",
+      () => {
+        clearTimeout(timeout);
+        reject(signal.reason);
+      },
+      { once: true },
+    );
+  });
 }
 
 async function readJson<T>(response: Response, endpointName: string): Promise<T> {

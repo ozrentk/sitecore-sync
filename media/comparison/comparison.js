@@ -31,6 +31,7 @@ const state = {
   },
   refreshOperations: new Map(),
   subtreeLoadOperations: new Map(),
+  syncOperations: new Map(),
   textNormalization: "none",
 };
 
@@ -519,7 +520,7 @@ function collapsePairItem(pair) {
   render();
 }
 
-function findLoadedPair(rowKey) {
+function findLoadedPairContext(rowKey) {
   refreshLoadedItemIndexes();
   const leftRoot = state.trees.left.root;
   const rightRoot = state.trees.right.root;
@@ -527,9 +528,9 @@ function findLoadedPair(rowKey) {
     return undefined;
   }
 
-  const visit = (pair) => {
+  const visit = (pair, parent) => {
     if (pair.key === rowKey) {
-      return pair;
+      return { pair, parent };
     }
     if (!pairLevelsLoaded(pair)) {
       return undefined;
@@ -538,14 +539,18 @@ function findLoadedPair(rowKey) {
       pair.left?.children ?? [],
       pair.right?.children ?? [],
     )) {
-      const found = visit(childPair);
+      const found = visit(childPair, pair);
       if (found) {
         return found;
       }
     }
     return undefined;
   };
-  return visit(createPair(leftRoot, rightRoot, "root"));
+  return visit(createPair(leftRoot, rightRoot, "root"), undefined);
+}
+
+function findLoadedPair(rowKey) {
+  return findLoadedPairContext(rowKey)?.pair;
 }
 
 function expandLoadedSubtree(rowKey, includeDetails = false) {
@@ -611,6 +616,7 @@ function isPairRefreshing(pair) {
   return [
     ...state.refreshOperations.values(),
     ...state.subtreeLoadOperations.values(),
+    ...state.syncOperations.values(),
   ].some(({ itemIds }) =>
     pairIds.some((itemId) => itemIds.has(itemId)),
   );
@@ -740,6 +746,32 @@ function cancelSubtreeLoad(rowKey) {
   closeContextMenu();
 }
 
+function startSubtreeSync(pair, direction) {
+  const sourceSide = direction === "leftToRight" ? "left" : "right";
+  const targetSide = direction === "leftToRight" ? "right" : "left";
+  const source = pair[sourceSide];
+  if (!source) {
+    return;
+  }
+  const context = findLoadedPairContext(pair.key);
+  const target = pair[targetSide];
+  const refreshRoot = target ?? context?.parent?.[targetSide];
+  const targetRefreshPlan = refreshRoot
+    ? target
+      ? buildRefreshPlan(target)
+      : [{ itemId: refreshRoot.itemId, path: refreshRoot.path, depth: 0, loadLevel: true }]
+    : [];
+  vscode.postMessage({
+    type: "syncSubtree",
+    rowKey: pair.key,
+    direction,
+    sourceItemId: source.itemId,
+    sourcePath: source.path,
+    targetRefreshPlan,
+  });
+  closeContextMenu();
+}
+
 function closeContextMenu() {
   contextMenu?.remove();
   contextMenu = undefined;
@@ -857,8 +889,51 @@ function showContextMenu(event, pair, forceDisabled = false) {
     closeContextMenu();
     render();
   });
+
+  const leftConnection = state.connections.find(
+    (connection) => connection.id === state.selection.leftConnectionId,
+  );
+  const rightConnection = state.connections.find(
+    (connection) => connection.id === state.selection.rightConnectionId,
+  );
+  const sameEnvironment = Boolean(
+    leftConnection && rightConnection && leftConnection.serverUrl === rightConnection.serverUrl,
+  );
+  const pathIdentityConflict = pair.left && pair.right &&
+    pair.left.path === pair.right.path &&
+    normalizeItemId(pair.left.itemId) !== normalizeItemId(pair.right.itemId);
+  const syncLeftToRight = document.createElement("button");
+  syncLeftToRight.className = "context-menu-item";
+  syncLeftToRight.type = "button";
+  syncLeftToRight.textContent = "Sync Subtree Left → Right…";
+  syncLeftToRight.disabled = disabled || sameEnvironment || !pair.left || pathIdentityConflict;
+  syncLeftToRight.title = sameEnvironment
+    ? "Subtree transfer requires two different XM Cloud environments."
+    : pathIdentityConflict
+      ? "Resolve the same-path item ID conflict before synchronizing."
+      : !pair.left
+        ? "The source item does not exist on the left."
+        : "Transfer this item, its descendants, and all languages and versions from left to right.";
+  syncLeftToRight.addEventListener("click", () => startSubtreeSync(pair, "leftToRight"));
+
+  const syncRightToLeft = document.createElement("button");
+  syncRightToLeft.className = "context-menu-item";
+  syncRightToLeft.type = "button";
+  syncRightToLeft.textContent = "Sync Subtree Right → Left…";
+  syncRightToLeft.disabled = disabled || sameEnvironment || !pair.right || pathIdentityConflict;
+  syncRightToLeft.title = sameEnvironment
+    ? "Subtree transfer requires two different XM Cloud environments."
+    : pathIdentityConflict
+      ? "Resolve the same-path item ID conflict before synchronizing."
+      : !pair.right
+        ? "The source item does not exist on the right."
+        : "Transfer this item, its descendants, and all languages and versions from right to left.";
+  syncRightToLeft.addEventListener("click", () => startSubtreeSync(pair, "rightToLeft"));
   menu.append(
     detailedDiff,
+    createContextMenuSeparator(),
+    syncLeftToRight,
+    syncRightToLeft,
     createContextMenuSeparator(),
     itemAction,
     expandLoaded,
@@ -1653,6 +1728,17 @@ window.addEventListener("message", (event) => {
     clearNodeLoadingState(pair?.right);
     state.subtreeLoadOperations.delete(message.rowKey);
     expandLoadedSubtree(message.rowKey, true);
+  } else if (message?.type === "syncStarted") {
+    const pair = findLoadedPair(message.rowKey);
+    if (pair) {
+      const itemIds = refreshIdsForPair(pair);
+      for (const itemId of message.targetItemIds ?? []) {
+        itemIds.add(normalizeItemId(itemId));
+      }
+      state.syncOperations.set(message.rowKey, { itemIds });
+    }
+  } else if (message?.type === "syncFinished") {
+    state.syncOperations.delete(message.rowKey);
   } else {
     return;
   }
