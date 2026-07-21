@@ -42,7 +42,6 @@ const rightSelect = document.getElementById("right-connection");
 const leftLanguageSelect = document.getElementById("left-language");
 const rightLanguageSelect = document.getElementById("right-language");
 const swapButton = document.getElementById("swap");
-const refreshAllButton = document.getElementById("refresh-all");
 const workspace = document.getElementById("workspace");
 
 function normalizeItemId(itemId) {
@@ -1485,10 +1484,6 @@ function render() {
   renderLanguageOptions("left", leftLanguageSelect, state.selection.leftLanguage);
   renderLanguageOptions("right", rightLanguageSelect, state.selection.rightLanguage);
   swapButton.disabled = state.connections.length < 1;
-  refreshAllButton.disabled =
-    (!state.trees.left.root && !state.trees.right.root) ||
-    state.refreshOperations.size > 0 ||
-    state.subtreeLoadOperations.size > 0;
 
   if (state.connections.length < 1) {
     const empty = document.createElement("div");
@@ -1670,8 +1665,6 @@ rightLanguageSelect.addEventListener("change", () => {
 swapButton.addEventListener("click", () => {
   vscode.postMessage({ type: "swapConnections" });
 });
-
-refreshAllButton.addEventListener("click", startRefreshAll);
 
 window.addEventListener("message", (event) => {
   const message = event.data;

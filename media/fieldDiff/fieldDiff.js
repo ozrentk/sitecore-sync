@@ -5,7 +5,7 @@ const state = {
   loadingSelection: undefined,
   error: undefined,
   showStandardTemplate: false,
-  differencesOnly: false,
+  differencesOnly: true,
 };
 
 const content = document.getElementById("content");

@@ -2,6 +2,7 @@ import * as vscode from "vscode";
 import { ComparisonPanelManager } from "./comparison/comparisonPanel";
 import {
   addConnection,
+  pasteAsConnectionUrl,
   removeConnection,
   testConnection,
 } from "./connections/connectionCommands";
@@ -47,13 +48,47 @@ export function activate(context: vscode.ExtensionContext): void {
     authoringClient,
     log,
   );
+  const connectionsView = vscode.window.createTreeView("xmCloudSync.connections", {
+    treeDataProvider: connectionProvider,
+  });
+  let selectedConnectionItem: ConnectionTreeItem | undefined;
+  const updateConnectionRemovalContext = async (): Promise<void> => {
+    const selected = selectedConnectionItem?.connection;
+    await Promise.all([
+      vscode.commands.executeCommand(
+        "setContext",
+        "xmCloudSync.connectionSelected",
+        Boolean(selected),
+      ),
+      vscode.commands.executeCommand(
+        "setContext",
+        "xmCloudSync.selectedConnectionRemovable",
+        Boolean(selected && !comparisonPanelManager.isConnectionInOpenComparison(selected.id)),
+      ),
+    ]);
+  };
   context.subscriptions.push(
     log,
     connectionStore,
     connectionProvider,
     { dispose: () => authoringClient.clear() },
     comparisonPanelManager,
-    vscode.window.registerTreeDataProvider("xmCloudSync.connections", connectionProvider),
+    connectionsView,
+    connectionsView.onDidChangeSelection((event) => {
+      selectedConnectionItem = event.selection[0] instanceof ConnectionTreeItem
+        ? event.selection[0]
+        : undefined;
+      void updateConnectionRemovalContext();
+    }),
+    comparisonPanelManager.onDidChangeComparisonState(() => {
+      void updateConnectionRemovalContext();
+    }),
+    connectionStore.onDidChange(() => {
+      if (selectedConnectionItem && !connectionStore.get(selectedConnectionItem.connection.id)) {
+        selectedConnectionItem = undefined;
+      }
+      void updateConnectionRemovalContext();
+    }),
     vscode.window.registerWebviewViewProvider(
       "xmCloudSync.fieldDiff",
       comparisonPanelManager.fieldDiffViewProvider,
@@ -74,11 +109,18 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.commands.registerCommand("xmCloudSync.addConnection", async () => {
       await addConnection(connectionStore, connectionProvider, authoringClient);
     }),
+    vscode.commands.registerCommand("xmCloudSync.pasteAsConnectionUrl", async () => {
+      await pasteAsConnectionUrl(connectionStore, connectionProvider, authoringClient);
+    }),
     vscode.commands.registerCommand("xmCloudSync.testConnection", async (argument) => {
       await testConnection(argument, connectionStore, connectionProvider, authoringClient);
     }),
     vscode.commands.registerCommand("xmCloudSync.removeConnection", async (argument) => {
-      await removeConnection(argument, connectionStore);
+      await removeConnection(
+        argument instanceof ConnectionTreeItem ? argument : selectedConnectionItem,
+        connectionStore,
+        (connectionId) => comparisonPanelManager.isConnectionInOpenComparison(connectionId),
+      );
     }),
     vscode.commands.registerCommand("xmCloudSync.openComparison", async () => {
       await comparisonPanelManager.open();
@@ -139,6 +181,7 @@ export function activate(context: vscode.ExtensionContext): void {
       await vscode.window.showTextDocument(document, { preview: false });
     }),
   );
+  void updateConnectionRemovalContext();
 }
 
 export function deactivate(): void {

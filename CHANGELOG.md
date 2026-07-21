@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.6.1
+
+- Collapsed the **Sync Operations** view by default and removed the comparison toolbar's complete-refresh button.
+- Added a selected-connection trash action beside the Connections view title actions and prevented deletion while the connection is used by the open comparison.
+- Added **Paste as Connection URL** for extracting an XM Cloud origin from a full clipboard URL and prefilling the add-connection wizard.
+- Enabled **Show differences only** by default in the Field Diff panel.
+
 ## 0.6.0
 
 - Added confirmed **Sync Subtree Left → Right…** and **Sync Subtree Right → Left…** actions to paired item rows.
