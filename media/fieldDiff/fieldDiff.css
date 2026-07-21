@@ -29,6 +29,24 @@ body {
 .summary { border-bottom: 1px solid var(--vscode-panel-border); }
 .summary-cell { display: grid; gap: 3px; min-width: 0; padding: 8px 12px; }
 .summary-cell span { overflow: hidden; color: var(--vscode-descriptionForeground); text-overflow: ellipsis; white-space: nowrap; }
+.item-id { display: flex; gap: 6px; align-items: center; min-width: 0; color: var(--vscode-descriptionForeground); font-size: 11px; }
+.item-id button {
+  min-width: 0;
+  padding: 0;
+  overflow: hidden;
+  border: 0;
+  color: var(--vscode-textLink-foreground);
+  background: transparent;
+  font: inherit;
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.item-id button:hover:not(:disabled) { text-decoration: underline; }
+.item-id button:focus-visible { outline: 1px solid var(--vscode-focusBorder); outline-offset: 2px; }
+.item-id button:disabled { color: var(--vscode-disabledForeground); cursor: wait; }
+.item-id button.copied { color: var(--vscode-testing-iconPassed, var(--vscode-charts-green)); }
 .field-row { border-bottom: 1px solid color-mix(in srgb, var(--vscode-panel-border) 72%, transparent); }
 .field-row.different { background: color-mix(in srgb, var(--vscode-editorWarning-foreground) 5%, transparent); }
 .field-cell { min-width: 0; padding: 7px 12px; }

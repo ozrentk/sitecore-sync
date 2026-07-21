@@ -92,8 +92,25 @@ function createSummary(snapshot) {
     );
     const meta = document.createElement("span");
     meta.textContent = metaLine(details);
-    meta.title = details ? `Item ID: ${details.itemId}` : "";
-    cell.append(title, meta);
+    const itemId = document.createElement("div");
+    itemId.className = "item-id";
+    if (details) {
+      const label = document.createElement("span");
+      label.textContent = "ID";
+      const copy = document.createElement("button");
+      copy.type = "button";
+      copy.dataset.copyItemId = side;
+      copy.dataset.itemId = details.itemId;
+      copy.textContent = details.itemId;
+      copy.title = `Copy ${side} item ID`;
+      copy.setAttribute("aria-label", `Copy ${side} item ID ${details.itemId}`);
+      copy.addEventListener("click", () => {
+        copy.disabled = true;
+        vscode.postMessage({ type: "copyItemId", side, itemId: details.itemId });
+      });
+      itemId.append(label, copy);
+    }
+    cell.append(title, meta, itemId);
     summary.append(cell);
     if (side === "left") summary.append(document.createElement("div"));
   }
@@ -262,6 +279,23 @@ window.addEventListener("message", (event) => {
     state.copyingFieldIds.clear();
   } else if (message?.type === "copyFinished" && typeof message.fieldId === "string") {
     state.copyingFieldIds.delete(normalizeId(message.fieldId));
+  } else if (
+    message?.type === "itemIdCopyFinished" &&
+    (message.side === "left" || message.side === "right")
+  ) {
+    const button = document.querySelector(`[data-copy-item-id="${message.side}"]`);
+    if (button instanceof HTMLButtonElement) {
+      button.disabled = false;
+      if (message.copied === true) {
+        const itemId = button.dataset.itemId || button.textContent;
+        button.textContent = `✓ ${itemId}`;
+        button.classList.add("copied");
+        window.setTimeout(() => {
+          button.textContent = itemId;
+          button.classList.remove("copied");
+        }, 1200);
+      }
+    }
   }
   render();
 });
