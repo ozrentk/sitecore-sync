@@ -49,7 +49,7 @@ Right-click an item and choose **Sync Subtree Left → Right…** or **Sync Subt
 
 Subtree transfer is disabled when both sides point to the same XM Cloud environment or when the same path contains different item IDs. The complete `/sitecore` root is also excluded. The extension verifies that the source path still resolves to the item ID shown in the comparison and that the destination parent exists before starting the transfer.
 
-The progress notification remains open while Sitecore processes the transfer. Completed target blobs are cleaned up, while a transfer that remains pending is retained for later processing rather than being reported as failed. Finished transfers refresh the affected loaded target subtree. Every attempt writes a secret-free journal beneath the extension's global storage; the completion or error notification can open it directly.
+The progress notification remains open while Sitecore processes the transfer. Only an explicit `TransferState: Finished` is considered successful; a consumed history record whose state remains unknown is still treated as pending. Destination `.raif` blobs are retained automatically because Sitecore exposes items before its background database synchronization is complete. Finished transfers refresh the affected loaded target subtree. Every attempt writes a secret-free journal beneath the extension's global storage; the completion or error notification can open it directly.
 
 ### Difference legend
 
