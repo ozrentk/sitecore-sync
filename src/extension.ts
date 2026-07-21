@@ -7,7 +7,11 @@ import {
   testConnection,
 } from "./connections/connectionCommands";
 import { ConnectionStore } from "./connections/connectionStore";
-import { ConnectionTreeItem, ConnectionTreeProvider } from "./connections/connectionTreeProvider";
+import {
+  ConnectionTreeItem,
+  ConnectionTreeProvider,
+  FavoriteTreeItem,
+} from "./connections/connectionTreeProvider";
 import { AuthoringContentClient } from "./sitecore/authoringClient";
 
 const viewIds = ["xmCloudSync.operations"] as const;
@@ -125,13 +129,26 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.commands.registerCommand("xmCloudSync.openComparison", async () => {
       await comparisonPanelManager.open();
     }),
+    vscode.commands.registerCommand("xmCloudSync.openFavorite", async (argument) => {
+      if (argument instanceof FavoriteTreeItem) {
+        await comparisonPanelManager.openFavorite(argument.connection.id, argument.path);
+      }
+    }),
+    vscode.commands.registerCommand("xmCloudSync.removeFavorite", async (argument) => {
+      if (!(argument instanceof FavoriteTreeItem)) {
+        return;
+      }
+      await connectionStore.removeFavoritePath(argument.connection.id, argument.path);
+    }),
     vscode.commands.registerCommand("xmCloudSync.showLogs", () => {
       log.show(true);
     }),
     vscode.commands.registerCommand("xmCloudSync.compareWithConnection", async (argument) => {
-      if (!(argument instanceof ConnectionTreeItem)) {
+      if (!(argument instanceof ConnectionTreeItem) && !(argument instanceof FavoriteTreeItem)) {
         return;
       }
+
+      const sourceConnection = argument.connection;
 
       const candidates = connectionStore
         .list();
@@ -146,21 +163,29 @@ export function activate(context: vscode.ExtensionContext): void {
         candidates.map((connection) => ({
           label: connection.name,
           description: connection.serverUrl,
-          detail: connection.id === argument.connection.id
+          detail: connection.id === sourceConnection.id
             ? "Same connection; select different languages in the comparison tab"
             : undefined,
           connectionId: connection.id,
         })),
         {
-          title: `Compare ${argument.connection.name} with…`,
+          title: `Compare ${sourceConnection.name} with…`,
           placeHolder: "Select the right-side connection",
         },
       );
       if (selected) {
-        await comparisonPanelManager.openWith(
-          argument.connection.id,
-          selected.connectionId,
-        );
+        if (argument instanceof FavoriteTreeItem) {
+          await comparisonPanelManager.openFavoriteWith(
+            sourceConnection.id,
+            selected.connectionId,
+            argument.path,
+          );
+        } else {
+          await comparisonPanelManager.openWith(
+            sourceConnection.id,
+            selected.connectionId,
+          );
+        }
       }
     }),
     vscode.commands.registerCommand("xmCloudSync.refreshAll", async () => {

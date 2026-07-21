@@ -45,6 +45,16 @@ interface WebviewMessage {
   readonly sourceItemId?: unknown;
   readonly sourcePath?: unknown;
   readonly targetRefreshPlan?: unknown;
+  readonly requestId?: unknown;
+  readonly found?: unknown;
+  readonly leftPath?: unknown;
+  readonly rightPath?: unknown;
+}
+
+interface FavoriteNavigation {
+  readonly connectionId: string;
+  readonly path: string;
+  readonly side: TreeSide;
 }
 
 interface RefreshPlanEntry {
@@ -95,6 +105,10 @@ export class ComparisonPanelManager implements vscode.Disposable {
   private readonly syncingRows = new Set<string>();
   private readonly fieldDiffProvider = new FieldDiffContentProvider();
   private readonly comparisonStateEmitter = new vscode.EventEmitter<void>();
+  private readonly pendingFavoriteReveal = new Map<string, (found: boolean) => void>();
+  private connectionSignature: string;
+  private nextFavoriteRevealId = 1;
+  private pendingFavoriteNavigation: FavoriteNavigation | undefined;
   private selectedFieldDiffItem: FieldDiffSelection | undefined;
   readonly onDidChangeComparisonState = this.comparisonStateEmitter.event;
   readonly fieldDiffViewProvider: FieldDiffViewProvider;
@@ -108,6 +122,7 @@ export class ComparisonPanelManager implements vscode.Disposable {
     private readonly authoringClient: AuthoringContentClient,
     private readonly log: vscode.LogOutputChannel,
   ) {
+    this.connectionSignature = this.currentConnectionSignature();
     this.fieldDiffViewProvider = new FieldDiffViewProvider(
       extensionUri,
       () => {
@@ -130,7 +145,11 @@ export class ComparisonPanelManager implements vscode.Disposable {
         }
       }),
       connectionStore.onDidChange(() => {
-        void this.refreshStateAndTrees();
+        const signature = this.currentConnectionSignature();
+        if (signature !== this.connectionSignature) {
+          this.connectionSignature = signature;
+          void this.refreshStateAndTrees();
+        }
       }),
     );
   }
@@ -188,6 +207,63 @@ export class ComparisonPanelManager implements vscode.Disposable {
     await this.loadInitialTrees();
   }
 
+  async openFavorite(connectionId: string, path: string): Promise<void> {
+    if (!this.connectionStore.get(connectionId)) {
+      await vscode.window.showErrorMessage("The favorite's XM Cloud connection no longer exists.");
+      return;
+    }
+    if (!this.panel) {
+      await vscode.window.showWarningMessage(
+        "Open a comparison before navigating to a favorite. You can also right-click the favorite and choose Compare with…",
+      );
+      return;
+    }
+
+    const selection = this.getSelection();
+    const side: TreeSide | undefined = selection.leftConnectionId === connectionId
+      ? "left"
+      : selection.rightConnectionId === connectionId
+        ? "right"
+        : undefined;
+    if (!side) {
+      await vscode.window.showWarningMessage(
+        `${this.connectionStore.get(connectionId)?.name ?? "The favorite's connection"} is not open in the current comparison. Right-click the favorite and choose Compare with… to open it explicitly.`,
+      );
+      return;
+    }
+
+    this.panel.reveal(vscode.ViewColumn.Active);
+    await this.navigateToFavorite({ connectionId, path, side });
+  }
+
+  async openFavoriteWith(
+    favoriteConnectionId: string,
+    rightConnectionId: string,
+    path: string,
+  ): Promise<void> {
+    const selection = this.normalizeSelection({
+      ...this.getSelection(),
+      leftConnectionId: favoriteConnectionId,
+      rightConnectionId,
+    });
+    await this.saveSelection(selection);
+    const navigation = {
+      connectionId: favoriteConnectionId,
+      path,
+      side: "left",
+    } satisfies FavoriteNavigation;
+    if (!this.panel) {
+      this.pendingFavoriteNavigation = navigation;
+      await this.open();
+      return;
+    }
+
+    this.panel.reveal(vscode.ViewColumn.Active);
+    await this.postState();
+    await this.loadInitialTrees();
+    await this.navigateToFavorite(navigation);
+  }
+
   async refreshAll(): Promise<boolean> {
     if (!this.panel) {
       return false;
@@ -207,6 +283,31 @@ export class ComparisonPanelManager implements vscode.Disposable {
     if (message.type === "ready") {
       await this.postState();
       await this.loadInitialTrees();
+      const navigation = this.pendingFavoriteNavigation;
+      this.pendingFavoriteNavigation = undefined;
+      if (navigation) {
+        await this.navigateToFavorite(navigation);
+      }
+      return;
+    }
+
+    if (
+      message.type === "favoriteRevealResult" &&
+      typeof message.requestId === "string" &&
+      typeof message.found === "boolean"
+    ) {
+      this.pendingFavoriteReveal.get(message.requestId)?.(message.found);
+      return;
+    }
+
+    if (
+      message.type === "addFavorite" &&
+      (typeof message.leftPath === "string" || typeof message.rightPath === "string")
+    ) {
+      await this.addFavoriteFromRow(
+        typeof message.leftPath === "string" ? message.leftPath : undefined,
+        typeof message.rightPath === "string" ? message.rightPath : undefined,
+      );
       return;
     }
 
@@ -1006,6 +1107,189 @@ export class ComparisonPanelManager implements vscode.Disposable {
     await this.loadInitialTrees();
   }
 
+  private currentConnectionSignature(): string {
+    return this.connectionStore.list()
+      .map((connection) => `${connection.id}:${connection.serverUrl}`)
+      .join("|");
+  }
+
+  private async addFavoriteFromRow(
+    leftPath: string | undefined,
+    rightPath: string | undefined,
+  ): Promise<void> {
+    const selection = this.getSelection();
+    const candidates = [
+      leftPath && selection.leftConnectionId
+        ? { connectionId: selection.leftConnectionId, path: leftPath, side: "Left" }
+        : undefined,
+      rightPath && selection.rightConnectionId
+        ? { connectionId: selection.rightConnectionId, path: rightPath, side: "Right" }
+        : undefined,
+    ].filter((candidate): candidate is {
+      connectionId: string;
+      path: string;
+      side: string;
+    } => Boolean(candidate));
+    const uniqueCandidates = candidates.filter((candidate, index) =>
+      candidates.findIndex((other) =>
+        other.connectionId === candidate.connectionId &&
+        other.path.localeCompare(candidate.path, undefined, { sensitivity: "base" }) === 0
+      ) === index
+    );
+    if (!uniqueCandidates.length) {
+      return;
+    }
+
+    let selected = uniqueCandidates;
+    if (uniqueCandidates.length > 1) {
+      const picked = await vscode.window.showQuickPick(
+        uniqueCandidates.map((candidate) => ({
+          label: this.connectionStore.get(candidate.connectionId)?.name ?? candidate.connectionId,
+          description: candidate.side,
+          detail: candidate.path,
+          picked: true,
+          candidate,
+        })),
+        {
+          title: "Add item to connection favorites",
+          placeHolder: "Select one or both connections",
+          canPickMany: true,
+        },
+      );
+      if (!picked?.length) {
+        return;
+      }
+      selected = picked.map((item) => item.candidate);
+    }
+
+    let added = 0;
+    for (const favorite of selected) {
+      if (await this.connectionStore.addFavoritePath(favorite.connectionId, favorite.path)) {
+        added += 1;
+      }
+    }
+    await vscode.window.showInformationMessage(
+      added
+        ? `Added ${added === 1 ? "favorite" : `${added} favorites`}.`
+        : "The selected item is already in Favorites.",
+    );
+  }
+
+  private async navigateToFavorite(navigation: FavoriteNavigation): Promise<void> {
+    if (!this.panel || !this.isCurrentFavoriteNavigation(navigation)) {
+      return;
+    }
+    if (await this.tryRevealFavorite(navigation)) {
+      return;
+    }
+
+    try {
+      // Resolve the complete path first so a missing favorite does not disturb the loaded tree.
+      await this.getTreeLevel(
+        navigation.connectionId,
+        this.sideLanguage(navigation.side),
+        { path: navigation.path },
+      );
+      for (const ancestorPath of favoriteAncestorPaths(navigation.path)) {
+        if (!this.panel || !this.isCurrentFavoriteNavigation(navigation)) {
+          return;
+        }
+        await this.loadFavoriteLevel(navigation.side, navigation.connectionId, ancestorPath);
+        const otherSide: TreeSide = navigation.side === "left" ? "right" : "left";
+        const selection = this.getSelection();
+        const otherConnectionId = otherSide === "left"
+          ? selection.leftConnectionId
+          : selection.rightConnectionId;
+        if (otherConnectionId) {
+          try {
+            await this.loadFavoriteLevel(otherSide, otherConnectionId, ancestorPath);
+          } catch (error: unknown) {
+            this.log.debug(
+              `Favorite counterpart ${ancestorPath} is unavailable on the ${otherSide}: ${errorMessage(error)}`,
+            );
+          }
+        }
+      }
+      if (!await this.tryRevealFavorite(navigation)) {
+        throw new Error("The item loaded, but it could not be revealed in the comparison tree.");
+      }
+    } catch (error: unknown) {
+      const message = errorMessage(error);
+      this.log.warn(
+        `Unable to open favorite ${navigation.path} on connection ${navigation.connectionId}: ${message}`,
+      );
+      const connectionName = this.connectionStore.get(navigation.connectionId)?.name ?? "the connection";
+      const notFound = message.includes(" was not found.");
+      const choice = notFound
+        ? await vscode.window.showErrorMessage(
+            `Favorite path ${navigation.path} was not found on ${connectionName}.`,
+            "Remove Favorite",
+          )
+        : await vscode.window.showErrorMessage(
+            `Unable to open favorite path ${navigation.path} on ${connectionName}: ${message}`,
+          );
+      if (choice === "Remove Favorite") {
+        await this.connectionStore.removeFavoritePath(navigation.connectionId, navigation.path);
+      }
+    }
+  }
+
+  private async loadFavoriteLevel(
+    side: TreeSide,
+    connectionId: string,
+    path: string,
+  ): Promise<void> {
+    const language = this.sideLanguage(side);
+    const level = await this.getTreeLevel(connectionId, language, { path });
+    if (!this.panel || !this.isCurrentSelection(side, connectionId, language)) {
+      return;
+    }
+    await this.panel.webview.postMessage({
+      type: "treeLoaded",
+      side,
+      connectionId,
+      language,
+      requestedItemId: level.item.itemId,
+      level,
+    });
+  }
+
+  private isCurrentFavoriteNavigation(navigation: FavoriteNavigation): boolean {
+    const selection = this.getSelection();
+    return navigation.side === "left"
+      ? selection.leftConnectionId === navigation.connectionId
+      : selection.rightConnectionId === navigation.connectionId;
+  }
+
+  private async tryRevealFavorite(navigation: FavoriteNavigation): Promise<boolean> {
+    if (!this.panel) {
+      return false;
+    }
+    const requestId = `favorite-${this.nextFavoriteRevealId}`;
+    this.nextFavoriteRevealId += 1;
+    const result = new Promise<boolean>((resolve) => {
+      const timeout = setTimeout(() => {
+        this.pendingFavoriteReveal.delete(requestId);
+        resolve(false);
+      }, 1_500);
+      this.pendingFavoriteReveal.set(requestId, (found) => {
+        clearTimeout(timeout);
+        this.pendingFavoriteReveal.delete(requestId);
+        resolve(found);
+      });
+    });
+    const posted = await this.panel.webview.postMessage({
+      type: "tryRevealFavorite",
+      requestId,
+      path: navigation.path,
+      side: navigation.side,
+    });
+    if (!posted) {
+      this.pendingFavoriteReveal.get(requestId)?.(false);
+    }
+    return result;
+  }
+
   private async loadAndPostLanguages(side: TreeSide, connectionId: string): Promise<void> {
     if (!this.panel) {
       return;
@@ -1591,6 +1875,10 @@ export class ComparisonPanelManager implements vscode.Disposable {
     this.pendingTreeLevels.clear();
     this.pendingLanguages.clear();
     this.pendingItemDetails.clear();
+    for (const resolve of this.pendingFavoriteReveal.values()) {
+      resolve(false);
+    }
+    this.pendingFavoriteReveal.clear();
   }
 
   private cancelSubtreeLoad(rowKey: string): void {
@@ -1654,6 +1942,11 @@ function throwIfAborted(signal: AbortSignal): void {
 
 function normalizeItemId(itemId: string): string {
   return itemId.replace(/[{}-]/g, "").toLowerCase();
+}
+
+function favoriteAncestorPaths(path: string): readonly string[] {
+  const segments = path.split("/").filter(Boolean);
+  return segments.map((_, index) => `/${segments.slice(0, index + 1).join("/")}`);
 }
 
 async function mapWithConcurrency<TInput, TOutput>(

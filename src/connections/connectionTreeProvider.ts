@@ -15,10 +15,11 @@ export class ConnectionTreeItem extends vscode.TreeItem {
   constructor(
     readonly connection: XmCloudConnection,
     testState: TestState,
+    favoriteCount: number,
   ) {
     super(
       connection.name,
-      testState.sites?.length
+      testState.sites?.length || favoriteCount
         ? vscode.TreeItemCollapsibleState.Collapsed
         : vscode.TreeItemCollapsibleState.None,
     );
@@ -56,7 +57,24 @@ export class SiteTreeItem extends vscode.TreeItem {
   }
 }
 
-type ConnectionNode = ConnectionTreeItem | SiteTreeItem;
+export class FavoriteTreeItem extends vscode.TreeItem {
+  constructor(
+    readonly connection: XmCloudConnection,
+    readonly path: string,
+  ) {
+    super(`☆ ${path.split("/").filter(Boolean).at(-1) ?? path}`, vscode.TreeItemCollapsibleState.None);
+    this.description = path;
+    this.contextValue = "xmCloudFavorite";
+    this.tooltip = `${connection.name}\n${path}`;
+    this.command = {
+      command: "xmCloudSync.openFavorite",
+      title: "Open Favorite in Comparison",
+      arguments: [this],
+    };
+  }
+}
+
+type ConnectionNode = ConnectionTreeItem | SiteTreeItem | FavoriteTreeItem;
 
 function iconForStatus(status: ConnectionTestStatus): vscode.ThemeIcon {
   switch (status) {
@@ -93,14 +111,18 @@ export class ConnectionTreeProvider
   }
 
   getChildren(element?: ConnectionNode): ConnectionNode[] {
-    if (element instanceof SiteTreeItem) {
+    if (element instanceof SiteTreeItem || element instanceof FavoriteTreeItem) {
       return [];
     }
 
     if (element instanceof ConnectionTreeItem) {
-      return (this.testStates.get(element.connection.id)?.sites ?? []).map(
+      const favorites = this.store.listFavoritePaths(element.connection.id).map(
+        (path) => new FavoriteTreeItem(element.connection, path),
+      );
+      const sites = (this.testStates.get(element.connection.id)?.sites ?? []).map(
         (site) => new SiteTreeItem(site),
       );
+      return [...favorites, ...sites];
     }
 
     return this.store.list().map(
@@ -108,6 +130,7 @@ export class ConnectionTreeProvider
         new ConnectionTreeItem(
           connection,
           this.testStates.get(connection.id) ?? { status: "unknown" },
+          this.store.listFavoritePaths(connection.id).length,
         ),
     );
   }

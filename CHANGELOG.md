@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.6.4
+
+- Added connection-scoped favorite Sitecore paths beneath each connection in the Connections view.
+- Added **Add to Favorites** to comparison-item context menus, including adding a paired path to either or both connections.
+- Opened favorites by revealing already-loaded rows first, then resolving and loading the required ancestor chain through Authoring GraphQL when necessary.
+- Prompted to remove a favorite when its path can no longer be found or opened on its connection.
+- Kept normal favorite clicks navigation-only: they now require an open comparison containing the favorite's connection and never replace either side implicitly.
+- Added **Compare with…** to favorite context menus, placing the favorite's connection on the left, the chosen connection on the right, and then revealing the favorite path.
+
 ## 0.6.3
 
 - Stopped treating `consumed` Item Transfer history entries with `TransferState: Unknown` as successful completion.

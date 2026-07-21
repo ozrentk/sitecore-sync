@@ -4,6 +4,12 @@ import type { NewXmCloudConnection, XmCloudConnection } from "./connection";
 
 const connectionsKey = "sitecoreXmCloudSync.connections.v1";
 const secretPrefix = "sitecoreXmCloudSync.connectionSecret.v1";
+const favoritePathsKey = "sitecoreXmCloudSync.favoritePaths.v1";
+
+interface StoredFavoritePath {
+  readonly connectionId: string;
+  readonly path: string;
+}
 
 function secretKey(connectionId: string): string {
   return `${secretPrefix}.${connectionId}`;
@@ -55,6 +61,42 @@ export class ConnectionStore implements vscode.Disposable {
     );
   }
 
+  listFavoritePaths(connectionId: string): readonly string[] {
+    return this.readFavorites()
+      .filter((favorite) => favorite.connectionId === connectionId)
+      .map((favorite) => favorite.path)
+      .sort((left, right) => left.localeCompare(right, undefined, { sensitivity: "base" }));
+  }
+
+  async addFavoritePath(connectionId: string, path: string): Promise<boolean> {
+    if (!this.get(connectionId)) {
+      throw new Error("The XM Cloud connection no longer exists.");
+    }
+    const normalizedPath = normalizeFavoritePath(path);
+    const favorites = this.readFavorites();
+    if (favorites.some((favorite) =>
+      favorite.connectionId === connectionId &&
+      favorite.path.localeCompare(normalizedPath, undefined, { sensitivity: "base" }) === 0
+    )) {
+      return false;
+    }
+    await this.globalState.update(favoritePathsKey, [
+      ...favorites,
+      { connectionId, path: normalizedPath },
+    ]);
+    this.changeEmitter.fire();
+    return true;
+  }
+
+  async removeFavoritePath(connectionId: string, path: string): Promise<void> {
+    const favorites = this.readFavorites().filter((favorite) => !(
+      favorite.connectionId === connectionId &&
+      favorite.path.localeCompare(path, undefined, { sensitivity: "base" }) === 0
+    ));
+    await this.globalState.update(favoritePathsKey, favorites);
+    this.changeEmitter.fire();
+  }
+
   async add(input: NewXmCloudConnection): Promise<XmCloudConnection> {
     const connection: XmCloudConnection = {
       id: randomUUID(),
@@ -83,11 +125,36 @@ export class ConnectionStore implements vscode.Disposable {
   async remove(connectionId: string): Promise<void> {
     const remaining = this.list().filter((connection) => connection.id !== connectionId);
     await this.globalState.update(connectionsKey, remaining);
+    await this.globalState.update(
+      favoritePathsKey,
+      this.readFavorites().filter((favorite) => favorite.connectionId !== connectionId),
+    );
     await this.secrets.delete(secretKey(connectionId));
     this.changeEmitter.fire();
+  }
+
+  private readFavorites(): readonly StoredFavoritePath[] {
+    const stored = this.globalState.get<unknown>(favoritePathsKey, []);
+    if (!Array.isArray(stored)) {
+      return [];
+    }
+    return stored.filter((favorite): favorite is StoredFavoritePath => Boolean(
+      favorite &&
+      typeof favorite === "object" &&
+      typeof (favorite as Partial<StoredFavoritePath>).connectionId === "string" &&
+      typeof (favorite as Partial<StoredFavoritePath>).path === "string",
+    ));
   }
 
   dispose(): void {
     this.changeEmitter.dispose();
   }
+}
+
+function normalizeFavoritePath(value: string): string {
+  const trimmed = value.trim().replace(/\\/gu, "/").replace(/\/{2,}/gu, "/");
+  if (trimmed !== "/sitecore" && !trimmed.startsWith("/sitecore/")) {
+    throw new Error("Favorite paths must begin with /sitecore.");
+  }
+  return trimmed.length > 1 ? trimmed.replace(/\/$/u, "") : trimmed;
 }

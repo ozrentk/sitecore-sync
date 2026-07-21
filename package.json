@@ -2,7 +2,7 @@
   "name": "sitecore-xm-cloud-sync",
   "displayName": "XM Cloud Sync",
   "description": "Compare and synchronize Sitecore XM Cloud authoring content from VS Code.",
-  "version": "0.6.3",
+  "version": "0.6.4",
   "publisher": "OzrenTK",
   "license": "MIT",
   "engines": {
@@ -26,6 +26,8 @@
     "onCommand:xmCloudSync.testConnection",
     "onCommand:xmCloudSync.removeConnection",
     "onCommand:xmCloudSync.openComparison",
+    "onCommand:xmCloudSync.openFavorite",
+    "onCommand:xmCloudSync.removeFavorite",
     "onCommand:xmCloudSync.showLogs",
     "onCommand:xmCloudSync.compareWithConnection",
     "onCommand:xmCloudSync.refreshAll",
@@ -58,6 +60,15 @@
         "command": "xmCloudSync.openComparison",
         "title": "XM Cloud Sync: Open Comparison",
         "icon": "$(diff)"
+      },
+      {
+        "command": "xmCloudSync.openFavorite",
+        "title": "Open Favorite in Comparison"
+      },
+      {
+        "command": "xmCloudSync.removeFavorite",
+        "title": "Remove Favorite",
+        "icon": "$(trash)"
       },
       {
         "command": "xmCloudSync.showLogs",
@@ -161,11 +172,29 @@
           "command": "xmCloudSync.removeConnection",
           "when": "view == xmCloudSync.connections && viewItem == xmCloudConnection",
           "group": "2_manage"
+        },
+        {
+          "command": "xmCloudSync.removeFavorite",
+          "when": "view == xmCloudSync.connections && viewItem == xmCloudFavorite",
+          "group": "inline"
+        },
+        {
+          "command": "xmCloudSync.compareWithConnection",
+          "when": "view == xmCloudSync.connections && viewItem == xmCloudFavorite",
+          "group": "1_compare"
         }
       ],
       "commandPalette": [
         {
           "command": "xmCloudSync.compareWithConnection",
+          "when": "false"
+        },
+        {
+          "command": "xmCloudSync.openFavorite",
+          "when": "false"
+        },
+        {
+          "command": "xmCloudSync.removeFavorite",
           "when": "false"
         }
       ]
