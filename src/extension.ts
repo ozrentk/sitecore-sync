@@ -7,7 +7,11 @@ import {
   testConnection,
 } from "./connections/connectionCommands";
 import { ConnectionStore } from "./connections/connectionStore";
-import { ConnectionTreeItem, ConnectionTreeProvider } from "./connections/connectionTreeProvider";
+import {
+  ConnectionTreeItem,
+  ConnectionTreeProvider,
+  FavoriteTreeItem,
+} from "./connections/connectionTreeProvider";
 import { AuthoringContentClient } from "./sitecore/authoringClient";
 
 const viewIds = ["xmCloudSync.operations"] as const;
@@ -124,6 +128,17 @@ export function activate(context: vscode.ExtensionContext): void {
     }),
     vscode.commands.registerCommand("xmCloudSync.openComparison", async () => {
       await comparisonPanelManager.open();
+    }),
+    vscode.commands.registerCommand("xmCloudSync.openFavorite", async (argument) => {
+      if (argument instanceof FavoriteTreeItem) {
+        await comparisonPanelManager.openFavorite(argument.connection.id, argument.path);
+      }
+    }),
+    vscode.commands.registerCommand("xmCloudSync.removeFavorite", async (argument) => {
+      if (!(argument instanceof FavoriteTreeItem)) {
+        return;
+      }
+      await connectionStore.removeFavoritePath(argument.connection.id, argument.path);
     }),
     vscode.commands.registerCommand("xmCloudSync.showLogs", () => {
       log.show(true);

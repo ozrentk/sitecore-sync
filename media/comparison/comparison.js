@@ -552,6 +552,63 @@ function findLoadedPair(rowKey) {
   return findLoadedPairContext(rowKey)?.pair;
 }
 
+function findPairByPath(side, path) {
+  const leftRoot = state.trees.left.root;
+  const rightRoot = state.trees.right.root;
+  if (!leftRoot && !rightRoot) {
+    return undefined;
+  }
+  const normalizedPath = path.toLowerCase();
+  const visit = (pair, ancestors) => {
+    if (pair[side]?.path?.toLowerCase() === normalizedPath) {
+      return { pair, ancestors };
+    }
+    if (!pairLevelsLoaded(pair)) {
+      return undefined;
+    }
+    for (const childPair of pairChildren(
+      pair.left?.children ?? [],
+      pair.right?.children ?? [],
+    )) {
+      const found = visit(childPair, [...ancestors, pair]);
+      if (found) {
+        return found;
+      }
+    }
+    return undefined;
+  };
+  return visit(createPair(leftRoot, rightRoot, "root"), []);
+}
+
+function revealFavorite(side, path) {
+  refreshLoadedItemIndexes();
+  const found = findPairByPath(side, path);
+  if (!found) {
+    return false;
+  }
+  for (const ancestor of found.ancestors) {
+    state.expandedRows.add(ancestor.key);
+  }
+  state.selectedRowKey = found.pair.key;
+  render();
+  vscode.postMessage({
+    type: "selectFieldDiffItem",
+    leftItemId: found.pair.left?.itemId,
+    rightItemId: found.pair.right?.itemId,
+    leftName: found.pair.left?.displayName || found.pair.left?.name,
+    rightName: found.pair.right?.displayName || found.pair.right?.name,
+  });
+  requestAnimationFrame(() => {
+    for (const row of document.querySelectorAll(".comparison-row[data-row-key]")) {
+      if (row.dataset.rowKey === found.pair.key) {
+        row.scrollIntoView({ block: "center", behavior: "smooth" });
+        break;
+      }
+    }
+  });
+  return true;
+}
+
 function expandLoadedSubtree(rowKey, includeDetails = false) {
   const rootPair = findLoadedPair(rowKey);
   if (!rootPair) {
@@ -889,6 +946,21 @@ function showContextMenu(event, pair, forceDisabled = false) {
     render();
   });
 
+  const addFavorite = document.createElement("button");
+  addFavorite.className = "context-menu-item";
+  addFavorite.type = "button";
+  addFavorite.textContent = "Add to Favorites";
+  addFavorite.disabled = !pair.left && !pair.right;
+  addFavorite.title = "Add this path to one or both connection favorites.";
+  addFavorite.addEventListener("click", () => {
+    vscode.postMessage({
+      type: "addFavorite",
+      leftPath: pair.left?.path,
+      rightPath: pair.right?.path,
+    });
+    closeContextMenu();
+  });
+
   const leftConnection = state.connections.find(
     (connection) => connection.id === state.selection.leftConnectionId,
   );
@@ -930,6 +1002,7 @@ function showContextMenu(event, pair, forceDisabled = false) {
   syncRightToLeft.addEventListener("click", () => startSubtreeSync(pair, "rightToLeft"));
   menu.append(
     detailedDiff,
+    addFavorite,
     createContextMenuSeparator(),
     syncLeftToRight,
     syncRightToLeft,
@@ -1361,6 +1434,7 @@ function renderPair(pair, depth, ancestorRefreshing = false) {
   row.className = "comparison-row";
   row.setAttribute("role", "treeitem");
   row.setAttribute("aria-level", String(depth + 1));
+  row.dataset.rowKey = pair.key;
   if (pair.flags.length) {
     row.classList.add("different");
   } else {
@@ -1668,7 +1742,14 @@ swapButton.addEventListener("click", () => {
 
 window.addEventListener("message", (event) => {
   const message = event.data;
-  if (message?.type === "stateChanged") {
+  if (message?.type === "tryRevealFavorite") {
+    const found = typeof message.path === "string" &&
+      (message.side === "left" || message.side === "right")
+      ? revealFavorite(message.side, message.path)
+      : false;
+    vscode.postMessage({ type: "favoriteRevealResult", requestId: message.requestId, found });
+    return;
+  } else if (message?.type === "stateChanged") {
     state.connections = message.connections;
     state.selection = message.selection;
     state.textNormalization = message.textNormalization || "none";
