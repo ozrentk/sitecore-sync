@@ -94,7 +94,9 @@ export class ComparisonPanelManager implements vscode.Disposable {
   private readonly pendingSubtreeConfirmations = new Set<string>();
   private readonly syncingRows = new Set<string>();
   private readonly fieldDiffProvider = new FieldDiffContentProvider();
+  private readonly comparisonStateEmitter = new vscode.EventEmitter<void>();
   private selectedFieldDiffItem: FieldDiffSelection | undefined;
+  readonly onDidChangeComparisonState = this.comparisonStateEmitter.event;
   readonly fieldDiffViewProvider: FieldDiffViewProvider;
 
   constructor(
@@ -155,12 +157,14 @@ export class ComparisonPanelManager implements vscode.Disposable {
     );
 
     this.panel = panel;
+    this.comparisonStateEmitter.fire();
     panel.iconPath = vscode.Uri.joinPath(this.extensionUri, "media", "sitecore-xm-cloud-sync.svg");
     this.panelDisposables = [
       panel.onDidDispose(() => {
         this.cancelRequests();
         this.disposePanelSubscriptions();
         this.panel = undefined;
+        this.comparisonStateEmitter.fire();
       }),
       panel.webview.onDidReceiveMessage(async (message: WebviewMessage) => {
         await this.handleMessage(message);
@@ -189,6 +193,14 @@ export class ComparisonPanelManager implements vscode.Disposable {
       return false;
     }
     return this.panel.webview.postMessage({ type: "refreshAllRequested" });
+  }
+
+  isConnectionInOpenComparison(connectionId: string): boolean {
+    if (!this.panel) {
+      return false;
+    }
+    const selection = this.getSelection();
+    return selection.leftConnectionId === connectionId || selection.rightConnectionId === connectionId;
   }
 
   private async handleMessage(message: WebviewMessage): Promise<void> {
@@ -1523,6 +1535,7 @@ export class ComparisonPanelManager implements vscode.Disposable {
 
   private async saveSelection(selection: ComparisonSelection): Promise<void> {
     await this.workspaceState.update(selectionKey, selection);
+    this.comparisonStateEmitter.fire();
   }
 
   private async postState(): Promise<void> {
@@ -1602,6 +1615,7 @@ export class ComparisonPanelManager implements vscode.Disposable {
     for (const disposable of this.disposables) {
       disposable.dispose();
     }
+    this.comparisonStateEmitter.dispose();
   }
 }
 

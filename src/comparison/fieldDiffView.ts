@@ -102,7 +102,7 @@ export class FieldDiffViewProvider implements vscode.WebviewViewProvider, vscode
       Show equal Standard Template fields
     </label>
     <label title="Hide fields whose metadata, value, and value source match">
-      <input id="differences-only" type="checkbox">
+      <input id="differences-only" type="checkbox" checked>
       Show differences only
     </label>
   </header>

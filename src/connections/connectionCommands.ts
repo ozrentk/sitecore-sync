@@ -11,6 +11,7 @@ export async function addConnection(
   store: ConnectionStore,
   provider: ConnectionTreeProvider,
   authoringClient: AuthoringContentClient,
+  initialServerUrl?: string,
 ): Promise<void> {
   const name = await vscode.window.showInputBox({
     title: "Add XM Cloud Connection (1/4)",
@@ -33,6 +34,7 @@ export async function addConnection(
     title: "Add XM Cloud Connection (2/4)",
     prompt: "Enter the XM Cloud CM server URL, without an API path.",
     placeHolder: "https://example.sitecorecloud.io",
+    value: initialServerUrl,
     ignoreFocusOut: true,
     validateInput: validateServerUrl,
   });
@@ -164,9 +166,16 @@ async function showSites(
 export async function removeConnection(
   argument: ConnectionTreeItem | XmCloudConnection | undefined,
   store: ConnectionStore,
+  isInOpenComparison?: (connectionId: string) => boolean,
 ): Promise<void> {
   const connection = resolveConnection(argument, store);
   if (!connection) {
+    return;
+  }
+  if (isInOpenComparison?.(connection.id)) {
+    await vscode.window.showInformationMessage(
+      `Close the comparison or select another connection on both sides before deleting “${connection.name}”.`,
+    );
     return;
   }
 
@@ -180,6 +189,26 @@ export async function removeConnection(
   }
 
   await store.remove(connection.id);
+}
+
+export async function pasteAsConnectionUrl(
+  store: ConnectionStore,
+  provider: ConnectionTreeProvider,
+  authoringClient: AuthoringContentClient,
+): Promise<void> {
+  const clipboard = (await vscode.env.clipboard.readText()).trim();
+  if (!clipboard) {
+    await vscode.window.showInformationMessage("The clipboard does not contain a connection URL.");
+    return;
+  }
+  let serverUrl: string;
+  try {
+    serverUrl = normalizeServerUrl(new URL(clipboard).origin);
+  } catch (error: unknown) {
+    await vscode.window.showErrorMessage(`Clipboard URL is invalid: ${errorMessage(error)}`);
+    return;
+  }
+  await addConnection(store, provider, authoringClient, serverUrl);
 }
 
 function resolveConnection(

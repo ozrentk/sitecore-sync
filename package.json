@@ -2,7 +2,7 @@
   "name": "sitecore-xm-cloud-sync",
   "displayName": "XM Cloud Sync",
   "description": "Compare and synchronize Sitecore XM Cloud authoring content from VS Code.",
-  "version": "0.6.0",
+  "version": "0.6.1",
   "publisher": "OzrenTK",
   "license": "MIT",
   "engines": {
@@ -22,6 +22,7 @@
     "onView:xmCloudSync.operations",
     "onView:xmCloudSync.fieldDiff",
     "onCommand:xmCloudSync.addConnection",
+    "onCommand:xmCloudSync.pasteAsConnectionUrl",
     "onCommand:xmCloudSync.testConnection",
     "onCommand:xmCloudSync.removeConnection",
     "onCommand:xmCloudSync.openComparison",
@@ -39,6 +40,10 @@
         "icon": "$(add)"
       },
       {
+        "command": "xmCloudSync.pasteAsConnectionUrl",
+        "title": "XM Cloud Sync: Paste as Connection URL"
+      },
+      {
         "command": "xmCloudSync.testConnection",
         "title": "XM Cloud Sync: Test Connection",
         "icon": "$(play)"
@@ -46,7 +51,8 @@
       {
         "command": "xmCloudSync.removeConnection",
         "title": "XM Cloud Sync: Delete Connection",
-        "icon": "$(trash)"
+        "icon": "$(trash)",
+        "enablement": "xmCloudSync.selectedConnectionRemovable"
       },
       {
         "command": "xmCloudSync.openComparison",
@@ -95,7 +101,8 @@
         },
         {
           "id": "xmCloudSync.operations",
-          "name": "Sync Operations"
+          "name": "Sync Operations",
+          "collapsed": true
         }
       ],
       "xmCloudSyncFieldDiff": [
@@ -121,15 +128,30 @@
         {
           "command": "xmCloudSync.addConnection",
           "when": "view == xmCloudSync.connections",
-          "group": "navigation"
+          "group": "navigation@1"
+        },
+        {
+          "command": "xmCloudSync.removeConnection",
+          "when": "view == xmCloudSync.connections && xmCloudSync.connectionSelected",
+          "group": "navigation@2"
         },
         {
           "command": "xmCloudSync.openComparison",
           "when": "view == xmCloudSync.connections || view == xmCloudSync.operations",
-          "group": "navigation@10"
+          "group": "navigation@3"
+        },
+        {
+          "command": "xmCloudSync.pasteAsConnectionUrl",
+          "when": "view == xmCloudSync.connections",
+          "group": "1_connections"
         }
       ],
       "view/item/context": [
+        {
+          "command": "xmCloudSync.pasteAsConnectionUrl",
+          "when": "view == xmCloudSync.connections && !viewItem",
+          "group": "1_connections"
+        },
         {
           "command": "xmCloudSync.compareWithConnection",
           "when": "view == xmCloudSync.connections && viewItem == xmCloudConnection",
