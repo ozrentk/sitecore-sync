@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.7.0
+
+- Added directional value-copy arrows around the **Value** indicator in paired Field Diff rows.
+- Added confirmed single-field updates through the Authoring GraphQL `updateItem` mutation using the target language, version, and field name.
+- Kept credentials and mutation inputs in the extension host, blocked fallback-derived value copies, and refreshed affected comparison caches after successful writes.
+
 ## 0.6.4
 
 - Added connection-scoped favorite Sitecore paths beneath each connection in the Connections view.

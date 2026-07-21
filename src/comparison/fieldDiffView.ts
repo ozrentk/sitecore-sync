@@ -21,6 +21,7 @@ export interface FieldDiffSnapshot extends FieldDiffSelection {
 interface FieldDiffMessage {
   readonly type?: unknown;
   readonly fieldId?: unknown;
+  readonly direction?: unknown;
 }
 
 export class FieldDiffViewProvider implements vscode.WebviewViewProvider, vscode.Disposable {
@@ -31,6 +32,10 @@ export class FieldDiffViewProvider implements vscode.WebviewViewProvider, vscode
     private readonly extensionUri: vscode.Uri,
     private readonly onBecameVisible: () => void,
     private readonly onOpenTextDiff: (fieldId: string) => Promise<void>,
+    private readonly onCopyFieldValue: (
+      fieldId: string,
+      direction: "leftToRight" | "rightToLeft",
+    ) => Promise<void>,
   ) {}
 
   resolveWebviewView(view: vscode.WebviewView): void {
@@ -52,6 +57,16 @@ export class FieldDiffViewProvider implements vscode.WebviewViewProvider, vscode
           this.onBecameVisible();
         } else if (message.type === "openTextDiff" && typeof message.fieldId === "string") {
           await this.onOpenTextDiff(message.fieldId);
+        } else if (
+          message.type === "copyFieldValue" &&
+          typeof message.fieldId === "string" &&
+          (message.direction === "leftToRight" || message.direction === "rightToLeft")
+        ) {
+          try {
+            await this.onCopyFieldValue(message.fieldId, message.direction);
+          } finally {
+            await this.post({ type: "copyFinished", fieldId: message.fieldId });
+          }
         }
       }),
     );
@@ -78,7 +93,7 @@ export class FieldDiffViewProvider implements vscode.WebviewViewProvider, vscode
   }
 
   private async post(message: unknown): Promise<void> {
-    if (this.view?.visible) {
+    if (this.view) {
       await this.view.webview.postMessage(message);
     }
   }

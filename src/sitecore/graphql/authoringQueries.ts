@@ -150,3 +150,18 @@ export const nonStandardFieldIdsQuery = gql`
     }
   }
 `;
+
+export const updateFieldValueMutation = gql`
+  mutation XmCloudSyncUpdateFieldValue($input: UpdateItemInput!) {
+    updateItem(input: $input) {
+      item {
+        itemId
+        path
+        version
+        language {
+          name
+        }
+      }
+    }
+  }
+`;

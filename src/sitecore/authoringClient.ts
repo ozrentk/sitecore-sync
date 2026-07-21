@@ -7,6 +7,7 @@ import {
   nonStandardFieldIdsQuery,
   testConnectionQuery,
   treeLevelQuery,
+  updateFieldValueMutation,
 } from "./graphql/authoringQueries";
 import { SitecoreHttpClient, type SitecoreHttpLogger } from "./sitecoreHttpClient";
 
@@ -165,6 +166,20 @@ interface NonStandardFieldIdsQueryResponse {
         readonly nodes?: readonly { readonly fieldId?: unknown }[];
         readonly pageInfo?: RawPageInfo;
       };
+    } | null;
+  };
+  readonly errors?: readonly GraphQlError[];
+}
+
+interface UpdateFieldValueMutationResponse {
+  readonly data?: {
+    readonly updateItem?: {
+      readonly item?: {
+        readonly itemId?: unknown;
+        readonly path?: unknown;
+        readonly version?: unknown;
+        readonly language?: { readonly name?: unknown };
+      } | null;
     } | null;
   };
   readonly errors?: readonly GraphQlError[];
@@ -686,6 +701,45 @@ export class AuthoringContentClient {
       this.loadNonStandardFieldIds(connection.serverUrl, accessToken, where, signal),
     ]);
     return parseItemDetails(rawDetails, nonStandardFieldIds);
+  }
+
+  async updateFieldValue(
+    connection: XmCloudConnection,
+    clientSecret: string,
+    itemId: string,
+    language: string,
+    version: number,
+    fieldName: string,
+    value: string,
+    signal: AbortSignal,
+  ): Promise<void> {
+    const accessToken = await this.getAccessToken(connection, clientSecret, signal);
+    const payload = await this.postGraphQl<UpdateFieldValueMutationResponse>(
+      connection.serverUrl,
+      accessToken,
+      "update Authoring field value",
+      "XmCloudSyncUpdateFieldValue",
+      print(updateFieldValueMutation),
+      {
+        input: {
+          database: "master",
+          itemId,
+          language,
+          version,
+          fields: [{ name: fieldName, value, reset: false }],
+        },
+      },
+      signal,
+      false,
+    );
+    const updatedItem = payload.data?.updateItem?.item;
+    if (
+      !updatedItem ||
+      typeof updatedItem.itemId !== "string" ||
+      normalizeGuid(updatedItem.itemId) !== normalizeGuid(itemId)
+    ) {
+      throw new Error("Authoring API did not confirm the updated item.");
+    }
   }
 
   private async loadItemDetailsPages(

@@ -46,6 +46,25 @@ pre {
   word-break: break-word;
 }
 .differences { display: flex; gap: 3px; align-items: center; justify-content: center; padding: 6px 4px; flex-wrap: wrap; }
+.value-transfer { display: grid; grid-template-rows: auto auto auto; justify-items: center; gap: 2px; }
+.copy-value {
+  min-width: 22px;
+  min-height: 18px;
+  padding: 0 4px;
+  border: 1px solid transparent;
+  border-radius: 3px;
+  color: var(--vscode-textLink-foreground);
+  background: transparent;
+  font: inherit;
+  font-size: 16px;
+  line-height: 16px;
+  cursor: pointer;
+}
+.copy-value.right { justify-self: end; }
+.copy-value.left { justify-self: start; }
+.copy-value:hover:not(:disabled) { border-color: var(--vscode-button-border, var(--vscode-panel-border)); background: var(--vscode-toolbar-hoverBackground); }
+.copy-value:focus-visible { outline: 1px solid var(--vscode-focusBorder); outline-offset: 1px; }
+.copy-value:disabled { color: var(--vscode-disabledForeground); cursor: wait; }
 .badge { padding: 0 4px; border: 1px solid var(--vscode-panel-border); border-radius: 3px; font-size: 10px; line-height: 15px; }
 .scope { color: var(--vscode-charts-blue, var(--vscode-textLink-foreground)); }
 .override, .difference { color: var(--vscode-editorWarning-foreground); }
