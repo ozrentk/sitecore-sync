@@ -262,8 +262,7 @@ export class AuthoringContentClient {
       contentTransferFileName: string;
     }> = [];
     const itemTransferIds: string[] = [];
-    const blobNamesToDelete: string[] = [];
-    const completedBlobNames = new Set<string>();
+    const destinationBlobNames: string[] = [];
 
     await this.requestWithoutBody(
       sourceTransferBase,
@@ -363,7 +362,7 @@ export class AuthoringContentClient {
           "ContentTransferFileName",
           "contentTransferFileName",
         );
-        blobNamesToDelete.push(blobName);
+        destinationBlobNames.push(blobName);
         completedChunkSets.push({
           chunkSetId,
           chunkCount,
@@ -381,97 +380,90 @@ export class AuthoringContentClient {
       );
     }
 
-    try {
-      for (const blobName of blobNamesToDelete) {
-        const blobListUrl = new URL("sources/blobs", itemTransferBase);
-        await this.pollJson(
-          blobListUrl,
-          destinationToken,
-          "poll item-transfer blob",
-          (payload) => {
-            const serialized = JSON.stringify(payload);
-            return serialized.includes(blobName) && /Uploaded/iu.test(serialized);
-          },
-          signal,
-          150,
-        );
+    for (const blobName of destinationBlobNames) {
+      const blobListUrl = new URL("sources/blobs", itemTransferBase);
+      await this.pollJson(
+        blobListUrl,
+        destinationToken,
+        "poll item-transfer blob",
+        (payload) => {
+          const serialized = JSON.stringify(payload);
+          return serialized.includes(blobName) && /Uploaded/iu.test(serialized);
+        },
+        signal,
+        150,
+      );
 
-        const startUrl = new URL("transfers/databases/master/sources", itemTransferBase);
-        startUrl.searchParams.set("blobName", blobName);
-        const startResponse = await this.http.request(
-          startUrl,
-          { method: "POST", headers: { authorization: `Bearer ${destinationToken}` } },
-          { name: "start item transfer", signal, retryable: false },
-        );
-        await assertSuccessfulResponse(startResponse, "Start item transfer");
-        const location = startResponse.headers.get("location");
-        if (!location) {
-          throw new Error("The Item Transfer API did not return a location header.");
-        }
-        const itemTransferId = location.split("/").filter(Boolean).at(-1);
-        if (!itemTransferId) {
-          throw new Error("The Item Transfer API returned an invalid location header.");
-        }
-        const decodedItemTransferId = decodeURIComponent(itemTransferId);
-        if (decodedItemTransferId !== blobName) {
-          throw new Error(
-            `The Item Transfer API location identified ${decodedItemTransferId}, expected ${blobName}.`,
-          );
-        }
-        itemTransferIds.push(decodedItemTransferId);
-        const itemTransferStatus = await this.pollItemTransfer(
-          new URL(`transfers/${encodeURIComponent(decodedItemTransferId)}`, itemTransferBase),
-          destinationToken,
-          decodedItemTransferId,
-          signal,
-        );
-        if (!itemTransferStatus) {
-          return {
-            state: "Pending",
-            transferId,
-            sourceItemId: normalizeGuid(sourceItem.item.itemId),
-            sourceChildIds: sourceItem.children.map((child) => normalizeGuid(child.itemId)),
-            chunkSets: completedChunkSets,
-            itemTransferIds,
-          };
-        }
-        completedBlobNames.add(blobName);
+      const startUrl = new URL("transfers/databases/master/sources", itemTransferBase);
+      startUrl.searchParams.set("blobName", blobName);
+      const startResponse = await this.http.request(
+        startUrl,
+        { method: "POST", headers: { authorization: `Bearer ${destinationToken}` } },
+        { name: "start item transfer", signal, retryable: false },
+      );
+      await assertSuccessfulResponse(startResponse, "Start item transfer");
+      const location = startResponse.headers.get("location");
+      if (!location) {
+        throw new Error("The Item Transfer API did not return a location header.");
       }
-
-      const destinationItem = await this.loadTreeLevel(
-        destination,
-        destinationSecret,
-        { itemId: sourceItem.item.itemId },
-        destinationLanguage,
+      const itemTransferId = location.split("/").filter(Boolean).at(-1);
+      if (!itemTransferId) {
+        throw new Error("The Item Transfer API returned an invalid location header.");
+      }
+      const decodedItemTransferId = decodeURIComponent(itemTransferId);
+      if (decodedItemTransferId !== blobName) {
+        throw new Error(
+          `The Item Transfer API location identified ${decodedItemTransferId}, expected ${blobName}.`,
+        );
+      }
+      itemTransferIds.push(decodedItemTransferId);
+      const itemTransferStatus = await this.pollItemTransfer(
+        new URL(`transfers/${encodeURIComponent(decodedItemTransferId)}`, itemTransferBase),
+        destinationToken,
+        decodedItemTransferId,
         signal,
       );
-      const sourceChildIds = sourceItem.children.map((child) => normalizeGuid(child.itemId));
-      const destinationChildIds = destinationItem.children.map((child) => normalizeGuid(child.itemId));
-      for (const childId of sourceChildIds) {
-        if (!destinationChildIds.includes(childId)) {
-          throw new Error(`Destination verification did not find transferred child ${childId}.`);
-        }
-      }
-
-      return {
-        state: "Finished",
-        transferId,
-        sourceItemId: normalizeGuid(sourceItem.item.itemId),
-        sourceChildIds,
-        chunkSets: completedChunkSets,
-        itemTransferIds,
-        destinationItemId: normalizeGuid(destinationItem.item.itemId),
-        destinationChildIds,
-      };
-    } finally {
-      for (const blobName of completedBlobNames) {
-        await this.deleteItemTransferBlob(
-          new URL(`sources/blobs/${encodeURIComponent(blobName)}`, itemTransferBase),
-          destinationToken,
-          signal,
-        );
+      if (!itemTransferStatus) {
+        return {
+          state: "Pending",
+          transferId,
+          sourceItemId: normalizeGuid(sourceItem.item.itemId),
+          sourceChildIds: sourceItem.children.map((child) => normalizeGuid(child.itemId)),
+          chunkSets: completedChunkSets,
+          itemTransferIds,
+        };
       }
     }
+
+    const destinationItem = await this.loadTreeLevel(
+      destination,
+      destinationSecret,
+      { itemId: sourceItem.item.itemId },
+      destinationLanguage,
+      signal,
+    );
+    const sourceChildIds = sourceItem.children.map((child) => normalizeGuid(child.itemId));
+    const destinationChildIds = destinationItem.children.map((child) => normalizeGuid(child.itemId));
+    for (const childId of sourceChildIds) {
+      if (!destinationChildIds.includes(childId)) {
+        throw new Error(`Destination verification did not find transferred child ${childId}.`);
+      }
+    }
+
+    // Destination .raif blobs are intentionally retained. Sitecore exposes imported items
+    // before its background database synchronization is complete, and deleting a blob too
+    // early leaves descendant field data pointing at missing Azure storage. Automated cleanup
+    // can be reintroduced only when the API exposes a reliably observable Finished state.
+    return {
+      state: "Finished",
+      transferId,
+      sourceItemId: normalizeGuid(sourceItem.item.itemId),
+      sourceChildIds,
+      chunkSets: completedChunkSets,
+      itemTransferIds,
+      destinationItemId: normalizeGuid(destinationItem.item.itemId),
+      destinationChildIds,
+    };
   }
 
   private async requestWithoutBody(
@@ -532,21 +524,6 @@ export class AuthoringContentClient {
     throw new Error(`${name} did not complete within ${maxAttempts * 2} seconds.`);
   }
 
-  private async deleteItemTransferBlob(
-    url: URL,
-    token: string,
-    signal: AbortSignal,
-  ): Promise<void> {
-    const response = await this.http.request(
-      url,
-      { method: "DELETE", headers: { authorization: `Bearer ${token}` } },
-      { name: "delete item-transfer blob", signal, retryable: false },
-    );
-    if (response.status !== 404) {
-      await assertSuccessfulResponse(response, "Delete item-transfer blob");
-    }
-  }
-
   private async pollItemTransfer(
     url: URL,
     token: string,
@@ -584,9 +561,13 @@ export class AuthoringContentClient {
           if (listedState === "Failed" || listedState === "Discarded") {
             throw new Error(`Item transfer ${transferId} entered the ${listedState} state.`);
           }
-          const historyId = stringProperty(matchingTransfer, "Id", "id");
-          const consumedDate = stringProperty(matchingTransfer, "ConsumedDate", "consumedDate");
-          if (listedState === "Finished" || consumedDate || /^consumed\./iu.test(historyId ?? "")) {
+          const blobState = stringProperty(matchingTransfer, "BlobState", "blobState");
+          if (blobState === "TransferredWithErrors") {
+            throw new Error(
+              `Item transfer ${transferId} completed with validation errors.`,
+            );
+          }
+          if (listedState === "Finished") {
             return matchingTransfer;
           }
         }
@@ -599,9 +580,11 @@ export class AuthoringContentClient {
       if (state === "Failed" || state === "Discarded") {
         throw new Error(`Item transfer ${transferId} entered the ${state} state.`);
       }
-      const historyId = stringProperty(payload, "Id", "id");
-      const consumedDate = stringProperty(payload, "ConsumedDate", "consumedDate");
-      if (state === "Finished" || consumedDate || /^consumed\./iu.test(historyId ?? "")) {
+      const blobState = stringProperty(payload, "BlobState", "blobState");
+      if (blobState === "TransferredWithErrors") {
+        throw new Error(`Item transfer ${transferId} completed with validation errors.`);
+      }
+      if (state === "Finished") {
         return payload;
       }
       await abortableDelay(2_000, signal);

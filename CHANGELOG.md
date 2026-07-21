@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.6.3
+
+- Stopped treating `consumed` Item Transfer history entries with `TransferState: Unknown` as successful completion.
+- Retained destination `.raif` blobs automatically to prevent descendant field data from referencing deleted Azure storage while Sitecore's background database sync is still running.
+- Recognized `TransferredWithErrors` as a terminal transfer failure instead of continuing to poll.
+
 ## 0.6.2
 
 - Removed **Paste as Connection URL** from the Connections view's **More Actions…** menu.

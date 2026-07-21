@@ -195,7 +195,7 @@ This setting affects comparison and diff presentation only. It never rewrites a 
 
 ## Sync operations
 
-The first executable sync path is a confirmed, transfer-backed subtree operation available directly from a paired item's context menu in either direction. It uses `ItemAndDescendants` with `OverrideExistingItem`, transfers every language and version, preserves item IDs, blocks same-environment transfer and same-path/different-ID conflicts, verifies source identity and target-parent existence, refreshes loaded target data after completion, and writes an execution journal. The generated removable operation-list workflow below remains the next layer over this proven execution primitive.
+The first executable sync path is a confirmed, transfer-backed subtree operation available directly from a paired item's context menu in either direction. It uses `ItemAndDescendants` with `OverrideExistingItem`, transfers every language and version, preserves item IDs, blocks same-environment transfer and same-path/different-ID conflicts, verifies source identity and target-parent existence, refreshes loaded target data after completion, and writes an execution journal. Only an explicit Item Transfer `Finished` state is terminal success; `consumed` history entries with an unknown state remain pending. Destination `.raif` blobs are retained automatically until a reliable cleanup workflow is introduced. The generated removable operation-list workflow below remains the next layer over this proven execution primitive.
 
 Comparison generates a proposed operation list in the selected sync direction. Users may remove operations before execution. The MVP does not allow manually adding, reversing, or editing generated operations.
 
