@@ -17,6 +17,7 @@ const selectionKey = "sitecoreXmCloudSync.comparisonSelection.v1";
 const defaultLanguage = "en";
 const authoringRootPath = "/sitecore";
 const traversalConcurrencyPerSide = 2;
+const fieldUpdateTimeoutMilliseconds = 30_000;
 
 type TreeSide = "left" | "right";
 
@@ -103,6 +104,7 @@ export class ComparisonPanelManager implements vscode.Disposable {
   private readonly subtreeLoadControllers = new Map<string, AbortController>();
   private readonly pendingSubtreeConfirmations = new Set<string>();
   private readonly syncingRows = new Set<string>();
+  private readonly copyingFieldIds = new Set<string>();
   private readonly fieldDiffProvider = new FieldDiffContentProvider();
   private readonly comparisonStateEmitter = new vscode.EventEmitter<void>();
   private readonly pendingFavoriteReveal = new Map<string, (found: boolean) => void>();
@@ -130,6 +132,9 @@ export class ComparisonPanelManager implements vscode.Disposable {
       },
       async (fieldId) => {
         await this.openSelectedFieldDiff(fieldId);
+      },
+      async (fieldId, direction) => {
+        await this.copySelectedFieldValue(fieldId, direction);
       },
     );
     this.disposables.push(
@@ -1471,6 +1476,213 @@ export class ComparisonPanelManager implements vscode.Disposable {
       selected.rightItemId,
       fieldId,
     );
+  }
+
+  private async copySelectedFieldValue(
+    fieldId: string,
+    direction: "leftToRight" | "rightToLeft",
+  ): Promise<void> {
+    const normalizedFieldId = normalizeItemId(fieldId);
+    if (this.copyingFieldIds.has(normalizedFieldId)) {
+      return;
+    }
+    this.copyingFieldIds.add(normalizedFieldId);
+    try {
+      const selected = this.selectedFieldDiffItem;
+      const selection = this.getSelection();
+      if (
+        !selected?.leftItemId ||
+        !selected.rightItemId ||
+        !selection.leftConnectionId ||
+        !selection.rightConnectionId
+      ) {
+        await vscode.window.showErrorMessage(
+          "Both items and connections must be available to copy a field value.",
+        );
+        return;
+      }
+
+      const [leftDetails, rightDetails] = await Promise.all([
+        this.getItemDetails(
+          selection.leftConnectionId,
+          selection.leftLanguage,
+          selected.leftItemId,
+        ),
+        this.getItemDetails(
+          selection.rightConnectionId,
+          selection.rightLanguage,
+          selected.rightItemId,
+        ),
+      ]);
+      const leftField = leftDetails.fields.find(
+        (field) => normalizeItemId(field.fieldId) === normalizedFieldId,
+      );
+      const rightField = rightDetails.fields.find(
+        (field) => normalizeItemId(field.fieldId) === normalizedFieldId,
+      );
+      if (!leftField || !rightField) {
+        await vscode.window.showErrorMessage(
+          "The field is no longer available on both sides of the comparison.",
+        );
+        return;
+      }
+
+      const leftToRight = direction === "leftToRight";
+      const sourceSide: TreeSide = leftToRight ? "left" : "right";
+      const targetSide: TreeSide = leftToRight ? "right" : "left";
+      const sourceDetails = leftToRight ? leftDetails : rightDetails;
+      const targetDetails = leftToRight ? rightDetails : leftDetails;
+      const sourceField = leftToRight ? leftField : rightField;
+      const targetField = leftToRight ? rightField : leftField;
+      const sourceConnectionId = leftToRight
+        ? selection.leftConnectionId
+        : selection.rightConnectionId;
+      const targetConnectionId = leftToRight
+        ? selection.rightConnectionId
+        : selection.leftConnectionId;
+      const sourceConnection = this.connectionStore.get(sourceConnectionId);
+      const targetConnection = this.connectionStore.get(targetConnectionId);
+      if (!sourceConnection || !targetConnection) {
+        await vscode.window.showErrorMessage("A comparison connection is no longer available.");
+        return;
+      }
+      if (sourceField.containsFallbackValue) {
+        await vscode.window.showWarningMessage(
+          "Fallback-derived values cannot be copied as stored field values.",
+        );
+        return;
+      }
+
+      const normalization = vscode.workspace
+        .getConfiguration("xmCloudSync")
+        .get<"none" | "lineEndings">("textNormalization", "none");
+      const normalizeValue = (value: string): string =>
+        normalization === "lineEndings" ? value.replace(/\r\n?|\n/g, "\n") : value;
+      if (normalizeValue(sourceField.value) === normalizeValue(targetField.value)) {
+        await vscode.window.showInformationMessage("The field values no longer differ.");
+        return;
+      }
+
+      const sourceKind = sourceField.containsInheritedValue
+        ? "inherited"
+        : sourceField.containsStandardValue
+          ? "Standard Value"
+          : "stored";
+      const fieldLabel = targetField.label || targetField.name;
+      const sourceLabel = `${sourceConnection.name}/${sourceDetails.language}`;
+      const targetLabel = `${targetConnection.name}/${targetDetails.language}`;
+      const sourceNote = sourceKind === "stored"
+        ? ""
+        : ` The ${sourceKind} source value will become an explicit stored value on the target.`;
+      const confirmed = await vscode.window.showWarningMessage(
+        `Copy “${fieldLabel}” from ${sourceLabel} to ${targetLabel}? This replaces the target field value.${sourceNote}`,
+        { modal: true },
+        "Copy Value",
+      );
+      if (confirmed !== "Copy Value") {
+        return;
+      }
+      const currentSelection = this.getSelection();
+      if (
+        selected !== this.selectedFieldDiffItem ||
+        currentSelection.leftConnectionId !== selection.leftConnectionId ||
+        currentSelection.rightConnectionId !== selection.rightConnectionId ||
+        currentSelection.leftLanguage !== selection.leftLanguage ||
+        currentSelection.rightLanguage !== selection.rightLanguage
+      ) {
+        await vscode.window.showWarningMessage(
+          "The comparison changed before the field value could be copied.",
+        );
+        return;
+      }
+
+      const targetSecret = await this.connectionStore.getClientSecret(targetConnectionId);
+      if (!targetSecret) {
+        throw new Error("The target XM Cloud connection secret is missing.");
+      }
+      const controller = new AbortController();
+      const timeout = setTimeout(
+        () => controller.abort(new Error("Field update timed out.")),
+        fieldUpdateTimeoutMilliseconds,
+      );
+      this.requestControllers.add(controller);
+      try {
+        this.log.info(
+          `Copying field ${normalizedFieldId} ${sourceSide} to ${targetSide} on item ${targetDetails.itemId}.`,
+        );
+        await this.authoringClient.updateFieldValue(
+          targetConnection,
+          targetSecret,
+          targetDetails.itemId,
+          targetDetails.language,
+          targetDetails.version,
+          targetField.name,
+          sourceField.value,
+          controller.signal,
+        );
+      } finally {
+        clearTimeout(timeout);
+        this.requestControllers.delete(controller);
+      }
+
+      const affectedSides: Array<{
+        readonly side: TreeSide;
+        readonly connectionId: string;
+        readonly language: string;
+        readonly itemId: string;
+      }> = [{
+        side: targetSide,
+        connectionId: targetConnectionId,
+        language: targetDetails.language,
+        itemId: targetDetails.itemId,
+      }];
+      const sameEnvironment = sourceConnection.serverUrl.replace(/\/$/u, "").toLowerCase() ===
+        targetConnection.serverUrl.replace(/\/$/u, "").toLowerCase();
+      const sameItem = normalizeItemId(sourceDetails.itemId) ===
+        normalizeItemId(targetDetails.itemId);
+      const sameLanguage = sourceDetails.language.toLowerCase() ===
+        targetDetails.language.toLowerCase();
+      const sourceAlsoAffected = sameEnvironment && sameItem && (
+        targetField.scope === "SHARED" ||
+        (targetField.scope === "UNVERSIONED" && sameLanguage) ||
+        (targetField.scope === "VERSIONED" &&
+          sameLanguage &&
+          sourceDetails.version === targetDetails.version)
+      );
+      if (sourceAlsoAffected) {
+        affectedSides.push({
+          side: sourceSide,
+          connectionId: sourceConnectionId,
+          language: sourceDetails.language,
+          itemId: sourceDetails.itemId,
+        });
+      }
+      for (const affected of affectedSides) {
+        this.invalidateItemDetails(
+          affected.connectionId,
+          affected.language,
+          affected.itemId,
+        );
+      }
+      await Promise.all(affectedSides.map((affected) =>
+        this.loadAndPostItemDetails(
+          affected.side,
+          affected.connectionId,
+          affected.itemId,
+        )
+      ));
+      await this.refreshFieldDiffView();
+      this.log.info(
+        `Copied field ${normalizedFieldId} ${sourceSide} to ${targetSide} on item ${targetDetails.itemId}.`,
+      );
+      await vscode.window.showInformationMessage(
+        `Copied “${fieldLabel}” from ${sourceLabel} to ${targetLabel}.`,
+      );
+    } catch (error: unknown) {
+      await vscode.window.showErrorMessage(`Unable to copy field value: ${errorMessage(error)}`);
+    } finally {
+      this.copyingFieldIds.delete(normalizedFieldId);
+    }
   }
 
   private async openFieldDiffForAvailableSides(

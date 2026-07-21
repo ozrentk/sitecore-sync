@@ -6,6 +6,7 @@ const state = {
   error: undefined,
   showStandardTemplate: false,
   differencesOnly: true,
+  copyingFieldIds: new Set(),
 };
 
 const content = document.getElementById("content");
@@ -158,7 +159,41 @@ function createFieldRow(pair) {
     const badge = document.createElement("span");
     badge.className = "badge difference";
     badge.textContent = flag;
-    differences.append(badge);
+    if (flag === "Value" && pair.left && pair.right) {
+      const transfer = document.createElement("div");
+      transfer.className = "value-transfer";
+      const leftToRight = document.createElement("button");
+      leftToRight.type = "button";
+      leftToRight.className = "copy-value right";
+      leftToRight.textContent = "→";
+      leftToRight.title = "Copy the left value to the right";
+      leftToRight.setAttribute("aria-label", "Copy the left field value to the right");
+      const rightToLeft = document.createElement("button");
+      rightToLeft.type = "button";
+      rightToLeft.className = "copy-value left";
+      rightToLeft.textContent = "←";
+      rightToLeft.title = "Copy the right value to the left";
+      rightToLeft.setAttribute("aria-label", "Copy the right field value to the left");
+      const copying = state.copyingFieldIds.has(pair.key);
+      leftToRight.disabled = copying;
+      rightToLeft.disabled = copying;
+      const copy = (direction) => {
+        if (state.copyingFieldIds.has(pair.key)) return;
+        state.copyingFieldIds.add(pair.key);
+        render();
+        vscode.postMessage({
+          type: "copyFieldValue",
+          fieldId: pair.left.fieldId,
+          direction,
+        });
+      };
+      leftToRight.addEventListener("click", () => copy("leftToRight"));
+      rightToLeft.addEventListener("click", () => copy("rightToLeft"));
+      transfer.append(leftToRight, badge, rightToLeft);
+      differences.append(transfer);
+    } else {
+      differences.append(badge);
+    }
   }
   row.append(createFieldCell(pair.left, pair), differences, createFieldCell(pair.right, pair));
   return row;
@@ -224,6 +259,9 @@ window.addEventListener("message", (event) => {
     state.snapshot = undefined;
     state.loadingSelection = undefined;
     state.error = undefined;
+    state.copyingFieldIds.clear();
+  } else if (message?.type === "copyFinished" && typeof message.fieldId === "string") {
+    state.copyingFieldIds.delete(normalizeId(message.fieldId));
   }
   render();
 });
