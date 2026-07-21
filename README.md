@@ -25,7 +25,7 @@ Run **XM Cloud Sync: Open Comparison** from the Command Palette or use the diff 
 
 One XM Cloud connection is sufficient. Select the same connection on both sides to compare languages such as `en` and `de`, or select different connections to compare environments. **Compare with…** also offers the selected connection itself for cross-language comparison.
 
-Selecting a connection reveals a trash action beside **Add Connection** and **Open Comparison**. A connection used by the open comparison cannot be deleted. **Paste as Connection URL** is available from the Connections view context/overflow menu; it accepts a full XM Cloud URL copied from Content Editor, extracts its HTTPS origin, and prefills the connection wizard.
+Selecting a connection reveals a trash action beside **Add Connection** and **Open Comparison**. A connection used by the open comparison cannot be deleted. **Paste as Connection URL** is available by right-clicking a connection and as an action in the empty Connections view; it accepts a full XM Cloud URL copied from Content Editor, extracts its HTTPS origin, and prefills the connection wizard.
 
 The comparison tab loads the authoring root and its immediate children on both sides. Expanding an item loads its latest numbered version, complete field set, template metadata, and direct children using paginated Authoring GraphQL requests. Loaded details are cached for the lifetime of the extension, while clicking an item only selects it and never causes a refresh. Expanded rows contain child items only, keeping the structural tree compact.
 

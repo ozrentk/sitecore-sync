@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.6.2
+
+- Removed **Paste as Connection URL** from the Connections view's **More Actions…** menu.
+- Added the paste action to connection-item context menus and to the empty Connections welcome view.
+
 ## 0.6.1
 
 - Collapsed the **Sync Operations** view by default and removed the comparison toolbar's complete-refresh button.

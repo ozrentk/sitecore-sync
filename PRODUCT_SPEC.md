@@ -51,7 +51,7 @@ The `Sitecore Sync` activity view contains:
 
 The activity view is the launcher and connection-management surface. The primary comparison workspace opens as a single document-style VS Code webview tab. It can be opened from the view title or Command Palette. A connection's **Compare with…** context action places that connection on the left and prompts for the right-side connection. The same connection can be selected on both sides for cross-language comparison.
 
-The **Sync Operations** view is collapsed by default. Selecting a connection exposes a title-bar trash action, but deletion is disabled while that connection is selected on either side of the open comparison. The Connections view provides **Paste as Connection URL**, which reads a full XM Cloud URL from the clipboard, extracts its HTTPS origin, and uses that origin to prefill the add-connection workflow.
+The **Sync Operations** view is collapsed by default. Selecting a connection exposes a title-bar trash action, but deletion is disabled while that connection is selected on either side of the open comparison. A connection's context menu and the empty Connections welcome view provide **Paste as Connection URL**, which reads a full XM Cloud URL from the clipboard, extracts its HTTPS origin, and uses that origin to prefill the add-connection workflow.
 
 The comparison tab's sticky top bar contains independent left and right connection and language selectors plus a swap action. The comparison tab remembers its selections per workspace and updates when connections are added or removed.
 
