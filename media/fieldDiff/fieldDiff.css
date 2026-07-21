@@ -12,15 +12,33 @@ body {
   top: 0;
   z-index: 2;
   display: flex;
-  gap: 20px;
+  gap: 8px 18px;
   align-items: center;
+  flex-wrap: wrap;
   min-height: 34px;
   padding: 6px 12px;
   border-bottom: 1px solid var(--vscode-panel-border);
   background: var(--vscode-sideBarSectionHeader-background, var(--vscode-panel-background));
 }
-.toolbar label { display: flex; gap: 6px; align-items: center; white-space: nowrap; }
-.toolbar input { margin: 0; }
+.toolbar-title { white-space: nowrap; }
+.visibility-control { display: flex; gap: 6px; align-items: center; white-space: nowrap; }
+.visibility-control > span { color: var(--vscode-descriptionForeground); font-size: 11px; }
+.visibility-options { display: inline-flex; overflow: hidden; border: 1px solid var(--vscode-panel-border); border-radius: 3px; }
+.visibility-options button {
+  min-height: 20px;
+  padding: 1px 6px;
+  border: 0;
+  border-right: 1px solid var(--vscode-panel-border);
+  color: var(--vscode-foreground);
+  background: transparent;
+  font: inherit;
+  font-size: 11px;
+  cursor: pointer;
+}
+.visibility-options button:last-child { border-right: 0; }
+.visibility-options button:hover { background: var(--vscode-toolbar-hoverBackground); }
+.visibility-options button[aria-pressed="true"] { color: var(--vscode-button-foreground); background: var(--vscode-button-background); }
+.visibility-options button:focus-visible { position: relative; outline: 1px solid var(--vscode-focusBorder); outline-offset: -1px; }
 .paired-grid {
   display: grid;
   grid-template-columns: minmax(250px, 1fr) minmax(64px, auto) minmax(250px, 1fr);
