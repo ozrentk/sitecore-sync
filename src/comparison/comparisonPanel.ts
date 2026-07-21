@@ -136,6 +136,7 @@ export class ComparisonPanelManager implements vscode.Disposable {
       async (fieldId, direction) => {
         await this.copySelectedFieldValue(fieldId, direction);
       },
+      async (side, itemId) => await this.copySelectedItemId(side, itemId),
     );
     this.disposables.push(
       this.fieldDiffViewProvider,
@@ -1682,6 +1683,24 @@ export class ComparisonPanelManager implements vscode.Disposable {
       await vscode.window.showErrorMessage(`Unable to copy field value: ${errorMessage(error)}`);
     } finally {
       this.copyingFieldIds.delete(normalizedFieldId);
+    }
+  }
+
+  private async copySelectedItemId(side: TreeSide, itemId: string): Promise<boolean> {
+    const selectedItemId = side === "left"
+      ? this.selectedFieldDiffItem?.leftItemId
+      : this.selectedFieldDiffItem?.rightItemId;
+    if (!selectedItemId || normalizeItemId(selectedItemId) !== normalizeItemId(itemId)) {
+      await vscode.window.showErrorMessage(`The ${side} item ID is no longer available.`);
+      return false;
+    }
+    try {
+      await vscode.env.clipboard.writeText(itemId);
+      this.log.info(`Copied ${side} Field Diff item ID to the clipboard.`);
+      return true;
+    } catch (error: unknown) {
+      await vscode.window.showErrorMessage(`Unable to copy item ID: ${errorMessage(error)}`);
+      return false;
     }
   }
 

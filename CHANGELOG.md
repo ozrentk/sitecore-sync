@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.7.1
+
+- Displayed each available item ID in the Field Diff summary and made it copyable to the system clipboard with one click.
+- Added immediate inline copied-state feedback without requiring browser clipboard permissions or a confirmation dialog.
+
 ## 0.7.0
 
 - Added directional value-copy arrows around the **Value** indicator in paired Field Diff rows.

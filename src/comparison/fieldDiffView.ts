@@ -21,7 +21,9 @@ export interface FieldDiffSnapshot extends FieldDiffSelection {
 interface FieldDiffMessage {
   readonly type?: unknown;
   readonly fieldId?: unknown;
+  readonly itemId?: unknown;
   readonly direction?: unknown;
+  readonly side?: unknown;
 }
 
 export class FieldDiffViewProvider implements vscode.WebviewViewProvider, vscode.Disposable {
@@ -36,6 +38,10 @@ export class FieldDiffViewProvider implements vscode.WebviewViewProvider, vscode
       fieldId: string,
       direction: "leftToRight" | "rightToLeft",
     ) => Promise<void>,
+    private readonly onCopyItemId: (
+      side: "left" | "right",
+      itemId: string,
+    ) => Promise<boolean>,
   ) {}
 
   resolveWebviewView(view: vscode.WebviewView): void {
@@ -67,6 +73,13 @@ export class FieldDiffViewProvider implements vscode.WebviewViewProvider, vscode
           } finally {
             await this.post({ type: "copyFinished", fieldId: message.fieldId });
           }
+        } else if (
+          message.type === "copyItemId" &&
+          (message.side === "left" || message.side === "right") &&
+          typeof message.itemId === "string"
+        ) {
+          const copied = await this.onCopyItemId(message.side, message.itemId);
+          await this.post({ type: "itemIdCopyFinished", side: message.side, copied });
         }
       }),
     );
