@@ -212,22 +212,46 @@ export class ComparisonPanelManager implements vscode.Disposable {
       await vscode.window.showErrorMessage("The favorite's XM Cloud connection no longer exists.");
       return;
     }
-
-    let selection = this.getSelection();
-    let selectionChanged = false;
-    let side: TreeSide;
-    if (selection.leftConnectionId === connectionId) {
-      side = "left";
-    } else if (selection.rightConnectionId === connectionId) {
-      side = "right";
-    } else {
-      side = "left";
-      selection = this.normalizeSelection({ ...selection, leftConnectionId: connectionId });
-      await this.saveSelection(selection);
-      selectionChanged = true;
+    if (!this.panel) {
+      await vscode.window.showWarningMessage(
+        "Open a comparison before navigating to a favorite. You can also right-click the favorite and choose Compare with…",
+      );
+      return;
     }
 
-    const navigation = { connectionId, path, side } satisfies FavoriteNavigation;
+    const selection = this.getSelection();
+    const side: TreeSide | undefined = selection.leftConnectionId === connectionId
+      ? "left"
+      : selection.rightConnectionId === connectionId
+        ? "right"
+        : undefined;
+    if (!side) {
+      await vscode.window.showWarningMessage(
+        `${this.connectionStore.get(connectionId)?.name ?? "The favorite's connection"} is not open in the current comparison. Right-click the favorite and choose Compare with… to open it explicitly.`,
+      );
+      return;
+    }
+
+    this.panel.reveal(vscode.ViewColumn.Active);
+    await this.navigateToFavorite({ connectionId, path, side });
+  }
+
+  async openFavoriteWith(
+    favoriteConnectionId: string,
+    rightConnectionId: string,
+    path: string,
+  ): Promise<void> {
+    const selection = this.normalizeSelection({
+      ...this.getSelection(),
+      leftConnectionId: favoriteConnectionId,
+      rightConnectionId,
+    });
+    await this.saveSelection(selection);
+    const navigation = {
+      connectionId: favoriteConnectionId,
+      path,
+      side: "left",
+    } satisfies FavoriteNavigation;
     if (!this.panel) {
       this.pendingFavoriteNavigation = navigation;
       await this.open();
@@ -235,10 +259,8 @@ export class ComparisonPanelManager implements vscode.Disposable {
     }
 
     this.panel.reveal(vscode.ViewColumn.Active);
-    if (selectionChanged) {
-      await this.postState();
-      await this.loadInitialTrees();
-    }
+    await this.postState();
+    await this.loadInitialTrees();
     await this.navigateToFavorite(navigation);
   }
 

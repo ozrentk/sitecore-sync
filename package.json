@@ -177,6 +177,11 @@
           "command": "xmCloudSync.removeFavorite",
           "when": "view == xmCloudSync.connections && viewItem == xmCloudFavorite",
           "group": "inline"
+        },
+        {
+          "command": "xmCloudSync.compareWithConnection",
+          "when": "view == xmCloudSync.connections && viewItem == xmCloudFavorite",
+          "group": "1_compare"
         }
       ],
       "commandPalette": [

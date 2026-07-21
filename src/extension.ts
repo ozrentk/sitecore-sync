@@ -144,9 +144,11 @@ export function activate(context: vscode.ExtensionContext): void {
       log.show(true);
     }),
     vscode.commands.registerCommand("xmCloudSync.compareWithConnection", async (argument) => {
-      if (!(argument instanceof ConnectionTreeItem)) {
+      if (!(argument instanceof ConnectionTreeItem) && !(argument instanceof FavoriteTreeItem)) {
         return;
       }
+
+      const sourceConnection = argument.connection;
 
       const candidates = connectionStore
         .list();
@@ -161,21 +163,29 @@ export function activate(context: vscode.ExtensionContext): void {
         candidates.map((connection) => ({
           label: connection.name,
           description: connection.serverUrl,
-          detail: connection.id === argument.connection.id
+          detail: connection.id === sourceConnection.id
             ? "Same connection; select different languages in the comparison tab"
             : undefined,
           connectionId: connection.id,
         })),
         {
-          title: `Compare ${argument.connection.name} with…`,
+          title: `Compare ${sourceConnection.name} with…`,
           placeHolder: "Select the right-side connection",
         },
       );
       if (selected) {
-        await comparisonPanelManager.openWith(
-          argument.connection.id,
-          selected.connectionId,
-        );
+        if (argument instanceof FavoriteTreeItem) {
+          await comparisonPanelManager.openFavoriteWith(
+            sourceConnection.id,
+            selected.connectionId,
+            argument.path,
+          );
+        } else {
+          await comparisonPanelManager.openWith(
+            sourceConnection.id,
+            selected.connectionId,
+          );
+        }
       }
     }),
     vscode.commands.registerCommand("xmCloudSync.refreshAll", async () => {
