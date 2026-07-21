@@ -124,15 +124,31 @@ export class FieldDiffViewProvider implements vscode.WebviewViewProvider, vscode
   <title>Field Diff</title>
 </head>
 <body>
-  <header class="toolbar">
-    <label title="Reveal equal fields inherited from the Standard Template">
-      <input id="show-standard-template" type="checkbox">
-      Show equal Standard Template fields
-    </label>
-    <label title="Hide fields whose metadata, value, and value source match">
-      <input id="differences-only" type="checkbox" checked>
-      Show differences only
-    </label>
+  <header class="toolbar" aria-label="Field visibility">
+    <strong class="toolbar-title">Field visibility</strong>
+    <div class="visibility-control">
+      <span id="content-visibility-label">Content fields</span>
+      <div class="visibility-options" role="group" aria-labelledby="content-visibility-label" data-category="content">
+        <button type="button" data-mode="all">All</button>
+        <button type="button" data-mode="differences">Differences</button>
+      </div>
+    </div>
+    <div class="visibility-control">
+      <span id="standard-visibility-label">Standard Template fields</span>
+      <div class="visibility-options" role="group" aria-labelledby="standard-visibility-label" data-category="standard">
+        <button type="button" data-mode="hidden">Hidden</button>
+        <button type="button" data-mode="differences">Differences</button>
+        <button type="button" data-mode="all">All</button>
+      </div>
+    </div>
+    <div class="visibility-control">
+      <span id="system-visibility-label">System fields</span>
+      <div class="visibility-options" role="group" aria-labelledby="system-visibility-label" data-category="system">
+        <button type="button" data-mode="hidden">Hidden</button>
+        <button type="button" data-mode="differences">Differences</button>
+        <button type="button" data-mode="all">All</button>
+      </div>
+    </div>
   </header>
   <main id="content" aria-live="polite"></main>
   <script src="${scriptUri}"></script>

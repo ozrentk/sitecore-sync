@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.7.2
+
+- Replaced the Field Diff checkboxes with independent segmented visibility controls for content, Standard Template, and system fields.
+- Classified `__`-prefixed fields as system fields before applying Standard Template classification, so each row belongs to exactly one category.
+- Defaulted content and Standard Template fields to differences-only and system fields to hidden, while retaining one shared filter profile across item selections and webview restoration.
+
 ## 0.7.1
 
 - Displayed each available item ID in the Field Diff summary and made it copyable to the system clipboard with one click.

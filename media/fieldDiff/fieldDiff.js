@@ -1,17 +1,32 @@
 const vscode = acquireVsCodeApi();
+const persistedVisibility = vscode.getState()?.visibility ?? {};
+
+function visibilityMode(value, allowed, fallback) {
+  return allowed.includes(value) ? value : fallback;
+}
 
 const state = {
   snapshot: undefined,
   loadingSelection: undefined,
   error: undefined,
-  showStandardTemplate: false,
-  differencesOnly: true,
+  visibility: {
+    content: visibilityMode(persistedVisibility.content, ["all", "differences"], "differences"),
+    standard: visibilityMode(
+      persistedVisibility.standard,
+      ["hidden", "differences", "all"],
+      "differences",
+    ),
+    system: visibilityMode(
+      persistedVisibility.system,
+      ["hidden", "differences", "all"],
+      "hidden",
+    ),
+  },
   copyingFieldIds: new Set(),
 };
 
 const content = document.getElementById("content");
-const showStandardTemplateInput = document.getElementById("show-standard-template");
-const differencesOnlyInput = document.getElementById("differences-only");
+const visibilityGroups = document.querySelectorAll(".visibility-options");
 
 function normalizeId(value) {
   return value.replace(/[{}-]/g, "").toLowerCase();
@@ -64,6 +79,27 @@ function pairFields(leftFields, rightFields) {
     if (!used.has(right)) pairs.push(createPair(undefined, right));
   }
   return pairs;
+}
+
+function fieldCategory(pair) {
+  const system = pair.left?.name.startsWith("__") || pair.right?.name.startsWith("__");
+  if (system) return "system";
+  return pair.isStandardTemplate ? "standard" : "content";
+}
+
+function pairIsVisible(pair) {
+  const mode = state.visibility[fieldCategory(pair)];
+  if (mode === "hidden") return false;
+  return mode === "all" || pair.flags.length > 0;
+}
+
+function updateVisibilityControls() {
+  for (const group of visibilityGroups) {
+    const selectedMode = state.visibility[group.dataset.category];
+    for (const button of group.querySelectorAll("button[data-mode]")) {
+      button.setAttribute("aria-pressed", String(button.dataset.mode === selectedMode));
+    }
+  }
 }
 
 function itemTitle(details, fallbackName, connectionName) {
@@ -217,8 +253,7 @@ function createFieldRow(pair) {
 }
 
 function render() {
-  showStandardTemplateInput.checked = state.showStandardTemplate;
-  differencesOnlyInput.checked = state.differencesOnly;
+  updateVisibilityControls();
   if (state.error) {
     content.innerHTML = `<p class="state error"></p>`;
     content.firstElementChild.textContent = state.error;
@@ -235,10 +270,7 @@ function render() {
   const pairs = pairFields(
     state.snapshot.leftDetails?.fields ?? [],
     state.snapshot.rightDetails?.fields ?? [],
-  ).filter((pair) => {
-    if (state.differencesOnly && !pair.flags.length) return false;
-    return state.showStandardTemplate || !pair.isStandardTemplate || pair.flags.length;
-  });
+  ).filter(pairIsVisible);
   const fragment = document.createDocumentFragment();
   fragment.append(createSummary(state.snapshot));
   if (!pairs.length) {
@@ -252,14 +284,18 @@ function render() {
   content.replaceChildren(fragment);
 }
 
-showStandardTemplateInput.addEventListener("change", () => {
-  state.showStandardTemplate = showStandardTemplateInput.checked;
-  render();
-});
-differencesOnlyInput.addEventListener("change", () => {
-  state.differencesOnly = differencesOnlyInput.checked;
-  render();
-});
+for (const group of visibilityGroups) {
+  group.addEventListener("click", (event) => {
+    const button = event.target.closest("button[data-mode]");
+    if (!button) return;
+    state.visibility[group.dataset.category] = button.dataset.mode;
+    vscode.setState({
+      ...vscode.getState(),
+      visibility: { ...state.visibility },
+    });
+    render();
+  });
+}
 window.addEventListener("message", (event) => {
   const message = event.data;
   if (message?.type === "loading") {
