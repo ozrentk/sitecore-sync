@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.9.2
+
+- Added reusable `text`, `number`, `pick`, and `boolean` manifest inputs and passed collected values through the task context.
+- Added optional `spe-remoting` task execution against the CM environment from the clicked comparison side.
+- Prompted for SPE credentials only when an SPE task requires them, stored them per connection in VS Code Secret Storage, and offered replacement after an authentication failure.
+- Removed stored SPE credentials automatically when their XM Cloud Sync connection is deleted.
+
 ## 0.9.1
 
 - Discovered item task manifests by directly enumerating each workspace's `.xm-cloud-sync/tasks` directory so hidden-folder and workspace-search exclusions cannot suppress valid plug-ins.
