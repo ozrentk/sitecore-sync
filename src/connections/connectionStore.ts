@@ -4,6 +4,7 @@ import type { NewXmCloudConnection, XmCloudConnection } from "./connection";
 
 const connectionsKey = "sitecoreXmCloudSync.connections.v1";
 const secretPrefix = "sitecoreXmCloudSync.connectionSecret.v1";
+const deploymentSecretPrefix = "sitecoreXmCloudSync.deploymentSecret.v1";
 const favoritePathsKey = "sitecoreXmCloudSync.favoritePaths.v1";
 
 interface StoredFavoritePath {
@@ -13,6 +14,10 @@ interface StoredFavoritePath {
 
 function secretKey(connectionId: string): string {
   return `${secretPrefix}.${connectionId}`;
+}
+
+function deploymentSecretKey(connectionId: string): string {
+  return `${deploymentSecretPrefix}.${connectionId}`;
 }
 
 function isConnection(value: unknown): value is XmCloudConnection {
@@ -122,6 +127,39 @@ export class ConnectionStore implements vscode.Disposable {
     return this.secrets.get(secretKey(connectionId));
   }
 
+  async configureDeploymentMonitoring(
+    connectionId: string,
+    clientId: string,
+    clientSecret: string,
+    environmentId: string,
+  ): Promise<void> {
+    const connection = this.get(connectionId);
+    if (!connection) {
+      throw new Error("The XM Cloud connection no longer exists.");
+    }
+    await this.secrets.store(deploymentSecretKey(connectionId), clientSecret);
+    try {
+      await this.globalState.update(
+        connectionsKey,
+        this.list().map((candidate) => candidate.id === connectionId
+          ? {
+              ...candidate,
+              deploymentClientId: clientId,
+              deploymentEnvironmentId: environmentId,
+            }
+          : candidate),
+      );
+    } catch (error: unknown) {
+      await this.secrets.delete(deploymentSecretKey(connectionId));
+      throw error;
+    }
+    this.changeEmitter.fire();
+  }
+
+  async getDeploymentClientSecret(connectionId: string): Promise<string | undefined> {
+    return this.secrets.get(deploymentSecretKey(connectionId));
+  }
+
   async remove(connectionId: string): Promise<void> {
     const remaining = this.list().filter((connection) => connection.id !== connectionId);
     await this.globalState.update(connectionsKey, remaining);
@@ -130,6 +168,7 @@ export class ConnectionStore implements vscode.Disposable {
       this.readFavorites().filter((favorite) => favorite.connectionId !== connectionId),
     );
     await this.secrets.delete(secretKey(connectionId));
+    await this.secrets.delete(deploymentSecretKey(connectionId));
     this.changeEmitter.fire();
   }
 

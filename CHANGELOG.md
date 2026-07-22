@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.8.3
+
+- Added organization-level deployment monitoring configuration to saved XM Cloud connections.
+- Captured the latest source and destination deployment IDs before each subtree transfer and persisted them with the queue record.
+- Failed and paused a subtree transfer when either environment's latest deployment changes, including across VS Code restarts, and made retry start a fresh remote transfer.
+
 ## 0.8.2
 
 - Added phase counters to queued subtree and field-value transfer statuses.

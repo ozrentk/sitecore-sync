@@ -33,6 +33,9 @@ export class ConnectionTreeItem extends vscode.TreeItem {
     tooltip.appendMarkdown(`**${escapeMarkdown(connection.name)}**\n\n`);
     tooltip.appendMarkdown(`${escapeMarkdown(connection.serverUrl)}\n\n`);
     tooltip.appendMarkdown(`Client ID: \`${escapeMarkdown(connection.clientId)}\``);
+    tooltip.appendMarkdown(
+      `\n\nDeployment monitoring: ${connection.deploymentEnvironmentId ? "configured" : "not configured"}`,
+    );
     if (testState.message) {
       tooltip.appendMarkdown(`\n\n${escapeMarkdown(testState.message)}`);
     }

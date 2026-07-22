@@ -15,6 +15,8 @@ Create an environment automation client for the XM Cloud environment in Sitecore
 
 The client secret is stored in VS Code `SecretStorage`. OAuth access tokens are kept in memory only.
 
+Before running subtree transfers, right-click each participating connection and select **Configure Deployment Monitoring**. Enter an organization automation client with Deploy API access. The extension matches the saved CM hostname to its Sitecore deployment environment and stores the additional secret in `SecretStorage`.
+
 After a successful test, expand the connection to see every configured site returned by the Authoring API, including its root path and root item ID. The success notification also provides a searchable **Show Sites** list. This API list can include sites that are not shown as ordinary site tiles in Channels.
 
 If the Authoring API returns identical site records, the extension displays the site once and reports the number of duplicate records omitted. Records are considered identical only when their name, root path, and root item ID all match exactly.
@@ -54,6 +56,8 @@ Open **Transfers** in the activity view and select Play to process records one a
 Subtree rows show six phases: queued, freshness checking, content export, chunk copying, Sitecore import, and verification. Chunk copying uses the actual Content Transfer count, for example `copying chunks (4/6, chunk 7/23)`. The Sitecore phase reports completed transfer blobs and elapsed phase time, for example `Sitecore (5/6, blob 0/1 imported, 8m 15s)`. Item Transfer polling starts near two-second intervals, backs off to 5, 10, and finally 15 seconds for long-running imports, and applies small jitter. Field-value rows show four phases from queued through verification. Detailed subtree progress is persisted with the queue record and remains visible on failure.
 
 Subtree processing uses Content Transfer and Item Transfer with `OverrideExistingItem`, preserving IDs and transferring every language and numbered version. It is disabled for the same XM Cloud environment, same-path/different-ID conflicts, and the complete `/sitecore` root. Only explicit `TransferState: Finished` is success; unknown consumed history remains pending and is polled over as many windows as necessary. Field transfers re-read both endpoints, reject changed source or target state, issue one non-retried Authoring mutation, and verify the result. Finished work refreshes affected loaded comparison data.
+
+At subtree start, the processor records the latest deployment ID for both source and destination. It checks those IDs during long-running Content and Item Transfer polling, throttled to at most once every 15 seconds, and persists the baselines for restart recovery. If either ID changes, the transfer fails, the queue pauses, and retry discards the old remote checkpoint and starts a fresh transfer.
 
 ### Difference legend
 

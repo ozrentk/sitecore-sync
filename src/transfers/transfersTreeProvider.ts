@@ -169,11 +169,29 @@ function transferTooltip(record: TransferRecord): vscode.MarkdownString {
     if (record.checkpoint) {
       tooltip.appendMarkdown(`Remote transfer: \`${record.checkpoint.transferId}\`  \n`);
     }
+    if (record.deploymentBaselines) {
+      tooltip.appendMarkdown(
+        `Source deployment baseline: ${escapeMarkdown(deploymentBaselineLabel(record.deploymentBaselines.source))}  \n`,
+      );
+      tooltip.appendMarkdown(
+        `Destination deployment baseline: ${escapeMarkdown(deploymentBaselineLabel(record.deploymentBaselines.target))}  \n`,
+      );
+    }
   }
   if (record.error) {
     tooltip.appendMarkdown(`\n**Error:** ${escapeMarkdown(record.error)}`);
   }
   return tooltip;
+}
+
+function deploymentBaselineLabel(
+  baseline: NonNullable<Extract<TransferRecord, { readonly kind: "subtree" }>["deploymentBaselines"]>["source"],
+): string {
+  const timestamp = baseline.createdAt ?? baseline.startedAt ?? baseline.deploymentStartedAt;
+  if (!baseline.deploymentId) {
+    return "none";
+  }
+  return timestamp ? `${baseline.deploymentId} at ${timestamp}` : baseline.deploymentId;
 }
 
 function escapeMarkdown(value: string): string {

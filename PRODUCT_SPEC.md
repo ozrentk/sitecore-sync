@@ -27,6 +27,7 @@ Each connection contains:
 - XM Cloud content-management hostname.
 - Environment automation client ID.
 - Environment automation client secret, stored only in VS Code `SecretStorage`.
+- Optional organization automation client credentials and matched Deploy environment ID for deployment-interruption monitoring; the secret is stored only in `SecretStorage`.
 - Default root path: `/`.
 - Default language: `en`, configurable per connection.
 
@@ -204,6 +205,8 @@ Queue records, insertion sequence, processor state, and pending Content/Item Tra
 Subtree status has six phases: `queued (1/6)`, `checking freshness (2/6)`, `exporting content (3/6)`, `copying chunks (4/6, chunk x/y)`, `Sitecore (5/6, blob x/y imported, elapsed)`, and `verifying (6/6)`. The chunk counter comes from Content Transfer chunk-set metadata and successful destination uploads. The Sitecore counter reports Item Transfer blobs confirmed as `Finished`, not restored Sitecore items. Its elapsed duration begins when the Sitecore phase starts and refreshes locally without extra requests or workspace-state writes. Polling uses jittered intervals near 2 seconds for the first minute, 5 seconds through five minutes, 10 seconds through ten minutes, and 15 seconds thereafter. Field-value transfers use four analogous phases without export or Sitecore import. Progress is persisted on the queue record; a failed subtree retains its last detailed phase.
 
 Subtree execution uses `ItemAndDescendants` with `OverrideExistingItem`, transfers every language and version, preserves item IDs, blocks same-environment transfer and same-path/different-ID conflicts, verifies source identity and target-parent existence, and refreshes loaded target data after completion. Only explicit Item Transfer `Finished` is terminal success; consumed history with an unknown state remains pending. Destination `.raif` blobs are retained automatically until a reliable cleanup workflow is introduced.
+
+Subtree processing requires deployment monitoring on both connections. Immediately before remote work begins, the processor captures each environment's latest Deploy API deployment ID and timestamp. The IDs are persisted with the queue record and checked at most once per 15 seconds during long-running polling plus once before completion. A changed source or destination deployment fails the transfer and pauses the FIFO. Retrying this failure clears the potentially stale Content/Item Transfer checkpoint and creates a fresh remote transfer.
 
 Field-value execution re-reads both items and checks scope-aware field fingerprints captured at enqueue time. A stale source or target fails before mutation. Otherwise it issues one Authoring `updateItem` mutation and re-reads the target to verify the literal value. Identical pending requests are deduplicated.
 

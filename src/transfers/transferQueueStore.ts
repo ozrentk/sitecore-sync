@@ -115,14 +115,30 @@ export class TransferQueueStore implements vscode.Disposable {
   }
 
   async retry(recordId: string): Promise<void> {
-    await this.update(recordId, (record) => ({
-      ...record,
-      status: record.kind === "subtree" && record.checkpoint?.state === "Pending"
-        ? "waitingForSitecore"
-        : "queued",
-      error: undefined,
-      journalPath: undefined,
-    }));
+    await this.update(recordId, (record) => {
+      if (record.kind === "subtree" && record.failureKind === "deploymentChanged") {
+        return {
+          ...record,
+          status: "queued",
+          startedAt: undefined,
+          error: undefined,
+          journalPath: undefined,
+          checkpoint: undefined,
+          progress: undefined,
+          deploymentBaselines: undefined,
+          failureKind: undefined,
+        };
+      }
+      return {
+        ...record,
+        status: record.kind === "subtree" && record.checkpoint?.state === "Pending"
+          ? "waitingForSitecore"
+          : "queued",
+        error: undefined,
+        journalPath: undefined,
+        failureKind: undefined,
+      };
+    });
   }
 
   async setProcessorState(processorState: TransferProcessorState): Promise<void> {
