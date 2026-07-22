@@ -1,5 +1,6 @@
 .vscode/**
 .agents/**
+.xm-cloud-sync/**
 .gitignore
 src/**
 scripts/**

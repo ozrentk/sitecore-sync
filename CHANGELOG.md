@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.9.1
+
+- Discovered item task manifests by directly enumerating each workspace's `.xm-cloud-sync/tasks` directory so hidden-folder and workspace-search exclusions cannot suppress valid plug-ins.
+
 ## 0.9.0
 
 - Added **Run task…** to comparison-item context menus with matching tasks distinguished by comparison side, connection, language, and path.

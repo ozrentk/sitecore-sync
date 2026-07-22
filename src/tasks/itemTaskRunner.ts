@@ -4,7 +4,7 @@ import * as path from "node:path";
 import * as vscode from "vscode";
 import type { AuthoringItemDetails } from "../sitecore/authoringClient";
 
-const workspaceTaskPattern = ".xm-cloud-sync/tasks/**/task.json";
+const maximumManifestCount = 200;
 
 interface ItemTaskMatchRules {
   readonly templateIds: readonly string[];
@@ -124,15 +124,11 @@ export class ItemTaskRunner implements vscode.Disposable {
   }
 
   private async discoverPlugins(): Promise<readonly ItemTaskPlugin[]> {
-    const manifests = await vscode.workspace.findFiles(
-      workspaceTaskPattern,
-      "**/{node_modules,.git}/**",
-      200,
-    );
+    const manifests = await this.findTaskManifests();
     const plugins: ItemTaskPlugin[] = [];
     const ids = new Set<string>();
     let invalidManifestCount = 0;
-    for (const manifestUri of manifests.sort((left, right) =>
+    for (const manifestUri of [...manifests].sort((left, right) =>
       left.fsPath.localeCompare(right.fsPath, undefined, { sensitivity: "base" })
     )) {
       try {
@@ -153,6 +149,29 @@ export class ItemTaskRunner implements vscode.Disposable {
     return plugins.sort((left, right) =>
       left.name.localeCompare(right.name, undefined, { sensitivity: "base" })
     );
+  }
+
+  private async findTaskManifests(): Promise<readonly vscode.Uri[]> {
+    const manifests: vscode.Uri[] = [];
+    for (const folder of vscode.workspace.workspaceFolders ?? []) {
+      const taskRoot = vscode.Uri.joinPath(folder.uri, ".xm-cloud-sync", "tasks");
+      try {
+        await collectTaskManifests(taskRoot, manifests);
+      } catch (error: unknown) {
+        if (!isFileNotFound(error)) {
+          this.output.appendLine(
+            `[discovery] ${taskRoot.fsPath}: ${errorMessage(error)}`,
+          );
+        }
+      }
+      if (manifests.length >= maximumManifestCount) {
+        this.output.appendLine(
+          `[discovery] Stopped after ${maximumManifestCount} task manifests.`,
+        );
+        break;
+      }
+    }
+    return manifests.slice(0, maximumManifestCount);
   }
 
   private async run(
@@ -465,6 +484,34 @@ function processErrorCode(error: unknown): string | undefined {
       typeof (error as { readonly code?: unknown }).code === "string"
     ? (error as { readonly code: string }).code
     : undefined;
+}
+
+async function collectTaskManifests(
+  directory: vscode.Uri,
+  manifests: vscode.Uri[],
+): Promise<void> {
+  if (manifests.length >= maximumManifestCount) {
+    return;
+  }
+  const entries = await vscode.workspace.fs.readDirectory(directory);
+  for (const [name, type] of entries) {
+    if (manifests.length >= maximumManifestCount) {
+      return;
+    }
+    const uri = vscode.Uri.joinPath(directory, name);
+    if ((type & vscode.FileType.File) !== 0 && name.toLowerCase() === "task.json") {
+      manifests.push(uri);
+    } else if (
+      (type & vscode.FileType.Directory) !== 0 &&
+      (type & vscode.FileType.SymbolicLink) === 0
+    ) {
+      await collectTaskManifests(uri, manifests);
+    }
+  }
+}
+
+function isFileNotFound(error: unknown): boolean {
+  return error instanceof vscode.FileSystemError && error.code === "FileNotFound";
 }
 
 function capitalize(value: string): string {
