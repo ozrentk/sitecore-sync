@@ -78,6 +78,8 @@ export class TransferProcessor implements vscode.Disposable {
     while (this.store.processorState === "running") {
       const record = this.store.head();
       if (!record) {
+        await this.store.setProcessorState("paused");
+        this.log.info("Transfer queue is empty; processing paused.");
         return;
       }
       if (record.status === "failed") {

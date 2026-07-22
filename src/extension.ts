@@ -36,6 +36,7 @@ export function activate(context: vscode.ExtensionContext): void {
   const comparisonPanelManager = new ComparisonPanelManager(
     context.extensionUri,
     context.workspaceState,
+    context.globalState,
     connectionStore,
     authoringClient,
     transferQueue,

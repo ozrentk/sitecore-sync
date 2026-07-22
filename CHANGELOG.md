@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.8.1
+
+- Released Field Diff transfer arrows immediately after enqueueing instead of keeping them disabled until the informational notification was dismissed.
+- Limited the field-transfer overwrite confirmation to the first accepted transfer for the extension profile.
+- Displayed the internal field name in Transfers and included source and target field paths in its tooltip.
+- Shortened transfer labels to the field plus item name or subtree root name while retaining connection and status details in the gray description.
+- Paused transfer processing automatically when the queue drains, so later additions wait for an explicit Play action.
+
 ## 0.8.0
 
 - Replaced synchronous subtree and field-value execution with a durable, workspace-scoped FIFO transfer queue.

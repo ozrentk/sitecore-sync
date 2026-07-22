@@ -4,8 +4,8 @@ import type { TransferQueueStore } from "./transferQueueStore";
 import type { TransferRecord } from "./transferTypes";
 
 export class TransferTreeItem extends vscode.TreeItem {
-  constructor(readonly record: TransferRecord, position: number, description: string) {
-    super(transferLabel(record, position), vscode.TreeItemCollapsibleState.None);
+  constructor(readonly record: TransferRecord, description: string) {
+    super(transferLabel(record), vscode.TreeItemCollapsibleState.None);
     this.description = description;
     this.contextValue = `xmCloudTransfer.${record.status}`;
     this.iconPath = transferIcon(record);
@@ -32,9 +32,8 @@ implements vscode.TreeDataProvider<TransferTreeItem>, vscode.Disposable {
   }
 
   getChildren(): TransferTreeItem[] {
-    return this.store.list().map((record, index) => new TransferTreeItem(
+    return this.store.list().map((record) => new TransferTreeItem(
       record,
-      index + 1,
       this.description(record),
     ));
   }
@@ -63,10 +62,24 @@ implements vscode.TreeDataProvider<TransferTreeItem>, vscode.Disposable {
   }
 }
 
-function transferLabel(record: TransferRecord, position: number): string {
+function transferLabel(record: TransferRecord): string {
   return record.kind === "fieldValue"
-    ? `${position}. Field · ${record.source.fieldLabel}`
-    : `${position}. Subtree · ${record.sourcePath}`;
+    ? `Field ${fieldName(record)} · ${itemName(record.source.itemPath)}`
+    : `Subtree · ${itemName(record.sourcePath)}`;
+}
+
+function itemName(path: string): string {
+  return path.split("/").filter(Boolean).at(-1) ?? path;
+}
+
+function fieldName(record: Extract<TransferRecord, { readonly kind: "fieldValue" }>): string {
+  return record.source.fieldName === record.target.fieldName
+    ? record.source.fieldName
+    : `${record.source.fieldName} → ${record.target.fieldName}`;
+}
+
+function fieldPath(itemPath: string, name: string): string {
+  return `${itemPath.replace(/\/$/u, "")}/${name}`;
 }
 
 function statusLabel(status: TransferRecord["status"]): string {
@@ -100,7 +113,12 @@ function transferTooltip(record: TransferRecord): vscode.MarkdownString {
     tooltip.appendMarkdown(`Started: ${record.startedAt}  \n`);
   }
   if (record.kind === "fieldValue") {
-    tooltip.appendMarkdown(`Field: ${escapeMarkdown(record.source.fieldLabel)}  \n`);
+    tooltip.appendMarkdown(`Field name: ${escapeMarkdown(fieldName(record))}  \n`);
+    if (record.source.fieldLabel !== record.source.fieldName) {
+      tooltip.appendMarkdown(`Field label: ${escapeMarkdown(record.source.fieldLabel)}  \n`);
+    }
+    tooltip.appendMarkdown(`Source field path: ${escapeMarkdown(fieldPath(record.source.itemPath, record.source.fieldName))}  \n`);
+    tooltip.appendMarkdown(`Target field path: ${escapeMarkdown(fieldPath(record.target.itemPath, record.target.fieldName))}  \n`);
     tooltip.appendMarkdown(`Source item: \`${record.source.itemId}\` (${record.source.language}, v${record.source.version})  \n`);
     tooltip.appendMarkdown(`Target item: \`${record.target.itemId}\` (${record.target.language}, v${record.target.version})  \n`);
   } else {
