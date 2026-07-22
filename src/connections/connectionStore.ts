@@ -5,6 +5,7 @@ import type { NewXmCloudConnection, XmCloudConnection } from "./connection";
 const connectionsKey = "sitecoreXmCloudSync.connections.v1";
 const secretPrefix = "sitecoreXmCloudSync.connectionSecret.v1";
 const deploymentSecretPrefix = "sitecoreXmCloudSync.deploymentSecret.v1";
+const speCredentialSecretPrefix = "sitecoreXmCloudSync.speCredential.v1";
 const favoritePathsKey = "sitecoreXmCloudSync.favoritePaths.v1";
 
 interface StoredFavoritePath {
@@ -18,6 +19,15 @@ function secretKey(connectionId: string): string {
 
 function deploymentSecretKey(connectionId: string): string {
   return `${deploymentSecretPrefix}.${connectionId}`;
+}
+
+function speCredentialSecretKey(connectionId: string): string {
+  return `${speCredentialSecretPrefix}.${connectionId}`;
+}
+
+export interface SpeCredential {
+  readonly username: string;
+  readonly password: string;
 }
 
 function isConnection(value: unknown): value is XmCloudConnection {
@@ -160,6 +170,40 @@ export class ConnectionStore implements vscode.Disposable {
     return this.secrets.get(deploymentSecretKey(connectionId));
   }
 
+  async getSpeCredential(connectionId: string): Promise<SpeCredential | undefined> {
+    const stored = await this.secrets.get(speCredentialSecretKey(connectionId));
+    if (!stored) {
+      return undefined;
+    }
+    try {
+      const credential = JSON.parse(stored) as Partial<SpeCredential>;
+      return typeof credential.username === "string" && credential.username.trim() &&
+          typeof credential.password === "string" && credential.password
+        ? { username: credential.username, password: credential.password }
+        : undefined;
+    } catch {
+      return undefined;
+    }
+  }
+
+  async storeSpeCredential(
+    connectionId: string,
+    username: string,
+    password: string,
+  ): Promise<void> {
+    if (!this.get(connectionId)) {
+      throw new Error("The XM Cloud connection no longer exists.");
+    }
+    await this.secrets.store(
+      speCredentialSecretKey(connectionId),
+      JSON.stringify({ username, password } satisfies SpeCredential),
+    );
+  }
+
+  async deleteSpeCredential(connectionId: string): Promise<void> {
+    await this.secrets.delete(speCredentialSecretKey(connectionId));
+  }
+
   async remove(connectionId: string): Promise<void> {
     const remaining = this.list().filter((connection) => connection.id !== connectionId);
     await this.globalState.update(connectionsKey, remaining);
@@ -169,6 +213,7 @@ export class ConnectionStore implements vscode.Disposable {
     );
     await this.secrets.delete(secretKey(connectionId));
     await this.secrets.delete(deploymentSecretKey(connectionId));
+    await this.secrets.delete(speCredentialSecretKey(connectionId));
     this.changeEmitter.fire();
   }
 

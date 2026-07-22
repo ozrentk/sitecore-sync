@@ -27,7 +27,12 @@ export function activate(context: vscode.ExtensionContext): void {
   const authoringClient = new AuthoringContentClient(log);
   const deploymentClient = new DeploymentClient(log);
   const taskOutput = vscode.window.createOutputChannel("XM Cloud Tasks");
-  const itemTaskRunner = new ItemTaskRunner(context.globalStorageUri, taskOutput);
+  const itemTaskRunner = new ItemTaskRunner(
+    context.globalStorageUri,
+    context.extensionUri,
+    connectionStore,
+    taskOutput,
+  );
   const extensionVersion = String(context.extension.packageJSON.version ?? "unknown");
   const transferQueue = new TransferQueueStore(context.workspaceState);
   const transferProcessor = new TransferProcessor(

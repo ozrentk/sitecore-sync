@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { spawn } from "node:child_process";
 import * as path from "node:path";
 import * as vscode from "vscode";
+import type { ConnectionStore, SpeCredential } from "../connections/connectionStore";
 import type { AuthoringItemDetails } from "../sitecore/authoringClient";
 
 const maximumManifestCount = 200;
@@ -20,7 +21,54 @@ interface ItemTaskPlugin {
   readonly scriptPath: string;
   readonly directoryPath: string;
   readonly matches: ItemTaskMatchRules;
+  readonly execution: ItemTaskExecution;
+  readonly inputs: readonly ItemTaskInput[];
 }
+
+type ItemTaskExecution =
+  | { readonly type: "powershell" }
+  | { readonly type: "spe-remoting" };
+
+interface ItemTaskInputBase {
+  readonly id: string;
+  readonly label: string;
+  readonly description?: string;
+  readonly required: boolean;
+}
+
+interface TextTaskInput extends ItemTaskInputBase {
+  readonly type: "text";
+  readonly defaultValue?: string;
+  readonly placeholder?: string;
+}
+
+interface NumberTaskInput extends ItemTaskInputBase {
+  readonly type: "number";
+  readonly defaultValue?: number;
+  readonly minimum?: number;
+  readonly maximum?: number;
+  readonly placeholder?: string;
+}
+
+interface PickTaskInputOption {
+  readonly label: string;
+  readonly value: string | number | boolean;
+  readonly description?: string;
+}
+
+interface PickTaskInput extends ItemTaskInputBase {
+  readonly type: "pick";
+  readonly defaultValue?: string | number | boolean;
+  readonly options: readonly PickTaskInputOption[];
+}
+
+interface BooleanTaskInput extends ItemTaskInputBase {
+  readonly type: "boolean";
+  readonly defaultValue: boolean;
+}
+
+type ItemTaskInput = TextTaskInput | NumberTaskInput | PickTaskInput | BooleanTaskInput;
+type ItemTaskInputValue = string | number | boolean;
 
 interface ItemTaskResult {
   readonly status?: unknown;
@@ -50,6 +98,7 @@ interface ItemTaskExecutionContext extends ItemTaskCandidateContext {
   };
   readonly parentPath?: string;
   readonly ancestorPaths: readonly string[];
+  readonly inputs: Readonly<Record<string, ItemTaskInputValue>>;
 }
 
 interface TaskChoice extends vscode.QuickPickItem {
@@ -60,6 +109,7 @@ interface TaskChoice extends vscode.QuickPickItem {
 interface ProcessResult {
   readonly exitCode: number | null;
   readonly cancelled: boolean;
+  readonly outputText: string;
 }
 
 export class ItemTaskRunner implements vscode.Disposable {
@@ -67,6 +117,8 @@ export class ItemTaskRunner implements vscode.Disposable {
 
   constructor(
     private readonly storageUri: vscode.Uri,
+    private readonly extensionUri: vscode.Uri,
+    private readonly connectionStore: ConnectionStore,
     private readonly output: vscode.OutputChannel,
   ) {}
 
@@ -187,15 +239,26 @@ export class ItemTaskRunner implements vscode.Disposable {
     const runDirectory = vscode.Uri.joinPath(this.storageUri, "task-runs", runId);
     const contextUri = vscode.Uri.joinPath(runDirectory, "context.json");
     const resultUri = vscode.Uri.joinPath(runDirectory, "result.json");
-    const ancestorPaths = itemAncestorPaths(candidate.item.path);
-    const executionContext: ItemTaskExecutionContext = {
-      schemaVersion: 1,
-      task: { id: plugin.id, name: plugin.name },
-      ...candidate,
-      parentPath: ancestorPaths.at(-1),
-      ancestorPaths,
-    };
     try {
+      const inputs = await promptForTaskInputs(plugin);
+      if (!inputs) {
+        return;
+      }
+      let speCredential = plugin.execution.type === "spe-remoting"
+        ? await this.getOrPromptForSpeCredential(candidate, false)
+        : undefined;
+      if (plugin.execution.type === "spe-remoting" && !speCredential) {
+        return;
+      }
+      const ancestorPaths = itemAncestorPaths(candidate.item.path);
+      const executionContext: ItemTaskExecutionContext = {
+        schemaVersion: 1,
+        task: { id: plugin.id, name: plugin.name },
+        ...candidate,
+        parentPath: ancestorPaths.at(-1),
+        ancestorPaths,
+        inputs,
+      };
       await vscode.workspace.fs.createDirectory(runDirectory);
       await vscode.workspace.fs.writeFile(
         contextUri,
@@ -212,19 +275,55 @@ export class ItemTaskRunner implements vscode.Disposable {
       this.output.appendLine("");
       this.output.show(true);
 
-      const processResult = await vscode.window.withProgress(
+      let processResult = await vscode.window.withProgress(
         {
           location: vscode.ProgressLocation.Notification,
           title: `Running item task “${plugin.name}”`,
-          cancellable: true,
+          cancellable: plugin.execution.type === "powershell",
         },
         async (_progress, token) => await this.runPowerShell(
           plugin,
           contextUri.fsPath,
           resultUri.fsPath,
           token,
+          speCredential,
         ),
       );
+      if (
+        plugin.execution.type === "spe-remoting" &&
+        !processResult.cancelled &&
+        isAuthenticationFailure(processResult) &&
+        speCredential
+      ) {
+        const replace = await vscode.window.showWarningMessage(
+          `SPE authentication failed for ${candidate.connection.name}.`,
+          "Replace Credentials",
+        );
+        if (replace === "Replace Credentials") {
+          speCredential = await this.getOrPromptForSpeCredential(candidate, true);
+          if (!speCredential) {
+            return;
+          }
+          await vscode.workspace.fs.delete(resultUri, { useTrash: false }).then(
+            () => undefined,
+            () => undefined,
+          );
+          processResult = await vscode.window.withProgress(
+            {
+              location: vscode.ProgressLocation.Notification,
+              title: `Retrying item task “${plugin.name}”`,
+              cancellable: false,
+            },
+            async (_progress, token) => await this.runPowerShell(
+              plugin,
+              contextUri.fsPath,
+              resultUri.fsPath,
+              token,
+              speCredential,
+            ),
+          );
+        }
+      }
       if (processResult.cancelled) {
         this.output.appendLine("\nTask cancelled.");
         await vscode.window.showInformationMessage(`Task “${plugin.name}” was cancelled.`);
@@ -267,7 +366,50 @@ export class ItemTaskRunner implements vscode.Disposable {
     contextPath: string,
     resultPath: string,
     cancellationToken: vscode.CancellationToken,
+    speCredential?: SpeCredential,
   ): Promise<ProcessResult> {
+    if (plugin.execution.type === "spe-remoting") {
+      if (!speCredential) {
+        throw new Error("SPE credentials are unavailable.");
+      }
+      const launcherPath = vscode.Uri.joinPath(
+        this.extensionUri,
+        "resources",
+        "invoke-spe-task.ps1",
+      ).fsPath;
+      const args = [
+        "-NoLogo",
+        "-NoProfile",
+        "-NonInteractive",
+        "-File",
+        launcherPath,
+        "-ScriptPath",
+        plugin.scriptPath,
+        "-ContextPath",
+        contextPath,
+        "-ResultPath",
+        resultPath,
+      ];
+      const credentialJson = JSON.stringify(speCredential);
+      if (process.platform === "win32") {
+        return runProcess(
+          "powershell.exe",
+          args,
+          plugin.directoryPath,
+          cancellationToken,
+          this.output,
+          credentialJson,
+        );
+      }
+      return runProcess(
+        "pwsh",
+        args,
+        plugin.directoryPath,
+        cancellationToken,
+        this.output,
+        credentialJson,
+      );
+    }
     const args = [
       "-NoLogo",
       "-NoProfile",
@@ -301,6 +443,41 @@ export class ItemTaskRunner implements vscode.Disposable {
       );
     }
   }
+
+  private async getOrPromptForSpeCredential(
+    candidate: ItemTaskCandidateContext,
+    replace: boolean,
+  ): Promise<SpeCredential | undefined> {
+    if (!replace) {
+      const stored = await this.connectionStore.getSpeCredential(candidate.connection.id);
+      if (stored) {
+        return stored;
+      }
+    }
+    const username = await vscode.window.showInputBox({
+      title: `SPE sign-in · ${candidate.connection.name}`,
+      prompt: "Enter the Sitecore account authorized for SPE remoting.",
+      placeHolder: "sitecore\\admin",
+      ignoreFocusOut: true,
+      validateInput: (value) => value.trim() ? undefined : "Username is required.",
+    });
+    if (!username) {
+      return undefined;
+    }
+    const password = await vscode.window.showInputBox({
+      title: `SPE sign-in · ${candidate.connection.name}`,
+      prompt: `Enter the password for ${username.trim()}. It will be stored in VS Code Secret Storage.`,
+      password: true,
+      ignoreFocusOut: true,
+      validateInput: (value) => value ? undefined : "Password is required.",
+    });
+    if (!password) {
+      return undefined;
+    }
+    const credential = { username: username.trim(), password };
+    await this.connectionStore.storeSpeCredential(candidate.connection.id, credential.username, password);
+    return credential;
+  }
 }
 
 async function readPlugin(manifestUri: vscode.Uri): Promise<ItemTaskPlugin> {
@@ -319,6 +496,8 @@ async function readPlugin(manifestUri: vscode.Uri): Promise<ItemTaskPlugin> {
   const name = requiredText(candidate.name, "name");
   const script = requiredText(candidate.script, "script");
   const matches = parseMatchRules(candidate.matches);
+  const execution = parseExecution(candidate.execution);
+  const inputs = parseTaskInputs(candidate.inputs);
   const directoryPath = path.dirname(manifestUri.fsPath);
   const scriptPath = path.resolve(directoryPath, script);
   const relativeScriptPath = path.relative(directoryPath, scriptPath);
@@ -343,7 +522,125 @@ async function readPlugin(manifestUri: vscode.Uri): Promise<ItemTaskPlugin> {
     scriptPath,
     directoryPath,
     matches,
+    execution,
+    inputs,
   };
+}
+
+function parseExecution(value: unknown): ItemTaskExecution {
+  if (value === undefined) {
+    return { type: "powershell" };
+  }
+  if (!value || typeof value !== "object") {
+    throw new Error("Manifest property “execution” must be an object.");
+  }
+  const type = requiredText((value as Record<string, unknown>).type, "execution.type");
+  if (type !== "powershell" && type !== "spe-remoting") {
+    throw new Error("Manifest property “execution.type” must be “powershell” or “spe-remoting”.");
+  }
+  return { type };
+}
+
+function parseTaskInputs(value: unknown): readonly ItemTaskInput[] {
+  if (value === undefined) {
+    return [];
+  }
+  if (!Array.isArray(value)) {
+    throw new Error("Manifest property “inputs” must be an array.");
+  }
+  const ids = new Set<string>();
+  return value.map((entry, index) => {
+    if (!entry || typeof entry !== "object") {
+      throw new Error(`Manifest input ${index + 1} must be an object.`);
+    }
+    const candidate = entry as Record<string, unknown>;
+    const id = requiredText(candidate.id, `inputs[${index}].id`);
+    if (!/^[A-Za-z][A-Za-z0-9_-]*$/u.test(id)) {
+      throw new Error(`Manifest input ID “${id}” is invalid.`);
+    }
+    if (ids.has(id.toLowerCase())) {
+      throw new Error(`Manifest input ID “${id}” is duplicated.`);
+    }
+    ids.add(id.toLowerCase());
+    const type = requiredText(candidate.type, `inputs[${index}].type`);
+    const base = {
+      id,
+      label: optionalText(candidate.label) ?? id,
+      description: optionalText(candidate.description),
+      required: candidate.required === true,
+    };
+    if (type === "text") {
+      return {
+        ...base,
+        type,
+        defaultValue: optionalString(candidate.default, `inputs[${index}].default`),
+        placeholder: optionalText(candidate.placeholder),
+      } satisfies TextTaskInput;
+    }
+    if (type === "number") {
+      const minimum = optionalNumber(candidate.minimum, `inputs[${index}].minimum`);
+      const maximum = optionalNumber(candidate.maximum, `inputs[${index}].maximum`);
+      const defaultValue = optionalNumber(candidate.default, `inputs[${index}].default`);
+      if (minimum !== undefined && maximum !== undefined && minimum > maximum) {
+        throw new Error(`Manifest input “${id}” has minimum greater than maximum.`);
+      }
+      if (defaultValue !== undefined && (
+        (minimum !== undefined && defaultValue < minimum) ||
+        (maximum !== undefined && defaultValue > maximum)
+      )) {
+        throw new Error(`Manifest input “${id}” has a default outside its allowed range.`);
+      }
+      return {
+        ...base,
+        type,
+        defaultValue,
+        minimum,
+        maximum,
+        placeholder: optionalText(candidate.placeholder),
+      } satisfies NumberTaskInput;
+    }
+    if (type === "boolean") {
+      if (candidate.default !== undefined && typeof candidate.default !== "boolean") {
+        throw new Error(`Manifest property “inputs[${index}].default” must be a boolean.`);
+      }
+      return {
+        ...base,
+        type,
+        defaultValue: candidate.default === true,
+      } satisfies BooleanTaskInput;
+    }
+    if (type === "pick") {
+      const options = parsePickOptions(candidate.options, index);
+      const defaultValue = optionalScalar(candidate.default, `inputs[${index}].default`);
+      if (defaultValue !== undefined && !options.some((option) => option.value === defaultValue)) {
+        throw new Error(`Manifest input “${id}” has a default that is not one of its options.`);
+      }
+      return { ...base, type, defaultValue, options } satisfies PickTaskInput;
+    }
+    throw new Error(
+      `Manifest property “inputs[${index}].type” must be “text”, “number”, “pick”, or “boolean”.`,
+    );
+  });
+}
+
+function parsePickOptions(value: unknown, inputIndex: number): readonly PickTaskInputOption[] {
+  if (!Array.isArray(value) || value.length === 0) {
+    throw new Error(`Manifest property “inputs[${inputIndex}].options” must be a non-empty array.`);
+  }
+  return value.map((entry, optionIndex) => {
+    if (typeof entry === "string" || typeof entry === "number" || typeof entry === "boolean") {
+      return { label: String(entry), value: entry };
+    }
+    if (!entry || typeof entry !== "object") {
+      throw new Error(`Manifest pick option ${optionIndex + 1} is invalid.`);
+    }
+    const candidate = entry as Record<string, unknown>;
+    return {
+      label: requiredText(candidate.label, `inputs[${inputIndex}].options[${optionIndex}].label`),
+      value: requiredScalar(candidate.value, `inputs[${inputIndex}].options[${optionIndex}].value`),
+      description: optionalText(candidate.description),
+    };
+  });
 }
 
 function parseMatchRules(value: unknown): ItemTaskMatchRules {
@@ -407,6 +704,40 @@ function optionalText(value: unknown): string | undefined {
   return typeof value === "string" && value.trim() ? value.trim() : undefined;
 }
 
+function optionalString(value: unknown, property: string): string | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+  if (typeof value !== "string") {
+    throw new Error(`Manifest property “${property}” must be a string.`);
+  }
+  return value;
+}
+
+function optionalNumber(value: unknown, property: string): number | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    throw new Error(`Manifest property “${property}” must be a finite number.`);
+  }
+  return value;
+}
+
+function optionalScalar(value: unknown, property: string): ItemTaskInputValue | undefined {
+  return value === undefined ? undefined : requiredScalar(value, property);
+}
+
+function requiredScalar(value: unknown, property: string): ItemTaskInputValue {
+  if (typeof value !== "string" && typeof value !== "number" && typeof value !== "boolean") {
+    throw new Error(`Manifest property “${property}” must be a string, number, or boolean.`);
+  }
+  if (typeof value === "number" && !Number.isFinite(value)) {
+    throw new Error(`Manifest property “${property}” must be finite.`);
+  }
+  return value;
+}
+
 function stringArray(value: unknown, property: string): readonly string[] {
   if (value === undefined) {
     return [];
@@ -452,29 +783,147 @@ function decodeText(bytes: Uint8Array): string {
   return new TextDecoder().decode(bytes);
 }
 
+async function promptForTaskInputs(
+  plugin: ItemTaskPlugin,
+): Promise<Readonly<Record<string, ItemTaskInputValue>> | undefined> {
+  const values: Record<string, ItemTaskInputValue> = {};
+  for (const input of plugin.inputs) {
+    if (input.type === "text") {
+      const value = await vscode.window.showInputBox({
+        title: `${plugin.name} · ${input.label}`,
+        prompt: input.description,
+        placeHolder: input.placeholder,
+        value: input.defaultValue,
+        ignoreFocusOut: true,
+        validateInput: (candidate) => input.required && !candidate.trim()
+          ? `${input.label} is required.`
+          : undefined,
+      });
+      if (value === undefined) {
+        return undefined;
+      }
+      if (value || input.required) {
+        values[input.id] = value;
+      }
+      continue;
+    }
+    if (input.type === "number") {
+      const value = await vscode.window.showInputBox({
+        title: `${plugin.name} · ${input.label}`,
+        prompt: input.description,
+        placeHolder: input.placeholder,
+        value: input.defaultValue?.toString(),
+        ignoreFocusOut: true,
+        validateInput: (candidate) => validateNumberInput(candidate, input),
+      });
+      if (value === undefined) {
+        return undefined;
+      }
+      if (value.trim()) {
+        values[input.id] = Number(value);
+      }
+      continue;
+    }
+    if (input.type === "boolean") {
+      const choices = [
+        { label: "Yes", value: true },
+        { label: "No", value: false },
+      ];
+      if (!input.defaultValue) {
+        choices.reverse();
+      }
+      const selected = await vscode.window.showQuickPick(choices, {
+        title: `${plugin.name} · ${input.label}`,
+        placeHolder: input.description,
+        ignoreFocusOut: true,
+      });
+      if (!selected) {
+        return undefined;
+      }
+      values[input.id] = selected.value;
+      continue;
+    }
+    const choices = input.options.map((option) => ({
+      label: option.label,
+      description: option.description,
+      picked: input.defaultValue !== undefined && option.value === input.defaultValue,
+      value: option.value,
+    }));
+    if (!input.required) {
+      choices.push({ label: "Skip", description: "Do not provide a value", picked: false, value: "" });
+    }
+    const selected = await vscode.window.showQuickPick(choices, {
+      title: `${plugin.name} · ${input.label}`,
+      placeHolder: input.description ?? `Select ${input.label}`,
+      ignoreFocusOut: true,
+    });
+    if (!selected) {
+      return undefined;
+    }
+    if (input.required || selected.label !== "Skip") {
+      values[input.id] = selected.value;
+    }
+  }
+  return values;
+}
+
+function validateNumberInput(value: string, input: NumberTaskInput): string | undefined {
+  if (!value.trim()) {
+    return input.required ? `${input.label} is required.` : undefined;
+  }
+  const numberValue = Number(value);
+  if (!Number.isFinite(numberValue)) {
+    return `${input.label} must be a number.`;
+  }
+  if (input.minimum !== undefined && numberValue < input.minimum) {
+    return `${input.label} must be at least ${input.minimum}.`;
+  }
+  if (input.maximum !== undefined && numberValue > input.maximum) {
+    return `${input.label} must be at most ${input.maximum}.`;
+  }
+  return undefined;
+}
+
+function isAuthenticationFailure(result: ProcessResult): boolean {
+  return result.exitCode === 41 || /\b401\b|unauthori[sz]ed|authentication failed/iu.test(result.outputText);
+}
+
 function runProcess(
   executable: string,
   args: readonly string[],
   cwd: string,
   cancellationToken: vscode.CancellationToken,
   output: vscode.OutputChannel,
+  standardInput?: string,
 ): Promise<ProcessResult> {
   return new Promise((resolve, reject) => {
     const child = spawn(executable, args, { cwd, shell: false, windowsHide: true });
     let cancelled = false;
+    let outputText = "";
     const cancellation = cancellationToken.onCancellationRequested(() => {
       cancelled = true;
       child.kill();
     });
-    child.stdout.on("data", (chunk: Buffer | string) => output.append(chunk.toString()));
-    child.stderr.on("data", (chunk: Buffer | string) => output.append(chunk.toString()));
+    child.stdout.on("data", (chunk: Buffer | string) => {
+      const text = chunk.toString();
+      outputText += text;
+      output.append(text);
+    });
+    child.stderr.on("data", (chunk: Buffer | string) => {
+      const text = chunk.toString();
+      outputText += text;
+      output.append(text);
+    });
+    if (standardInput !== undefined) {
+      child.stdin.end(standardInput);
+    }
     child.once("error", (error) => {
       cancellation.dispose();
       reject(error);
     });
     child.once("close", (exitCode) => {
       cancellation.dispose();
-      resolve({ exitCode, cancelled });
+      resolve({ exitCode, cancelled, outputText });
     });
   });
 }

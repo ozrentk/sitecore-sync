@@ -69,6 +69,21 @@ Right-click a comparison item and choose **Run task…** to run a matching works
   "name": "Validate product",
   "description": "Checks product content.",
   "script": "validate-product.ps1",
+  "execution": {
+    "type": "powershell"
+  },
+  "inputs": [
+    {
+      "id": "market",
+      "type": "pick",
+      "label": "Market",
+      "required": true,
+      "options": [
+        { "label": "United Kingdom", "value": "uk" },
+        { "label": "Germany", "value": "de" }
+      ]
+    }
+  ],
   "matches": {
     "templateIds": ["{TEMPLATE-ID}"],
     "itemIds": [],
@@ -78,9 +93,13 @@ Right-click a comparison item and choose **Run task…** to run a matching works
 }
 ```
 
-The script receives `-ContextPath` and `-ResultPath`. Context JSON includes schema version, task identity, comparison side, connection identity without credentials, language, parent and ancestor paths, and complete item details including template, versions, and fields. Standard output and error stream live to **XM Cloud Tasks**. The script can write `{"status":"ok","message":"Done."}` or `{"status":"error","message":"Reason."}` to the result path; a non-zero exit code is always failure. See `examples/item-task` for a working plug-in that can be copied into a workspace.
+Inputs support `text`, `number`, `pick`, and `boolean`. Common properties are `id`, `type`, `label`, optional `description`, `required`, and `default`. Text inputs can provide `placeholder`; number inputs can provide `minimum` and `maximum`; pick inputs require scalar options or `{ "label", "value", "description" }` objects. Collected values are available as `context.inputs.<id>`.
 
-Tasks run only on an explicit click and only in trusted workspaces. They use `pwsh -NoLogo -NoProfile -NonInteractive`, falling back to Windows PowerShell when PowerShell 7 is unavailable. Scripts run under the machine's normal PowerShell execution policy. Temporary context and result files are deleted after execution, and Sitecore secrets and access tokens are never included.
+Local PowerShell is the default execution type. Its script receives `-ContextPath` and `-ResultPath`. Context JSON includes schema version, task identity, collected inputs, comparison side, connection identity without credentials, language, parent and ancestor paths, and complete item details including template, versions, and fields. Standard output and error stream live to **XM Cloud Tasks**. The script can write `{"status":"ok","message":"Done."}` or `{"status":"error","message":"Reason."}` to the result path; a non-zero exit code is always failure. See `examples/item-task` for a working plug-in that can be copied into a workspace.
+
+Set `execution.type` to `spe-remoting` for a server-side Sitecore PowerShell Extensions task. The extension uses the clicked side's connection URL and language, asks for a Sitecore username and password only on first use, and stores the credential per connection in VS Code Secret Storage. An authentication failure offers credential replacement; deleting the connection also deletes its SPE credential. The workspace script executes inside Sitecore and receives one `Context` object parameter. SPE Remoting must be enabled and authorized on the CM environment, and the local Windows PowerShell environment must provide the `SPE` remoting module.
+
+Tasks run only on an explicit click and only in trusted workspaces. Local tasks use `pwsh -NoLogo -NoProfile -NonInteractive`, falling back to Windows PowerShell when PowerShell 7 is unavailable. SPE remoting tasks use Windows PowerShell on Windows for compatibility with the SPE client module. Scripts run under the machine's normal PowerShell execution policy. Temporary context and result files are deleted after execution. Sitecore credentials are supplied to the launcher through its standard input and are never included in the manifest, context file, command line, or logs.
 
 ## Difference legend
 
