@@ -59,7 +59,30 @@ Subtree processing uses Content Transfer and Item Transfer with `OverrideExistin
 
 When deployment information is available for both sides, the processor records the latest source and destination deployment IDs at subtree start. It checks those IDs during long-running Content and Item Transfer polling, throttled to at most once every 15 seconds, and persists the baselines for restart recovery. If either ID changes, the transfer fails, the queue pauses, and retry discards the old remote checkpoint and starts a fresh transfer. Missing permissions and temporary monitoring errors are logged but never block or fail a transfer.
 
-### Difference legend
+## Item task plug-ins
+
+Right-click a comparison item and choose **Run task…** to run a matching workspace PowerShell plug-in. Create each plug-in beneath `.xm-cloud-sync/tasks/<task-name>/` with a `task.json` manifest and a `.ps1` script. Tasks can match an item by template ID, item ID, exact immediate-parent path, or exact ancestor path; rules within a manifest are OR conditions. When both comparison sides match, the picker identifies the side, connection, language, and path.
+
+```json
+{
+  "id": "validate-product",
+  "name": "Validate product",
+  "description": "Checks product content.",
+  "script": "validate-product.ps1",
+  "matches": {
+    "templateIds": ["{TEMPLATE-ID}"],
+    "itemIds": [],
+    "parentPaths": [],
+    "ancestorPaths": ["/sitecore/content/Products"]
+  }
+}
+```
+
+The script receives `-ContextPath` and `-ResultPath`. Context JSON includes schema version, task identity, comparison side, connection identity without credentials, language, parent and ancestor paths, and complete item details including template, versions, and fields. Standard output and error stream live to **XM Cloud Tasks**. The script can write `{"status":"ok","message":"Done."}` or `{"status":"error","message":"Reason."}` to the result path; a non-zero exit code is always failure. See `examples/item-task` for a working plug-in that can be copied into a workspace.
+
+Tasks run only on an explicit click and only in trusted workspaces. They use `pwsh -NoLogo -NoProfile -NonInteractive`, falling back to Windows PowerShell when PowerShell 7 is unavailable. Scripts run under the machine's normal PowerShell execution policy. Temporary context and result files are deleted after execution, and Sitecore secrets and access tokens are never included.
+
+## Difference legend
 
 | Badge | Meaning |
 | --- | --- |

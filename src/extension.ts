@@ -15,6 +15,7 @@ import {
 } from "./connections/connectionTreeProvider";
 import { AuthoringContentClient } from "./sitecore/authoringClient";
 import { DeploymentClient } from "./sitecore/deploymentClient";
+import { ItemTaskRunner } from "./tasks/itemTaskRunner";
 import { TransferProcessor } from "./transfers/transferProcessor";
 import { TransferQueueStore } from "./transfers/transferQueueStore";
 import { TransfersTreeProvider, TransferTreeItem } from "./transfers/transfersTreeProvider";
@@ -25,6 +26,8 @@ export function activate(context: vscode.ExtensionContext): void {
   const connectionProvider = new ConnectionTreeProvider(connectionStore);
   const authoringClient = new AuthoringContentClient(log);
   const deploymentClient = new DeploymentClient(log);
+  const taskOutput = vscode.window.createOutputChannel("XM Cloud Tasks");
+  const itemTaskRunner = new ItemTaskRunner(context.globalStorageUri, taskOutput);
   const extensionVersion = String(context.extension.packageJSON.version ?? "unknown");
   const transferQueue = new TransferQueueStore(context.workspaceState);
   const transferProcessor = new TransferProcessor(
@@ -44,6 +47,7 @@ export function activate(context: vscode.ExtensionContext): void {
     connectionStore,
     authoringClient,
     transferQueue,
+    itemTaskRunner,
     log,
   );
   const connectionsView = vscode.window.createTreeView("xmCloudSync.connections", {
@@ -85,6 +89,7 @@ export function activate(context: vscode.ExtensionContext): void {
     transferQueue,
     transferProcessor,
     transfersProvider,
+    itemTaskRunner,
     { dispose: () => {
       authoringClient.clear();
       deploymentClient.clear();

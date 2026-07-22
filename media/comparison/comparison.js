@@ -961,6 +961,29 @@ function showContextMenu(event, pair, forceDisabled = false) {
     closeContextMenu();
   });
 
+  const runTask = document.createElement("button");
+  runTask.className = "context-menu-item";
+  runTask.type = "button";
+  runTask.textContent = "Run task…";
+  runTask.disabled = disabled || (!pair.left && !pair.right);
+  runTask.title = runTask.disabled
+    ? "Item context is unavailable while this item is locked."
+    : "Select a matching workspace PowerShell task for this item.";
+  runTask.addEventListener("click", () => {
+    vscode.postMessage({
+      type: "runItemTask",
+      leftItemId: pair.left?.itemId,
+      rightItemId: pair.right?.itemId,
+      leftName: pair.left?.name,
+      rightName: pair.right?.name,
+      leftDisplayName: pair.left?.displayName,
+      rightDisplayName: pair.right?.displayName,
+      leftHasChildren: pair.left?.hasChildren,
+      rightHasChildren: pair.right?.hasChildren,
+    });
+    closeContextMenu();
+  });
+
   const leftConnection = state.connections.find(
     (connection) => connection.id === state.selection.leftConnectionId,
   );
@@ -1002,6 +1025,7 @@ function showContextMenu(event, pair, forceDisabled = false) {
   syncRightToLeft.addEventListener("click", () => startSubtreeSync(pair, "rightToLeft"));
   menu.append(
     detailedDiff,
+    runTask,
     addFavorite,
     createContextMenuSeparator(),
     syncLeftToRight,

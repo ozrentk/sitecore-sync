@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.9.0
+
+- Added **Run task…** to comparison-item context menus with matching tasks distinguished by comparison side, connection, language, and path.
+- Discovered PowerShell task plug-ins from `.xm-cloud-sync/tasks/**/task.json` and matched them by template ID, item ID, immediate parent path, or ancestor path.
+- Passed complete, secret-free item context through a temporary JSON file, streamed stdout and stderr to the **XM Cloud Tasks** output channel, and reported structured OK or failure results.
+- Added cancellable, non-interactive PowerShell execution with PowerShell 7 and Windows PowerShell fallback, Workspace Trust enforcement, manifest validation, and temporary-context cleanup.
+
 ## 0.8.4
 
 - Made deployment monitoring optional so missing Deploy API permissions never block a subtree transfer.
