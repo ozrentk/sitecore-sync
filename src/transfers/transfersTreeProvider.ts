@@ -65,8 +65,18 @@ implements vscode.TreeDataProvider<TransferTreeItem>, vscode.Disposable {
 
 function transferLabel(record: TransferRecord, position: number): string {
   return record.kind === "fieldValue"
-    ? `${position}. Field · ${record.source.fieldLabel}`
+    ? `${position}. Field · ${fieldName(record)}`
     : `${position}. Subtree · ${record.sourcePath}`;
+}
+
+function fieldName(record: Extract<TransferRecord, { readonly kind: "fieldValue" }>): string {
+  return record.source.fieldName === record.target.fieldName
+    ? record.source.fieldName
+    : `${record.source.fieldName} → ${record.target.fieldName}`;
+}
+
+function fieldPath(itemPath: string, name: string): string {
+  return `${itemPath.replace(/\/$/u, "")}/${name}`;
 }
 
 function statusLabel(status: TransferRecord["status"]): string {
@@ -100,7 +110,12 @@ function transferTooltip(record: TransferRecord): vscode.MarkdownString {
     tooltip.appendMarkdown(`Started: ${record.startedAt}  \n`);
   }
   if (record.kind === "fieldValue") {
-    tooltip.appendMarkdown(`Field: ${escapeMarkdown(record.source.fieldLabel)}  \n`);
+    tooltip.appendMarkdown(`Field name: ${escapeMarkdown(fieldName(record))}  \n`);
+    if (record.source.fieldLabel !== record.source.fieldName) {
+      tooltip.appendMarkdown(`Field label: ${escapeMarkdown(record.source.fieldLabel)}  \n`);
+    }
+    tooltip.appendMarkdown(`Source field path: ${escapeMarkdown(fieldPath(record.source.itemPath, record.source.fieldName))}  \n`);
+    tooltip.appendMarkdown(`Target field path: ${escapeMarkdown(fieldPath(record.target.itemPath, record.target.fieldName))}  \n`);
     tooltip.appendMarkdown(`Source item: \`${record.source.itemId}\` (${record.source.language}, v${record.source.version})  \n`);
     tooltip.appendMarkdown(`Target item: \`${record.target.itemId}\` (${record.target.language}, v${record.target.version})  \n`);
   } else {

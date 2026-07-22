@@ -3,6 +3,8 @@
 ## 0.8.1
 
 - Released Field Diff transfer arrows immediately after enqueueing instead of keeping them disabled until the informational notification was dismissed.
+- Limited the field-transfer overwrite confirmation to the first accepted transfer for the extension profile.
+- Displayed the internal field name in Transfers and included source and target field paths in its tooltip.
 
 ## 0.8.0
 

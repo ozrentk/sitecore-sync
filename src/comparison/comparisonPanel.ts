@@ -20,6 +20,7 @@ import {
 } from "../transfers/transferTypes";
 
 const selectionKey = "sitecoreXmCloudSync.comparisonSelection.v1";
+const fieldTransferConfirmationKey = "sitecoreXmCloudSync.fieldTransferConfirmationAccepted.v1";
 const defaultLanguage = "en";
 const authoringRootPath = "/sitecore";
 const traversalConcurrencyPerSide = 2;
@@ -122,6 +123,7 @@ export class ComparisonPanelManager implements vscode.Disposable {
   constructor(
     private readonly extensionUri: vscode.Uri,
     private readonly workspaceState: vscode.Memento,
+    private readonly globalState: vscode.Memento,
     private readonly connectionStore: ConnectionStore,
     private readonly authoringClient: AuthoringContentClient,
     private readonly transferQueue: TransferQueueStore,
@@ -1558,13 +1560,16 @@ export class ComparisonPanelManager implements vscode.Disposable {
       const sourceNote = sourceKind === "stored"
         ? ""
         : ` The ${sourceKind} source value will become an explicit stored value on the target.`;
-      const confirmed = await vscode.window.showWarningMessage(
-        `Add a transfer for “${fieldLabel}” from ${sourceLabel} to ${targetLabel}? Processing it will replace the target field value.${sourceNote}`,
-        { modal: true },
-        "Add Transfer",
-      );
-      if (confirmed !== "Add Transfer") {
-        return;
+      if (!this.globalState.get<boolean>(fieldTransferConfirmationKey, false)) {
+        const confirmed = await vscode.window.showWarningMessage(
+          `Add a transfer for “${fieldLabel}” from ${sourceLabel} to ${targetLabel}? Processing it will replace the target field value.${sourceNote} This confirmation is shown only for the first accepted field transfer.`,
+          { modal: true },
+          "Add Transfer",
+        );
+        if (confirmed !== "Add Transfer") {
+          return;
+        }
+        await this.globalState.update(fieldTransferConfirmationKey, true);
       }
       const currentSelection = this.getSelection();
       if (
