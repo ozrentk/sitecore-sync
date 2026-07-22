@@ -6,6 +6,8 @@ import type { ConnectionStore, SpeCredential } from "../connections/connectionSt
 import type { AuthoringItemDetails } from "../sitecore/authoringClient";
 
 const maximumManifestCount = 200;
+const speInstallCommand = "Install-Module -Name SPE -Scope CurrentUser";
+const speGalleryUrl = "https://www.powershellgallery.com/packages/SPE";
 
 interface ItemTaskMatchRules {
   readonly templateIds: readonly string[];
@@ -240,6 +242,12 @@ export class ItemTaskRunner implements vscode.Disposable {
     const contextUri = vscode.Uri.joinPath(runDirectory, "context.json");
     const resultUri = vscode.Uri.joinPath(runDirectory, "result.json");
     try {
+      if (
+        plugin.execution.type === "spe-remoting" &&
+        !await this.ensureSpeModuleAvailable(plugin.directoryPath)
+      ) {
+        return;
+      }
       const inputs = await promptForTaskInputs(plugin);
       if (!inputs) {
         return;
@@ -477,6 +485,57 @@ export class ItemTaskRunner implements vscode.Disposable {
     const credential = { username: username.trim(), password };
     await this.connectionStore.storeSpeCredential(candidate.connection.id, credential.username, password);
     return credential;
+  }
+
+  private async ensureSpeModuleAvailable(cwd: string): Promise<boolean> {
+    const executable = process.platform === "win32" ? "powershell.exe" : "pwsh";
+    const tokenSource = new vscode.CancellationTokenSource();
+    let result: ProcessResult;
+    try {
+      result = await runProcess(
+        executable,
+        [
+          "-NoLogo",
+          "-NoProfile",
+          "-NonInteractive",
+          "-Command",
+          "if (Get-Module -ListAvailable -Name SPE) { exit 0 } else { exit 3 }",
+        ],
+        cwd,
+        tokenSource.token,
+        this.output,
+      );
+    } catch (error: unknown) {
+      const message = processErrorCode(error) === "ENOENT"
+        ? `${executable} is unavailable, so SPE tasks cannot run.`
+        : `Unable to check for the local SPE module: ${errorMessage(error)}`;
+      this.output.appendLine(`[SPE preflight] ${message}`);
+      this.output.show(true);
+      await vscode.window.showErrorMessage(message);
+      return false;
+    } finally {
+      tokenSource.dispose();
+    }
+    if (result.exitCode === 0) {
+      return true;
+    }
+
+    this.output.appendLine("[SPE preflight] The local SPE remoting module is not installed.");
+    this.output.appendLine(`Run in ${process.platform === "win32" ? "Windows PowerShell" : "PowerShell"}:`);
+    this.output.appendLine(`  ${speInstallCommand}`);
+    this.output.show(true);
+    const selected = await vscode.window.showWarningMessage(
+      "The local SPE remoting module is required before this task can run.",
+      "Copy Install Command",
+      "Open SPE Package",
+    );
+    if (selected === "Copy Install Command") {
+      await vscode.env.clipboard.writeText(speInstallCommand);
+      await vscode.window.showInformationMessage("SPE installation command copied to the clipboard.");
+    } else if (selected === "Open SPE Package") {
+      await vscode.env.openExternal(vscode.Uri.parse(speGalleryUrl));
+    }
+    return false;
   }
 }
 
