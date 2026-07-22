@@ -48,7 +48,7 @@ export interface ContentTransferResult {
 export type ContentTransferProgress =
   | { readonly stage: "exportingContent" }
   | { readonly stage: "copyingChunks"; readonly current: number; readonly total: number }
-  | { readonly stage: "sitecore"; readonly current: number; readonly total: number }
+  | { readonly stage: "sitecore"; readonly completed: number; readonly total: number }
   | { readonly stage: "verifying" };
 
 interface TestQueryResponse {
@@ -436,10 +436,11 @@ export class AuthoringContentClient {
     };
     await onCheckpoint?.(checkpoint);
 
+    const sitecorePhaseStartedAt = Date.now();
     for (const [blobIndex, blobName] of destinationBlobNames.entries()) {
       await onProgress?.({
         stage: "sitecore",
-        current: blobIndex + 1,
+        completed: blobIndex,
         total: destinationBlobNames.length,
       });
       const blobListUrl = new URL("sources/blobs", itemTransferBase);
@@ -485,10 +486,16 @@ export class AuthoringContentClient {
         destinationToken,
         decodedItemTransferId,
         signal,
+        sitecorePhaseStartedAt,
       );
       if (!itemTransferStatus) {
         return checkpoint;
       }
+      await onProgress?.({
+        stage: "sitecore",
+        completed: blobIndex + 1,
+        total: destinationBlobNames.length,
+      });
     }
 
     await onProgress?.({ stage: "verifying" });
@@ -529,6 +536,7 @@ export class AuthoringContentClient {
     destinationLanguage: string,
     checkpoint: ContentTransferResult,
     signal: AbortSignal,
+    sitecorePhaseStartedAt: number,
     onCheckpoint?: (checkpoint: ContentTransferResult) => Promise<void>,
     onProgress?: (progress: ContentTransferProgress) => Promise<void>,
   ): Promise<ContentTransferResult> {
@@ -577,7 +585,7 @@ export class AuthoringContentClient {
     for (const [itemTransferIndex, itemTransferId] of itemTransferIds.entries()) {
       await onProgress?.({
         stage: "sitecore",
-        current: itemTransferIndex + 1,
+        completed: itemTransferIndex,
         total: checkpoint.chunkSets.length,
       });
       const status = await this.pollItemTransfer(
@@ -585,10 +593,16 @@ export class AuthoringContentClient {
         destinationToken,
         itemTransferId,
         signal,
+        sitecorePhaseStartedAt,
       );
       if (!status) {
         return { ...currentCheckpoint, state: "Pending" };
       }
+      await onProgress?.({
+        stage: "sitecore",
+        completed: itemTransferIndex + 1,
+        total: checkpoint.chunkSets.length,
+      });
     }
 
     await onProgress?.({ stage: "verifying" });
@@ -678,8 +692,10 @@ export class AuthoringContentClient {
     token: string,
     transferId: string,
     signal: AbortSignal,
+    sitecorePhaseStartedAt: number,
   ): Promise<unknown | undefined> {
-    for (let attempt = 0; attempt < 60; attempt += 1) {
+    const pollingWindowEndsAt = Date.now() + 120_000;
+    while (Date.now() < pollingWindowEndsAt) {
       const response = await this.http.request(
         url,
         { method: "GET", headers: { authorization: `Bearer ${token}` } },
@@ -720,23 +736,30 @@ export class AuthoringContentClient {
             return matchingTransfer;
           }
         }
-        await abortableDelay(2_000, signal);
-        continue;
+      } else {
+        await assertSuccessfulResponse(response, "Poll item transfer");
+        const payload = await readJson<unknown>(response, "Item Transfer API");
+        const state = stringProperty(payload, "TransferState", "transferState");
+        if (state === "Failed" || state === "Discarded") {
+          throw new Error(`Item transfer ${transferId} entered the ${state} state.`);
+        }
+        const blobState = stringProperty(payload, "BlobState", "blobState");
+        if (blobState === "TransferredWithErrors") {
+          throw new Error(`Item transfer ${transferId} completed with validation errors.`);
+        }
+        if (state === "Finished") {
+          return payload;
+        }
       }
-      await assertSuccessfulResponse(response, "Poll item transfer");
-      const payload = await readJson<unknown>(response, "Item Transfer API");
-      const state = stringProperty(payload, "TransferState", "transferState");
-      if (state === "Failed" || state === "Discarded") {
-        throw new Error(`Item transfer ${transferId} entered the ${state} state.`);
+      const remainingWindow = pollingWindowEndsAt - Date.now();
+      if (remainingWindow <= 0) {
+        break;
       }
-      const blobState = stringProperty(payload, "BlobState", "blobState");
-      if (blobState === "TransferredWithErrors") {
-        throw new Error(`Item transfer ${transferId} completed with validation errors.`);
-      }
-      if (state === "Finished") {
-        return payload;
-      }
-      await abortableDelay(2_000, signal);
+      const elapsed = Math.max(0, Date.now() - sitecorePhaseStartedAt);
+      await abortableDelay(
+        Math.min(remainingWindow, jitteredItemTransferPollingDelay(elapsed)),
+        signal,
+      );
     }
     return undefined;
   }
@@ -1433,20 +1456,35 @@ async function assertSuccessfulResponse(response: Response, operation: string): 
   );
 }
 
+function jitteredItemTransferPollingDelay(elapsedMilliseconds: number): number {
+  const baseDelay = elapsedMilliseconds < 60_000
+    ? 2_000
+    : elapsedMilliseconds < 5 * 60_000
+      ? 5_000
+      : elapsedMilliseconds < 10 * 60_000
+        ? 10_000
+        : 15_000;
+  return Math.round(baseDelay * (0.9 + Math.random() * 0.2));
+}
+
 async function abortableDelay(milliseconds: number, signal: AbortSignal): Promise<void> {
   if (signal.aborted) {
     throw signal.reason;
   }
   await new Promise<void>((resolve, reject) => {
-    const timeout = setTimeout(resolve, milliseconds);
-    signal.addEventListener(
-      "abort",
-      () => {
-        clearTimeout(timeout);
-        reject(signal.reason);
-      },
-      { once: true },
-    );
+    const onAbort = (): void => {
+      clearTimeout(timeout);
+      reject(signal.reason);
+    };
+    const timeout = setTimeout(() => {
+      signal.removeEventListener("abort", onAbort);
+      resolve();
+    }, milliseconds);
+    signal.addEventListener("abort", onAbort, { once: true });
+    if (signal.aborted) {
+      signal.removeEventListener("abort", onAbort);
+      onAbort();
+    }
   });
 }
 

@@ -20,7 +20,6 @@ export class TransferProcessor implements vscode.Disposable {
   private readonly failureEmitter = new vscode.EventEmitter<TransferRecord>();
   private readonly disposables: vscode.Disposable[] = [];
   private pumping: Promise<void> | undefined;
-  private pauseWaitController: AbortController | undefined;
 
   readonly onDidStartRecord = this.startEmitter.event;
   readonly onDidCompleteRecord = this.completeEmitter.event;
@@ -60,7 +59,6 @@ export class TransferProcessor implements vscode.Disposable {
       return;
     }
     await this.store.setProcessorState("pausing");
-    this.pauseWaitController?.abort();
   }
 
   private kick(): void {
@@ -272,16 +270,18 @@ export class TransferProcessor implements vscode.Disposable {
       if (this.store.processorState !== "running") {
         return false;
       }
-      const waited = await this.waitBetweenPollWindows(15_000);
-      if (!waited || this.store.processorState !== "running") {
-        return false;
-      }
+      const latest = this.store.get(record.id);
+      const sitecorePhaseStartedAt = latest?.kind === "subtree" &&
+          latest.progress?.stage === "sitecore"
+        ? Date.parse(latest.progress.startedAt)
+        : Date.now();
       checkpoint = await this.authoringClient.resumeSubtreeTransfer(
         targetConnection,
         targetSecret,
         record.targetLanguage,
         checkpoint,
         controller.signal,
+        Number.isFinite(sitecorePhaseStartedAt) ? sitecorePhaseStartedAt : Date.now(),
         async (nextCheckpoint) => {
           await this.persistSubtreeCheckpoint(record.id, nextCheckpoint);
         },
@@ -310,17 +310,28 @@ export class TransferProcessor implements vscode.Disposable {
     recordId: string,
     progress: ContentTransferProgress,
   ): Promise<void> {
-    await this.store.update(recordId, (current) => current.kind === "subtree"
-      ? {
-          ...current,
-          progress,
-          status: progress.stage === "sitecore"
-            ? "waitingForSitecore"
-            : progress.stage === "verifying"
-              ? "verifying"
-              : "executing",
-        }
-      : current);
+    await this.store.update(recordId, (current) => {
+      if (current.kind !== "subtree") {
+        return current;
+      }
+      const persistedProgress = progress.stage === "sitecore"
+        ? {
+            ...progress,
+            startedAt: current.progress?.stage === "sitecore"
+              ? current.progress.startedAt
+              : new Date().toISOString(),
+          }
+        : progress;
+      return {
+        ...current,
+        progress: persistedProgress,
+        status: progress.stage === "sitecore"
+          ? "waitingForSitecore"
+          : progress.stage === "verifying"
+            ? "verifying"
+            : "executing",
+      };
+    });
   }
 
   private async persistSubtreeCheckpoint(
@@ -333,24 +344,6 @@ export class TransferProcessor implements vscode.Disposable {
     await this.store.update(recordId, (current) => current.kind === "subtree"
       ? { ...current, checkpoint, status: "waitingForSitecore" }
       : current);
-  }
-
-  private async waitBetweenPollWindows(milliseconds: number): Promise<boolean> {
-    const controller = new AbortController();
-    this.pauseWaitController = controller;
-    try {
-      return await new Promise<boolean>((resolve) => {
-        const timeout = setTimeout(() => resolve(true), milliseconds);
-        controller.signal.addEventListener("abort", () => {
-          clearTimeout(timeout);
-          resolve(false);
-        }, { once: true });
-      });
-    } finally {
-      if (this.pauseWaitController === controller) {
-        this.pauseWaitController = undefined;
-      }
-    }
   }
 
   private async writeJournal(
@@ -393,7 +386,6 @@ export class TransferProcessor implements vscode.Disposable {
   }
 
   dispose(): void {
-    this.pauseWaitController?.abort();
     for (const disposable of this.disposables.splice(0)) {
       disposable.dispose();
     }

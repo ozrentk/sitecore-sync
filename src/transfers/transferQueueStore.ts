@@ -166,11 +166,36 @@ export class TransferQueueStore implements vscode.Disposable {
 }
 
 function recoverInterruptedRecord(record: TransferRecord): TransferRecord {
-  if (record.status === "failed" || record.status === "queued") {
-    return record;
+  const recoveredProgress = recoverLegacySitecoreProgress(record);
+  const recoveredRecord = recoveredProgress && record.kind === "subtree"
+    ? { ...record, progress: recoveredProgress }
+    : record;
+  if (recoveredRecord.status === "failed" || recoveredRecord.status === "queued") {
+    return recoveredRecord;
   }
-  if (record.kind === "subtree" && record.checkpoint?.state === "Pending") {
-    return { ...record, status: "waitingForSitecore" };
+  if (recoveredRecord.kind === "subtree" && recoveredRecord.checkpoint?.state === "Pending") {
+    return { ...recoveredRecord, status: "waitingForSitecore" };
   }
-  return { ...record, status: "queued" };
+  return { ...recoveredRecord, status: "queued" };
+}
+
+function recoverLegacySitecoreProgress(
+  record: TransferRecord,
+): Extract<TransferRecord, { readonly kind: "subtree" }>["progress"] | undefined {
+  if (record.kind !== "subtree" || record.progress?.stage !== "sitecore") {
+    return record.kind === "subtree" ? record.progress : undefined;
+  }
+  const candidate = record.progress as typeof record.progress & {
+    readonly current?: number;
+    readonly completed?: number;
+    readonly startedAt?: string;
+  };
+  return {
+    stage: "sitecore",
+    completed: typeof candidate.completed === "number"
+      ? candidate.completed
+      : Math.max(0, (candidate.current ?? 1) - 1),
+    total: candidate.total,
+    startedAt: candidate.startedAt ?? record.startedAt ?? record.enqueuedAt,
+  };
 }
