@@ -3,6 +3,7 @@
 ## 0.9.1
 
 - Discovered item task manifests by directly enumerating each workspace's `.xm-cloud-sync/tasks` directory so hidden-folder and workspace-search exclusions cannot suppress valid plug-ins.
+- Opened the extension source workspace automatically in the Extension Development Host so F5 debugging discovers its workspace task plug-ins.
 
 ## 0.9.0
 
