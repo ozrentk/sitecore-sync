@@ -3,6 +3,7 @@ import type { ConnectionStore } from "../connections/connectionStore";
 import {
   AuthoringContentClient,
   type AuthoringItemField,
+  type ContentTransferProgress,
 } from "../sitecore/authoringClient";
 import { TransferQueueStore } from "./transferQueueStore";
 import {
@@ -252,12 +253,18 @@ export class TransferProcessor implements vscode.Disposable {
         async (nextCheckpoint) => {
           await this.persistSubtreeCheckpoint(record.id, nextCheckpoint);
         },
+        async (progress) => {
+          await this.persistSubtreeProgress(record.id, progress);
+        },
       );
       await this.store.update(record.id, (current) => current.kind === "subtree"
         ? {
             ...current,
             checkpoint,
             status: checkpoint?.state === "Pending" ? "waitingForSitecore" : "verifying",
+            progress: checkpoint?.state === "Pending"
+              ? current.progress
+              : { stage: "verifying" },
           }
         : current);
     }
@@ -278,16 +285,42 @@ export class TransferProcessor implements vscode.Disposable {
         async (nextCheckpoint) => {
           await this.persistSubtreeCheckpoint(record.id, nextCheckpoint);
         },
+        async (progress) => {
+          await this.persistSubtreeProgress(record.id, progress);
+        },
       );
       await this.store.update(record.id, (current) => current.kind === "subtree"
         ? {
             ...current,
             checkpoint,
             status: checkpoint?.state === "Pending" ? "waitingForSitecore" : "verifying",
+            progress: checkpoint?.state === "Pending"
+              ? current.progress
+              : { stage: "verifying" },
           }
         : current);
     }
+    await this.store.update(record.id, (current) => current.kind === "subtree"
+      ? { ...current, status: "verifying", progress: { stage: "verifying" } }
+      : current);
     return true;
+  }
+
+  private async persistSubtreeProgress(
+    recordId: string,
+    progress: ContentTransferProgress,
+  ): Promise<void> {
+    await this.store.update(recordId, (current) => current.kind === "subtree"
+      ? {
+          ...current,
+          progress,
+          status: progress.stage === "sitecore"
+            ? "waitingForSitecore"
+            : progress.stage === "verifying"
+              ? "verifying"
+              : "executing",
+        }
+      : current);
   }
 
   private async persistSubtreeCheckpoint(

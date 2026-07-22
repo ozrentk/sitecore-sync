@@ -53,7 +53,7 @@ implements vscode.TreeDataProvider<TransferTreeItem>, vscode.Disposable {
       : record.targetConnectionName;
     const source = this.connections.get(sourceId)?.name ?? sourceFallback;
     const target = this.connections.get(targetId)?.name ?? targetFallback;
-    return `${source} → ${target} · ${statusLabel(record.status)}`;
+    return `${source} → ${target} · ${statusLabel(record)}`;
   }
 
   dispose(): void {
@@ -82,14 +82,41 @@ function fieldPath(itemPath: string, name: string): string {
   return `${itemPath.replace(/\/$/u, "")}/${name}`;
 }
 
-function statusLabel(status: TransferRecord["status"]): string {
-  switch (status) {
-    case "queued": return "queued";
-    case "preflighting": return "checking freshness";
-    case "executing": return "transferring";
-    case "waitingForSitecore": return "waiting for Sitecore";
-    case "verifying": return "verifying";
-    case "failed": return "failed";
+function statusLabel(record: TransferRecord): string {
+  if (record.kind === "fieldValue") {
+    switch (record.status) {
+      case "queued": return "queued (1/4)";
+      case "preflighting": return "checking freshness (2/4)";
+      case "executing": return "updating field (3/4)";
+      case "verifying": return "verifying (4/4)";
+      case "waitingForSitecore": return "waiting for Sitecore";
+      case "failed": return "failed";
+    }
+  }
+  switch (record.status) {
+    case "queued": return "queued (1/6)";
+    case "preflighting": return "checking freshness (2/6)";
+    case "executing": return subtreeProgressLabel(record) ?? "exporting content (3/6)";
+    case "waitingForSitecore": return subtreeProgressLabel(record) ?? "Sitecore (5/6)";
+    case "verifying": return "verifying (6/6)";
+    case "failed": {
+      const phase = subtreeProgressLabel(record);
+      return phase ? `failed · ${phase}` : "failed";
+    }
+  }
+}
+
+function subtreeProgressLabel(
+  record: Extract<TransferRecord, { readonly kind: "subtree" }>,
+): string | undefined {
+  switch (record.progress?.stage) {
+    case "exportingContent": return "exporting content (3/6)";
+    case "copyingChunks":
+      return `copying chunks (4/6, chunk ${record.progress.current}/${record.progress.total})`;
+    case "sitecore":
+      return `Sitecore (5/6, import ${record.progress.current}/${record.progress.total})`;
+    case "verifying": return "verifying (6/6)";
+    default: return undefined;
   }
 }
 
@@ -107,7 +134,7 @@ function transferIcon(record: TransferRecord): vscode.ThemeIcon {
 function transferTooltip(record: TransferRecord): vscode.MarkdownString {
   const tooltip = new vscode.MarkdownString(undefined, true);
   tooltip.appendMarkdown(`**${record.kind === "fieldValue" ? "Field value" : "Subtree"} transfer**\n\n`);
-  tooltip.appendMarkdown(`Status: ${statusLabel(record.status)}  \n`);
+  tooltip.appendMarkdown(`Status: ${statusLabel(record)}  \n`);
   tooltip.appendMarkdown(`Queued: ${record.enqueuedAt}  \n`);
   if (record.startedAt) {
     tooltip.appendMarkdown(`Started: ${record.startedAt}  \n`);
