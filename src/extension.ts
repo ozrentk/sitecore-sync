@@ -13,49 +13,50 @@ import {
   FavoriteTreeItem,
 } from "./connections/connectionTreeProvider";
 import { AuthoringContentClient } from "./sitecore/authoringClient";
-
-const viewIds = ["xmCloudSync.operations"] as const;
-
-class EmptyTreeDataProvider implements vscode.TreeDataProvider<never> {
-  private readonly changeEmitter = new vscode.EventEmitter<never | undefined | null | void>();
-
-  readonly onDidChangeTreeData = this.changeEmitter.event;
-
-  getTreeItem(): vscode.TreeItem {
-    throw new Error("The empty provider does not contain tree items.");
-  }
-
-  getChildren(): never[] {
-    return [];
-  }
-
-  refresh(): void {
-    this.changeEmitter.fire();
-  }
-
-  dispose(): void {
-    this.changeEmitter.dispose();
-  }
-}
+import { TransferProcessor } from "./transfers/transferProcessor";
+import { TransferQueueStore } from "./transfers/transferQueueStore";
+import { TransfersTreeProvider, TransferTreeItem } from "./transfers/transfersTreeProvider";
 
 export function activate(context: vscode.ExtensionContext): void {
   const log = vscode.window.createOutputChannel("XM Cloud Sync", { log: true });
   const connectionStore = new ConnectionStore(context.globalState, context.secrets);
   const connectionProvider = new ConnectionTreeProvider(connectionStore);
   const authoringClient = new AuthoringContentClient(log);
+  const extensionVersion = String(context.extension.packageJSON.version ?? "unknown");
+  const transferQueue = new TransferQueueStore(context.workspaceState);
+  const transferProcessor = new TransferProcessor(
+    transferQueue,
+    connectionStore,
+    authoringClient,
+    context.globalStorageUri,
+    extensionVersion,
+    log,
+  );
+  const transfersProvider = new TransfersTreeProvider(transferQueue, connectionStore);
   const comparisonPanelManager = new ComparisonPanelManager(
     context.extensionUri,
-    context.globalStorageUri,
-    String(context.extension.packageJSON.version ?? "unknown"),
     context.workspaceState,
     connectionStore,
     authoringClient,
+    transferQueue,
     log,
   );
   const connectionsView = vscode.window.createTreeView("xmCloudSync.connections", {
     treeDataProvider: connectionProvider,
   });
+  const transfersView = vscode.window.createTreeView("xmCloudSync.operations", {
+    treeDataProvider: transfersProvider,
+  });
+  const updateTransfersBadge = (): void => {
+    const count = transferQueue.list().length;
+    transfersView.badge = count ? { value: count, tooltip: `${count} queued transfer(s)` } : undefined;
+  };
+  updateTransfersBadge();
+
   let selectedConnectionItem: ConnectionTreeItem | undefined;
+  const connectionIsInUse = (connectionId: string): boolean =>
+    comparisonPanelManager.isConnectionInOpenComparison(connectionId) ||
+    transferQueue.referencesConnection(connectionId);
   const updateConnectionRemovalContext = async (): Promise<void> => {
     const selected = selectedConnectionItem?.connection;
     await Promise.all([
@@ -67,17 +68,22 @@ export function activate(context: vscode.ExtensionContext): void {
       vscode.commands.executeCommand(
         "setContext",
         "xmCloudSync.selectedConnectionRemovable",
-        Boolean(selected && !comparisonPanelManager.isConnectionInOpenComparison(selected.id)),
+        Boolean(selected && !connectionIsInUse(selected.id)),
       ),
     ]);
   };
+
   context.subscriptions.push(
     log,
     connectionStore,
     connectionProvider,
+    transferQueue,
+    transferProcessor,
+    transfersProvider,
     { dispose: () => authoringClient.clear() },
     comparisonPanelManager,
     connectionsView,
+    transfersView,
     connectionsView.onDidChangeSelection((event) => {
       selectedConnectionItem = event.selection[0] instanceof ConnectionTreeItem
         ? event.selection[0]
@@ -93,21 +99,25 @@ export function activate(context: vscode.ExtensionContext): void {
       }
       void updateConnectionRemovalContext();
     }),
+    transferQueue.onDidChange(() => {
+      updateTransfersBadge();
+      void updateConnectionRemovalContext();
+    }),
+    transferProcessor.onDidStartRecord((record) => {
+      void comparisonPanelManager.handleTransferStarted(record);
+    }),
+    transferProcessor.onDidCompleteRecord((record) => {
+      void comparisonPanelManager.handleTransferCompleted(record);
+    }),
+    transferProcessor.onDidFailRecord((record) => {
+      void comparisonPanelManager.handleTransferFailed(record);
+    }),
     vscode.window.registerWebviewViewProvider(
       "xmCloudSync.fieldDiff",
       comparisonPanelManager.fieldDiffViewProvider,
       { webviewOptions: { retainContextWhenHidden: true } },
     ),
   );
-
-  const providers = viewIds.map((viewId) => {
-    const provider = new EmptyTreeDataProvider();
-    context.subscriptions.push(
-      provider,
-      vscode.window.registerTreeDataProvider(viewId, provider),
-    );
-    return provider;
-  });
 
   context.subscriptions.push(
     vscode.commands.registerCommand("xmCloudSync.addConnection", async () => {
@@ -123,7 +133,7 @@ export function activate(context: vscode.ExtensionContext): void {
       await removeConnection(
         argument instanceof ConnectionTreeItem ? argument : selectedConnectionItem,
         connectionStore,
-        (connectionId) => comparisonPanelManager.isConnectionInOpenComparison(connectionId),
+        connectionIsInUse,
       );
     }),
     vscode.commands.registerCommand("xmCloudSync.openComparison", async () => {
@@ -135,30 +145,68 @@ export function activate(context: vscode.ExtensionContext): void {
       }
     }),
     vscode.commands.registerCommand("xmCloudSync.removeFavorite", async (argument) => {
-      if (!(argument instanceof FavoriteTreeItem)) {
+      if (argument instanceof FavoriteTreeItem) {
+        await connectionStore.removeFavoritePath(argument.connection.id, argument.path);
+      }
+    }),
+    vscode.commands.registerCommand("xmCloudSync.showLogs", () => log.show(true)),
+    vscode.commands.registerCommand("xmCloudSync.startTransfers", async () => {
+      await transferProcessor.start();
+    }),
+    vscode.commands.registerCommand("xmCloudSync.pauseTransfers", async () => {
+      await transferProcessor.pause();
+    }),
+    vscode.commands.registerCommand("xmCloudSync.retryTransfer", async (argument) => {
+      if (argument instanceof TransferTreeItem) {
+        await transferQueue.retry(argument.record.id);
+      }
+    }),
+    vscode.commands.registerCommand("xmCloudSync.removeTransfer", async (argument) => {
+      if (!(argument instanceof TransferTreeItem)) {
         return;
       }
-      await connectionStore.removeFavoritePath(argument.connection.id, argument.path);
+      const current = transferQueue.get(argument.record.id);
+      const removable = current && (
+        current.status === "queued" ||
+        current.status === "failed" ||
+        (current.status === "waitingForSitecore" && transferQueue.processorState === "paused")
+      );
+      if (!removable) {
+        await vscode.window.showInformationMessage(
+          "This transfer has started. Pause processing before removing it at a safe boundary.",
+        );
+        return;
+      }
+      const checkpointWarning = current.kind === "subtree" && current.checkpoint
+        ? " The remote Sitecore operation may continue, but it will no longer be monitored."
+        : "";
+      const confirmed = await vscode.window.showWarningMessage(
+        `Remove this transfer from the queue?${checkpointWarning}`,
+        { modal: true },
+        "Remove Transfer",
+      );
+      if (confirmed === "Remove Transfer") {
+        await transferQueue.remove(current.id);
+      }
     }),
-    vscode.commands.registerCommand("xmCloudSync.showLogs", () => {
-      log.show(true);
+    vscode.commands.registerCommand("xmCloudSync.openTransferJournal", async (argument) => {
+      if (argument instanceof TransferTreeItem && argument.record.journalPath) {
+        const document = await vscode.workspace.openTextDocument(argument.record.journalPath);
+        await vscode.window.showTextDocument(document, { preview: false });
+      }
     }),
     vscode.commands.registerCommand("xmCloudSync.compareWithConnection", async (argument) => {
       if (!(argument instanceof ConnectionTreeItem) && !(argument instanceof FavoriteTreeItem)) {
         return;
       }
-
       const sourceConnection = argument.connection;
-
-      const candidates = connectionStore
-        .list();
+      const candidates = connectionStore.list();
       if (candidates.length === 0) {
         await vscode.window.showInformationMessage(
           "Add an XM Cloud connection before opening a comparison.",
         );
         return;
       }
-
       const selected = await vscode.window.showQuickPick(
         candidates.map((connection) => ({
           label: connection.name,
@@ -168,10 +216,7 @@ export function activate(context: vscode.ExtensionContext): void {
             : undefined,
           connectionId: connection.id,
         })),
-        {
-          title: `Compare ${sourceConnection.name} with…`,
-          placeHolder: "Select the right-side connection",
-        },
+        { title: `Compare ${sourceConnection.name} with…`, placeHolder: "Select the right-side connection" },
       );
       if (selected) {
         if (argument instanceof FavoriteTreeItem) {
@@ -181,17 +226,11 @@ export function activate(context: vscode.ExtensionContext): void {
             argument.path,
           );
         } else {
-          await comparisonPanelManager.openWith(
-            sourceConnection.id,
-            selected.connectionId,
-          );
+          await comparisonPanelManager.openWith(sourceConnection.id, selected.connectionId);
         }
       }
     }),
     vscode.commands.registerCommand("xmCloudSync.refreshAll", async () => {
-      for (const provider of providers) {
-        provider.refresh();
-      }
       const requested = await comparisonPanelManager.refreshAll();
       if (!requested) {
         await vscode.window.showInformationMessage(
@@ -207,6 +246,7 @@ export function activate(context: vscode.ExtensionContext): void {
     }),
   );
   void updateConnectionRemovalContext();
+  void transferProcessor.resumeIfRunning();
 }
 
 export function deactivate(): void {

@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.8.0
+
+- Replaced synchronous subtree and field-value execution with a durable, workspace-scoped FIFO transfer queue.
+- Renamed **Sync Operations** to **Transfers** and added Play/Pause processing controls, live status, queue count, failed-transfer retry/removal, and journal access.
+- Added restart recovery and persisted Content/Item Transfer checkpoints so Sitecore operations can be monitored across multi-hour runs and VS Code restarts.
+- Added optimistic source and target freshness checks around queued Authoring `updateItem` field mutations, followed by target verification.
+- Removed completed records after their journals are safely written; failed records remain at the queue head and pause processing for explicit user action.
+
 ## 0.7.2
 
 - Replaced the Field Diff checkboxes with independent segmented visibility controls for content, Standard Template, and system fields.

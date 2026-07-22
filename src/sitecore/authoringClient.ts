@@ -225,6 +225,7 @@ export class AuthoringContentClient {
     sourceLanguage: string,
     destinationLanguage: string,
     signal: AbortSignal,
+    onCheckpoint?: (checkpoint: ContentTransferResult) => Promise<void>,
   ): Promise<ContentTransferResult> {
     const sourceToken = await this.getAccessToken(source, sourceSecret, signal);
     const destinationToken = await this.getAccessToken(destination, destinationSecret, signal);
@@ -395,6 +396,16 @@ export class AuthoringContentClient {
       );
     }
 
+    let checkpoint: ContentTransferResult = {
+      state: "Pending",
+      transferId,
+      sourceItemId: normalizeGuid(sourceItem.item.itemId),
+      sourceChildIds: sourceItem.children.map((child) => normalizeGuid(child.itemId)),
+      chunkSets: completedChunkSets,
+      itemTransferIds,
+    };
+    await onCheckpoint?.(checkpoint);
+
     for (const blobName of destinationBlobNames) {
       const blobListUrl = new URL("sources/blobs", itemTransferBase);
       await this.pollJson(
@@ -432,6 +443,8 @@ export class AuthoringContentClient {
         );
       }
       itemTransferIds.push(decodedItemTransferId);
+      checkpoint = { ...checkpoint, itemTransferIds: [...itemTransferIds] };
+      await onCheckpoint?.(checkpoint);
       const itemTransferStatus = await this.pollItemTransfer(
         new URL(`transfers/${encodeURIComponent(decodedItemTransferId)}`, itemTransferBase),
         destinationToken,
@@ -439,14 +452,7 @@ export class AuthoringContentClient {
         signal,
       );
       if (!itemTransferStatus) {
-        return {
-          state: "Pending",
-          transferId,
-          sourceItemId: normalizeGuid(sourceItem.item.itemId),
-          sourceChildIds: sourceItem.children.map((child) => normalizeGuid(child.itemId)),
-          chunkSets: completedChunkSets,
-          itemTransferIds,
-        };
+        return checkpoint;
       }
     }
 
@@ -476,6 +482,91 @@ export class AuthoringContentClient {
       sourceChildIds,
       chunkSets: completedChunkSets,
       itemTransferIds,
+      destinationItemId: normalizeGuid(destinationItem.item.itemId),
+      destinationChildIds,
+    };
+  }
+
+  async resumeSubtreeTransfer(
+    destination: XmCloudConnection,
+    destinationSecret: string,
+    destinationLanguage: string,
+    checkpoint: ContentTransferResult,
+    signal: AbortSignal,
+    onCheckpoint?: (checkpoint: ContentTransferResult) => Promise<void>,
+  ): Promise<ContentTransferResult> {
+    const destinationToken = await this.getAccessToken(destination, destinationSecret, signal);
+    const itemTransferBase = new URL(
+      "/sitecore/shell/api/v3/ItemsTransfer/",
+      destination.serverUrl,
+    );
+    const itemTransferIds = [...checkpoint.itemTransferIds];
+    let currentCheckpoint = checkpoint;
+    for (const chunkSet of checkpoint.chunkSets) {
+      const blobName = chunkSet.contentTransferFileName;
+      if (itemTransferIds.includes(blobName)) {
+        continue;
+      }
+      const blobListUrl = new URL("sources/blobs", itemTransferBase);
+      await this.pollJson(
+        blobListUrl,
+        destinationToken,
+        "poll item-transfer blob",
+        (payload) => {
+          const serialized = JSON.stringify(payload);
+          return serialized.includes(blobName) && /Uploaded/iu.test(serialized);
+        },
+        signal,
+        150,
+      );
+      const startUrl = new URL("transfers/databases/master/sources", itemTransferBase);
+      startUrl.searchParams.set("blobName", blobName);
+      const startResponse = await this.http.request(
+        startUrl,
+        { method: "POST", headers: { authorization: `Bearer ${destinationToken}` } },
+        { name: "resume item transfer", signal, retryable: false },
+      );
+      await assertSuccessfulResponse(startResponse, "Resume item transfer");
+      const location = startResponse.headers.get("location");
+      const itemTransferId = location?.split("/").filter(Boolean).at(-1);
+      if (!itemTransferId || decodeURIComponent(itemTransferId) !== blobName) {
+        throw new Error("The resumed Item Transfer API returned an invalid location header.");
+      }
+      itemTransferIds.push(blobName);
+      currentCheckpoint = { ...currentCheckpoint, itemTransferIds: [...itemTransferIds] };
+      await onCheckpoint?.(currentCheckpoint);
+    }
+
+    for (const itemTransferId of itemTransferIds) {
+      const status = await this.pollItemTransfer(
+        new URL(`transfers/${encodeURIComponent(itemTransferId)}`, itemTransferBase),
+        destinationToken,
+        itemTransferId,
+        signal,
+      );
+      if (!status) {
+        return { ...currentCheckpoint, state: "Pending" };
+      }
+    }
+
+    const destinationItem = await this.loadTreeLevel(
+      destination,
+      destinationSecret,
+      { itemId: currentCheckpoint.sourceItemId },
+      destinationLanguage,
+      signal,
+    );
+    const destinationChildIds = destinationItem.children.map((child) =>
+      normalizeGuid(child.itemId)
+    );
+    for (const childId of currentCheckpoint.sourceChildIds) {
+      if (!destinationChildIds.includes(childId)) {
+        throw new Error(`Destination verification did not find transferred child ${childId}.`);
+      }
+    }
+    return {
+      ...currentCheckpoint,
+      state: "Finished",
       destinationItemId: normalizeGuid(destinationItem.item.itemId),
       destinationChildIds,
     };
