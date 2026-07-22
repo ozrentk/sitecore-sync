@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.8.4
+
+- Made deployment monitoring optional so missing Deploy API permissions never block a subtree transfer.
+- Reused existing connection credentials automatically when they can read deployment information, while retaining explicit organization-client configuration as an optional enhancement.
+- Continued transfers when a deployment check is unavailable or temporarily fails; only a confirmed deployment-ID change now fails the transfer.
+
 ## 0.8.3
 
 - Added organization-level deployment monitoring configuration to saved XM Cloud connections.

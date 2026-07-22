@@ -15,7 +15,7 @@ Create an environment automation client for the XM Cloud environment in Sitecore
 
 The client secret is stored in VS Code `SecretStorage`. OAuth access tokens are kept in memory only.
 
-Before running subtree transfers, right-click each participating connection and select **Configure Deployment Monitoring**. Enter an organization automation client with Deploy API access. The extension matches the saved CM hostname to its Sitecore deployment environment and stores the additional secret in `SecretStorage`.
+Deployment monitoring is optional. The extension first tries the connection's existing credentials; if they already have Deploy API access, no setup is needed. Otherwise subtree transfers continue normally without monitoring. To enable the additional guard explicitly, right-click a connection and select **Configure Deployment Monitoring**, then enter an organization automation client with Deploy API access. The extension matches the saved CM hostname to its deployment environment and stores the additional secret in `SecretStorage`.
 
 After a successful test, expand the connection to see every configured site returned by the Authoring API, including its root path and root item ID. The success notification also provides a searchable **Show Sites** list. This API list can include sites that are not shown as ordinary site tiles in Channels.
 
@@ -57,7 +57,7 @@ Subtree rows show six phases: queued, freshness checking, content export, chunk 
 
 Subtree processing uses Content Transfer and Item Transfer with `OverrideExistingItem`, preserving IDs and transferring every language and numbered version. It is disabled for the same XM Cloud environment, same-path/different-ID conflicts, and the complete `/sitecore` root. Only explicit `TransferState: Finished` is success; unknown consumed history remains pending and is polled over as many windows as necessary. Field transfers re-read both endpoints, reject changed source or target state, issue one non-retried Authoring mutation, and verify the result. Finished work refreshes affected loaded comparison data.
 
-At subtree start, the processor records the latest deployment ID for both source and destination. It checks those IDs during long-running Content and Item Transfer polling, throttled to at most once every 15 seconds, and persists the baselines for restart recovery. If either ID changes, the transfer fails, the queue pauses, and retry discards the old remote checkpoint and starts a fresh transfer.
+When deployment information is available for both sides, the processor records the latest source and destination deployment IDs at subtree start. It checks those IDs during long-running Content and Item Transfer polling, throttled to at most once every 15 seconds, and persists the baselines for restart recovery. If either ID changes, the transfer fails, the queue pauses, and retry discards the old remote checkpoint and starts a fresh transfer. Missing permissions and temporary monitoring errors are logged but never block or fail a transfer.
 
 ### Difference legend
 

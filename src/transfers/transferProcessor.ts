@@ -247,7 +247,7 @@ export class TransferProcessor implements vscode.Disposable {
     const monitoring = await this.deploymentMonitoring(record, controller.signal);
     let lastDeploymentCheck = Date.now();
     const checkDeployments = async (force = false): Promise<void> => {
-      if (!force && Date.now() - lastDeploymentCheck < 15_000) {
+      if (!monitoring || (!force && Date.now() - lastDeploymentCheck < 15_000)) {
         return;
       }
       lastDeploymentCheck = Date.now();
@@ -332,58 +332,98 @@ export class TransferProcessor implements vscode.Disposable {
   private async deploymentMonitoring(
     record: SubtreeTransferRecord,
     signal: AbortSignal,
-  ): Promise<DeploymentMonitoringContext> {
-    const source = await this.deploymentEndpoint(
-      record.sourceConnectionId,
-      record.sourceConnectionName,
-    );
-    const target = await this.deploymentEndpoint(
-      record.targetConnectionId,
-      record.targetConnectionName,
-    );
-    let baselines = record.deploymentBaselines;
-    if (!baselines) {
-      const [sourceBaseline, targetBaseline] = await Promise.all([
-        this.deploymentClient.getLatestDeployment(
-          source.environmentId,
-          source.credentials,
+  ): Promise<DeploymentMonitoringContext | undefined> {
+    try {
+      const [source, target] = await Promise.all([
+        this.deploymentEndpoint(
+          record.sourceConnectionId,
+          record.sourceConnectionName,
+          record.deploymentBaselines?.source,
           signal,
         ),
-        this.deploymentClient.getLatestDeployment(
-          target.environmentId,
-          target.credentials,
+        this.deploymentEndpoint(
+          record.targetConnectionId,
+          record.targetConnectionName,
+          record.deploymentBaselines?.target,
           signal,
         ),
       ]);
-      baselines = { source: sourceBaseline, target: targetBaseline };
-      await this.store.update(record.id, (current) => current.kind === "subtree"
-        ? { ...current, deploymentBaselines: baselines }
-        : current);
-      this.log.info(
-        `Transfer ${record.id} deployment baselines: source ${baselineLabel(sourceBaseline)}, target ${baselineLabel(targetBaseline)}.`,
+      let baselines = record.deploymentBaselines;
+      if (!baselines) {
+        const [sourceBaseline, targetBaseline] = await Promise.all([
+          source.resolvedBaseline ?? this.deploymentClient.getLatestDeployment(
+            source.environmentId,
+            source.credentials,
+            signal,
+          ),
+          target.resolvedBaseline ?? this.deploymentClient.getLatestDeployment(
+            target.environmentId,
+            target.credentials,
+            signal,
+          ),
+        ]);
+        baselines = { source: sourceBaseline, target: targetBaseline };
+        await this.store.update(record.id, (current) => current.kind === "subtree"
+          ? { ...current, deploymentBaselines: baselines }
+          : current);
+        this.log.info(
+          `Transfer ${record.id} deployment baselines: source ${baselineLabel(sourceBaseline)}, target ${baselineLabel(targetBaseline)}.`,
+        );
+      }
+      return { source, target, baselines };
+    } catch (error: unknown) {
+      this.log.warn(
+        `Transfer ${record.id}: deployment monitoring is unavailable; continuing without it. ${errorMessage(error)}`,
       );
+      return undefined;
     }
-    return { source, target, baselines };
   }
 
   private async deploymentEndpoint(
     connectionId: string,
     connectionName: string,
+    existingBaseline: DeploymentBaseline | undefined,
+    signal: AbortSignal,
   ): Promise<DeploymentMonitoringEndpoint> {
     const connection = this.connectionStore.get(connectionId);
-    if (!connection?.deploymentClientId || !connection.deploymentEnvironmentId) {
-      throw new Error(
-        `Deployment monitoring is not configured for ${connectionName}. Use Configure Deployment Monitoring on that connection before retrying.`,
-      );
+    if (!connection) {
+      throw new Error(`The ${connectionName} connection no longer exists.`);
     }
-    const clientSecret = await this.connectionStore.getDeploymentClientSecret(connectionId);
-    if (!clientSecret) {
-      throw new Error(`The deployment monitoring secret for ${connectionName} is missing.`);
+    if (connection.deploymentClientId && connection.deploymentEnvironmentId) {
+      const deploymentSecret = await this.connectionStore.getDeploymentClientSecret(connectionId);
+      if (deploymentSecret) {
+        return {
+          connectionName,
+          environmentId: connection.deploymentEnvironmentId,
+          credentials: {
+            clientId: connection.deploymentClientId,
+            clientSecret: deploymentSecret,
+          },
+        };
+      }
     }
+    const connectionSecret = await this.connectionStore.getClientSecret(connectionId);
+    if (!connectionSecret) {
+      throw new Error(`The connection secret for ${connectionName} is missing.`);
+    }
+    const credentials = { clientId: connection.clientId, clientSecret: connectionSecret };
+    if (existingBaseline) {
+      return {
+        connectionName,
+        environmentId: existingBaseline.environmentId,
+        credentials,
+      };
+    }
+    const resolvedBaseline = await this.deploymentClient.resolveEnvironment(
+      connection,
+      credentials,
+      signal,
+    );
     return {
       connectionName,
-      environmentId: connection.deploymentEnvironmentId,
-      credentials: { clientId: connection.deploymentClientId, clientSecret },
+      environmentId: resolvedBaseline.environmentId,
+      credentials,
+      resolvedBaseline,
     };
   }
 
@@ -391,20 +431,42 @@ export class TransferProcessor implements vscode.Disposable {
     context: DeploymentMonitoringContext,
     signal: AbortSignal,
   ): Promise<void> {
-    const [sourceLatest, targetLatest] = await Promise.all([
-      this.deploymentClient.getLatestDeployment(
-        context.source.environmentId,
-        context.source.credentials,
+    await Promise.all([
+      this.checkDeploymentEndpoint(
+        context.source,
+        "source",
+        context.baselines.source,
         signal,
       ),
-      this.deploymentClient.getLatestDeployment(
-        context.target.environmentId,
-        context.target.credentials,
+      this.checkDeploymentEndpoint(
+        context.target,
+        "destination",
+        context.baselines.target,
         signal,
       ),
     ]);
-    assertUnchangedDeployment(context.source.connectionName, "source", context.baselines.source, sourceLatest);
-    assertUnchangedDeployment(context.target.connectionName, "destination", context.baselines.target, targetLatest);
+  }
+
+  private async checkDeploymentEndpoint(
+    endpoint: DeploymentMonitoringEndpoint,
+    role: "source" | "destination",
+    baseline: DeploymentBaseline,
+    signal: AbortSignal,
+  ): Promise<void> {
+    let latest: DeploymentBaseline;
+    try {
+      latest = await this.deploymentClient.getLatestDeployment(
+        endpoint.environmentId,
+        endpoint.credentials,
+        signal,
+      );
+    } catch (error: unknown) {
+      this.log.warn(
+        `Could not check the ${role} deployment for ${endpoint.connectionName}; the transfer continues. ${errorMessage(error)}`,
+      );
+      return;
+    }
+    assertUnchangedDeployment(endpoint.connectionName, role, baseline, latest);
   }
 
   private async persistSubtreeProgress(
@@ -517,6 +579,7 @@ interface DeploymentMonitoringEndpoint {
   readonly connectionName: string;
   readonly environmentId: string;
   readonly credentials: DeploymentCredentials;
+  readonly resolvedBaseline?: DeploymentBaseline;
 }
 
 interface DeploymentMonitoringContext {
