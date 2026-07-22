@@ -612,6 +612,9 @@ export class ComparisonPanelManager implements vscode.Disposable {
 
   private async runItemTask(message: WebviewMessage): Promise<void> {
     const selection = this.getSelection();
+    const requestedSide = message.side === "left" || message.side === "right"
+      ? message.side
+      : undefined;
     const candidates: ItemTaskCandidateContext[] = [];
     const inputs = [
       {
@@ -636,7 +639,7 @@ export class ComparisonPanelManager implements vscode.Disposable {
         connectionId: selection.rightConnectionId,
         language: selection.rightLanguage,
       },
-    ];
+    ].filter((input) => !requestedSide || input.side === requestedSide);
     try {
       await vscode.window.withProgress(
         {
