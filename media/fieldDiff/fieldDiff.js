@@ -219,14 +219,14 @@ function createFieldRow(pair) {
       leftToRight.type = "button";
       leftToRight.className = "copy-value right";
       leftToRight.textContent = "→";
-      leftToRight.title = "Copy the left value to the right";
-      leftToRight.setAttribute("aria-label", "Copy the left field value to the right");
+      leftToRight.title = "Add the left-to-right value transfer";
+      leftToRight.setAttribute("aria-label", "Add the left-to-right field value transfer");
       const rightToLeft = document.createElement("button");
       rightToLeft.type = "button";
       rightToLeft.className = "copy-value left";
       rightToLeft.textContent = "←";
-      rightToLeft.title = "Copy the right value to the left";
-      rightToLeft.setAttribute("aria-label", "Copy the right field value to the left");
+      rightToLeft.title = "Add the right-to-left value transfer";
+      rightToLeft.setAttribute("aria-label", "Add the right-to-left field value transfer");
       const copying = state.copyingFieldIds.has(pair.key);
       leftToRight.disabled = copying;
       rightToLeft.disabled = copying;

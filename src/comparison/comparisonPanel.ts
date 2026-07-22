@@ -12,12 +12,17 @@ import {
   fieldDiffViewId,
   type FieldDiffSelection,
 } from "./fieldDiffView";
+import type { TransferQueueStore } from "../transfers/transferQueueStore";
+import {
+  fieldStateFingerprint,
+  normalizeTransferId,
+  type TransferRecord,
+} from "../transfers/transferTypes";
 
 const selectionKey = "sitecoreXmCloudSync.comparisonSelection.v1";
 const defaultLanguage = "en";
 const authoringRootPath = "/sitecore";
 const traversalConcurrencyPerSide = 2;
-const fieldUpdateTimeoutMilliseconds = 30_000;
 
 type TreeSide = "left" | "right";
 
@@ -103,7 +108,6 @@ export class ComparisonPanelManager implements vscode.Disposable {
   private readonly requestControllers = new Set<AbortController>();
   private readonly subtreeLoadControllers = new Map<string, AbortController>();
   private readonly pendingSubtreeConfirmations = new Set<string>();
-  private readonly syncingRows = new Set<string>();
   private readonly copyingFieldIds = new Set<string>();
   private readonly fieldDiffProvider = new FieldDiffContentProvider();
   private readonly comparisonStateEmitter = new vscode.EventEmitter<void>();
@@ -117,11 +121,10 @@ export class ComparisonPanelManager implements vscode.Disposable {
 
   constructor(
     private readonly extensionUri: vscode.Uri,
-    private readonly storageUri: vscode.Uri,
-    private readonly extensionVersion: string,
     private readonly workspaceState: vscode.Memento,
     private readonly connectionStore: ConnectionStore,
     private readonly authoringClient: AuthoringContentClient,
+    private readonly transferQueue: TransferQueueStore,
     private readonly log: vscode.LogOutputChannel,
   ) {
     this.connectionSignature = this.currentConnectionSignature();
@@ -158,6 +161,79 @@ export class ComparisonPanelManager implements vscode.Disposable {
         }
       }),
     );
+  }
+
+  async handleTransferStarted(record: TransferRecord): Promise<void> {
+    if (record.kind !== "subtree") {
+      return;
+    }
+    await this.panel?.webview.postMessage({
+      type: "syncStarted",
+      rowKey: record.comparisonRowKey,
+      targetItemIds: record.targetRefreshPlan.map((entry) => entry.itemId),
+    });
+  }
+
+  async handleTransferCompleted(record: TransferRecord): Promise<void> {
+    if (record.kind === "subtree") {
+      const selection = this.getSelection();
+      const selectedTargetConnectionId = record.targetSide === "left"
+        ? selection.leftConnectionId
+        : selection.rightConnectionId;
+      const selectedTargetLanguage = record.targetSide === "left"
+        ? selection.leftLanguage
+        : selection.rightLanguage;
+      if (
+        selectedTargetConnectionId === record.targetConnectionId &&
+        selectedTargetLanguage === record.targetLanguage
+      ) {
+        await this.refreshSubtree(
+          record.comparisonRowKey,
+          record.targetSide === "left" ? record.targetRefreshPlan : [],
+          record.targetSide === "right" ? record.targetRefreshPlan : [],
+        );
+      }
+      await this.panel?.webview.postMessage({
+        type: "syncFinished",
+        rowKey: record.comparisonRowKey,
+      });
+      return;
+    }
+
+    const selection = this.getSelection();
+    const targetSide: TreeSide = record.direction === "leftToRight" ? "right" : "left";
+    const selectedConnectionId = targetSide === "left"
+      ? selection.leftConnectionId
+      : selection.rightConnectionId;
+    const selectedLanguage = targetSide === "left"
+      ? selection.leftLanguage
+      : selection.rightLanguage;
+    if (
+      selectedConnectionId !== record.target.connectionId ||
+      selectedLanguage !== record.target.language
+    ) {
+      return;
+    }
+    this.invalidateItemDetails(
+      record.target.connectionId,
+      record.target.language,
+      record.target.itemId,
+    );
+    await this.loadAndPostItemDetails(
+      targetSide,
+      record.target.connectionId,
+      record.target.itemId,
+    );
+    await this.refreshFieldDiffView();
+  }
+
+  async handleTransferFailed(record: TransferRecord): Promise<void> {
+    if (record.kind === "subtree") {
+      await this.panel?.webview.postMessage({
+        type: "syncFinished",
+        rowKey: record.comparisonRowKey,
+      });
+    }
   }
 
   async open(): Promise<void> {
@@ -522,7 +598,7 @@ export class ComparisonPanelManager implements vscode.Disposable {
     sourcePath: string,
     targetRefreshPlan: readonly RefreshPlanEntry[],
   ): Promise<void> {
-    if (!this.panel || this.syncingRows.has(rowKey)) {
+    if (!this.panel) {
       return;
     }
     const selection = this.getSelection();
@@ -541,7 +617,7 @@ export class ComparisonPanelManager implements vscode.Disposable {
       ? this.connectionStore.get(targetConnectionId)
       : undefined;
     if (!sourceConnection || !targetConnection) {
-      await vscode.window.showErrorMessage("Both comparison connections are required for sync.");
+      await vscode.window.showErrorMessage("Both comparison connections are required for transfer.");
       return;
     }
     if (sourcePath.replace(/\/$/u, "").toLowerCase() === authoringRootPath) {
@@ -558,132 +634,39 @@ export class ComparisonPanelManager implements vscode.Disposable {
     }
 
     const confirmed = await vscode.window.showWarningMessage(
-      `Sync ${sourcePath} and all descendants from “${sourceConnection.name}” to “${targetConnection.name}”? This transfers every language and version and overwrites matching target items using OverrideExistingItem.`,
+      `Add ${sourcePath} and all descendants to Transfers from “${sourceConnection.name}” to “${targetConnection.name}”? Processing transfers every language and version and overwrites matching target items using OverrideExistingItem.`,
       { modal: true },
-      "Sync Subtree",
+      "Add Transfer",
     );
-    if (confirmed !== "Sync Subtree") {
+    if (confirmed !== "Add Transfer") {
       return;
     }
-
-    const [sourceSecret, targetSecret] = await Promise.all([
-      this.connectionStore.getClientSecret(sourceConnection.id),
-      this.connectionStore.getClientSecret(targetConnection.id),
-    ]);
-    if (!sourceSecret || !targetSecret) {
-      await vscode.window.showErrorMessage("A source or target client secret is missing.");
-      return;
-    }
-
-    const startedAt = new Date().toISOString();
-    const controller = new AbortController();
-    this.syncingRows.add(rowKey);
-    await this.panel.webview.postMessage({
-      type: "syncStarted",
-      rowKey,
-      targetItemIds: targetRefreshPlan.map((entry) => entry.itemId),
+    const duplicateKey = [
+      "subtree",
+      sourceConnection.id,
+      targetConnection.id,
+      normalizeTransferId(sourceItemId),
+      sourcePath.toLowerCase(),
+    ].join(":");
+    const queued = await this.transferQueue.enqueue({
+      kind: "subtree",
+      duplicateKey,
+      direction,
+      sourceConnectionId: sourceConnection.id,
+      sourceConnectionName: sourceConnection.name,
+      targetConnectionId: targetConnection.id,
+      targetConnectionName: targetConnection.name,
+      sourceItemId,
+      sourcePath,
+      sourceLanguage: this.sideLanguage(sourceSide),
+      targetLanguage: this.sideLanguage(targetSide),
+      comparisonRowKey: rowKey,
+      targetSide,
+      targetRefreshPlan,
     });
-    this.log.info(
-      `Synchronizing subtree ${sourcePath} from ${sourceConnection.name} to ${targetConnection.name}.`,
-    );
-    try {
-      const result = await vscode.window.withProgress(
-        {
-          location: vscode.ProgressLocation.Notification,
-          title: `Syncing ${sourcePath} to ${targetConnection.name}`,
-          cancellable: false,
-        },
-        () => this.authoringClient.transferSubtree(
-          sourceConnection,
-          sourceSecret,
-          targetConnection,
-          targetSecret,
-          sourcePath,
-          sourceItemId,
-          this.sideLanguage(sourceSide),
-          this.sideLanguage(targetSide),
-          controller.signal,
-        ),
-      );
-      const journalUri = await this.writeSyncJournal({
-        startedAt,
-        endedAt: new Date().toISOString(),
-        outcome: result.state === "Finished" ? "succeeded" : "pending",
-        sourceConnection: sourceConnection.name,
-        targetConnection: targetConnection.name,
-        sourcePath,
-        sourceItemId,
-        result,
-      });
-      if (result.state === "Finished") {
-        if (targetRefreshPlan.length) {
-          await this.refreshSubtree(
-            rowKey,
-            targetSide === "left" ? targetRefreshPlan : [],
-            targetSide === "right" ? targetRefreshPlan : [],
-          );
-        }
-        this.log.info(`Finished synchronizing subtree ${sourcePath}.`);
-        const action = await vscode.window.showInformationMessage(
-          `Synced ${sourcePath} to “${targetConnection.name}”.`,
-          "Open Journal",
-        );
-        if (action === "Open Journal") {
-          await vscode.window.showTextDocument(journalUri, { preview: false });
-        }
-      } else {
-        this.log.warn(`Subtree synchronization remains pending for ${sourcePath}.`);
-        const action = await vscode.window.showWarningMessage(
-          `Sitecore is still processing ${sourcePath}. The transfer was retained and may already be visible on “${targetConnection.name}”.`,
-          "Open Journal",
-        );
-        if (action === "Open Journal") {
-          await vscode.window.showTextDocument(journalUri, { preview: false });
-        }
-      }
-    } catch (error: unknown) {
-      this.log.error(`Unable to synchronize subtree ${sourcePath}.`, error);
-      const journalUri = await this.writeSyncJournal({
-        startedAt,
-        endedAt: new Date().toISOString(),
-        outcome: "failed",
-        sourceConnection: sourceConnection.name,
-        targetConnection: targetConnection.name,
-        sourcePath,
-        sourceItemId,
-        error: errorMessage(error),
-      });
-      const action = await vscode.window.showErrorMessage(
-        `Unable to sync subtree: ${errorMessage(error)}`,
-        "Open Journal",
-      );
-      if (action === "Open Journal") {
-        await vscode.window.showTextDocument(journalUri, { preview: false });
-      }
-    } finally {
-      controller.abort();
-      this.syncingRows.delete(rowKey);
-      await this.panel?.webview.postMessage({ type: "syncFinished", rowKey });
-    }
-  }
-
-  private async writeSyncJournal(entry: Readonly<Record<string, unknown>>): Promise<vscode.Uri> {
-    const journalDirectory = vscode.Uri.joinPath(this.storageUri, "journals");
-    await vscode.workspace.fs.createDirectory(journalDirectory);
-    const journalUri = vscode.Uri.joinPath(
-      journalDirectory,
-      `journal-${localJournalTimestamp(new Date())}.log`,
-    );
-    const content = JSON.stringify({
-      journalFormatVersion: 1,
-      extensionVersion: this.extensionVersion,
-      mode: "execute",
-      scope: "ItemAndDescendants",
-      mergeStrategy: "OverrideExistingItem",
-      ...entry,
-    }, null, 2);
-    await vscode.workspace.fs.writeFile(journalUri, new TextEncoder().encode(`${content}\n`));
-    return journalUri;
+    await vscode.window.showInformationMessage(queued.added
+      ? `Added ${sourcePath} to Transfers.`
+      : `${sourcePath} is already queued for this destination.`);
   }
 
   private async confirmAndLoadSubtree(
@@ -1576,11 +1559,11 @@ export class ComparisonPanelManager implements vscode.Disposable {
         ? ""
         : ` The ${sourceKind} source value will become an explicit stored value on the target.`;
       const confirmed = await vscode.window.showWarningMessage(
-        `Copy “${fieldLabel}” from ${sourceLabel} to ${targetLabel}? This replaces the target field value.${sourceNote}`,
+        `Add a transfer for “${fieldLabel}” from ${sourceLabel} to ${targetLabel}? Processing it will replace the target field value.${sourceNote}`,
         { modal: true },
-        "Copy Value",
+        "Add Transfer",
       );
-      if (confirmed !== "Copy Value") {
+      if (confirmed !== "Add Transfer") {
         return;
       }
       const currentSelection = this.getSelection();
@@ -1596,91 +1579,55 @@ export class ComparisonPanelManager implements vscode.Disposable {
         );
         return;
       }
-
-      const targetSecret = await this.connectionStore.getClientSecret(targetConnectionId);
-      if (!targetSecret) {
-        throw new Error("The target XM Cloud connection secret is missing.");
-      }
-      const controller = new AbortController();
-      const timeout = setTimeout(
-        () => controller.abort(new Error("Field update timed out.")),
-        fieldUpdateTimeoutMilliseconds,
-      );
-      this.requestControllers.add(controller);
-      try {
-        this.log.info(
-          `Copying field ${normalizedFieldId} ${sourceSide} to ${targetSide} on item ${targetDetails.itemId}.`,
-        );
-        await this.authoringClient.updateFieldValue(
-          targetConnection,
-          targetSecret,
-          targetDetails.itemId,
-          targetDetails.language,
-          targetDetails.version,
-          targetField.name,
-          sourceField.value,
-          controller.signal,
-        );
-      } finally {
-        clearTimeout(timeout);
-        this.requestControllers.delete(controller);
-      }
-
-      const affectedSides: Array<{
-        readonly side: TreeSide;
-        readonly connectionId: string;
-        readonly language: string;
-        readonly itemId: string;
-      }> = [{
-        side: targetSide,
-        connectionId: targetConnectionId,
-        language: targetDetails.language,
-        itemId: targetDetails.itemId,
-      }];
-      const sameEnvironment = sourceConnection.serverUrl.replace(/\/$/u, "").toLowerCase() ===
-        targetConnection.serverUrl.replace(/\/$/u, "").toLowerCase();
-      const sameItem = normalizeItemId(sourceDetails.itemId) ===
-        normalizeItemId(targetDetails.itemId);
-      const sameLanguage = sourceDetails.language.toLowerCase() ===
-        targetDetails.language.toLowerCase();
-      const sourceAlsoAffected = sameEnvironment && sameItem && (
-        targetField.scope === "SHARED" ||
-        (targetField.scope === "UNVERSIONED" && sameLanguage) ||
-        (targetField.scope === "VERSIONED" &&
-          sameLanguage &&
-          sourceDetails.version === targetDetails.version)
-      );
-      if (sourceAlsoAffected) {
-        affectedSides.push({
-          side: sourceSide,
+      const duplicateKey = [
+        "field",
+        sourceConnectionId,
+        targetConnectionId,
+        normalizeItemId(targetDetails.itemId),
+        normalizedFieldId,
+        direction,
+      ].join(":");
+      const enqueueResult = await this.transferQueue.enqueue({
+        kind: "fieldValue",
+        duplicateKey,
+        direction,
+        source: {
           connectionId: sourceConnectionId,
-          language: sourceDetails.language,
+          connectionName: sourceConnection.name,
           itemId: sourceDetails.itemId,
-        });
-      }
-      for (const affected of affectedSides) {
-        this.invalidateItemDetails(
-          affected.connectionId,
-          affected.language,
-          affected.itemId,
+          itemPath: sourceDetails.path,
+          language: sourceDetails.language,
+          version: sourceDetails.version,
+          fieldId: sourceField.fieldId,
+          fieldName: sourceField.name,
+          fieldLabel,
+          fingerprint: fieldStateFingerprint(sourceDetails, sourceField),
+        },
+        target: {
+          connectionId: targetConnectionId,
+          connectionName: targetConnection.name,
+          itemId: targetDetails.itemId,
+          itemPath: targetDetails.path,
+          language: targetDetails.language,
+          version: targetDetails.version,
+          fieldId: targetField.fieldId,
+          fieldName: targetField.name,
+          fieldLabel,
+          fingerprint: fieldStateFingerprint(targetDetails, targetField),
+        },
+      });
+      if (enqueueResult.added) {
+        this.log.info(`Queued field ${normalizedFieldId} ${sourceSide} to ${targetSide}.`);
+        await vscode.window.showInformationMessage(
+          `Added “${fieldLabel}” from ${sourceLabel} to ${targetLabel} to Transfers.`,
+        );
+      } else {
+        await vscode.window.showInformationMessage(
+          `That “${fieldLabel}” transfer is already queued.`,
         );
       }
-      await Promise.all(affectedSides.map((affected) =>
-        this.loadAndPostItemDetails(
-          affected.side,
-          affected.connectionId,
-          affected.itemId,
-        )
-      ));
-      await this.refreshFieldDiffView();
-      this.log.info(
-        `Copied field ${normalizedFieldId} ${sourceSide} to ${targetSide} on item ${targetDetails.itemId}.`,
-      );
-      await vscode.window.showInformationMessage(
-        `Copied “${fieldLabel}” from ${sourceLabel} to ${targetLabel}.`,
-      );
     } catch (error: unknown) {
-      await vscode.window.showErrorMessage(`Unable to copy field value: ${errorMessage(error)}`);
+      await vscode.window.showErrorMessage(`Unable to queue field transfer: ${errorMessage(error)}`);
     } finally {
       this.copyingFieldIds.delete(normalizedFieldId);
     }
@@ -2146,19 +2093,6 @@ function errorMessage(error: unknown): string {
     return error.message;
   }
   return "An unknown error occurred while loading the content tree.";
-}
-
-function localJournalTimestamp(value: Date): string {
-  const pad = (part: number): string => part.toString().padStart(2, "0");
-  return [
-    value.getFullYear(),
-    pad(value.getMonth() + 1),
-    pad(value.getDate()),
-    "-",
-    pad(value.getHours()),
-    pad(value.getMinutes()),
-    pad(value.getSeconds()),
-  ].join("");
 }
 
 function isAbortError(error: unknown): boolean {

@@ -11,7 +11,7 @@ The MVP supports:
 - Lazy loading and explicit full-subtree refresh.
 - Item-, language-, version-, and field-level comparison.
 - Native VS Code text diff for textual fields.
-- Generated, removable sync operations.
+- A durable FIFO queue for subtree and field-value transfers.
 - Dry runs and real execution.
 - Dedicated execution journals.
 
@@ -49,11 +49,11 @@ Retry waits are cancellable. Cancellation, permanent HTTP client or authorizatio
 The `Sitecore Sync` activity view contains:
 
 - Connections.
-- Sync operations.
+- Transfers.
 
 The activity view is the launcher and connection-management surface. The primary comparison workspace opens as a single document-style VS Code webview tab. It can be opened from the view title or Command Palette. A connection's **Compare with…** context action places that connection on the left and prompts for the right-side connection. The same connection can be selected on both sides for cross-language comparison.
 
-The **Sync Operations** view is collapsed by default. Selecting a connection exposes a title-bar trash action, but deletion is disabled while that connection is selected on either side of the open comparison. A connection's context menu and the empty Connections welcome view provide **Paste as Connection URL**, which reads a full XM Cloud URL from the clipboard, extracts its HTTPS origin, and uses that origin to prefill the add-connection workflow.
+The **Transfers** view is collapsed by default. Selecting a connection exposes a title-bar trash action, but deletion is disabled while that connection is selected on either side of the open comparison or referenced by a queued transfer. A connection's context menu and the empty Connections welcome view provide **Paste as Connection URL**, which reads a full XM Cloud URL from the clipboard, extracts its HTTPS origin, and uses that origin to prefill the add-connection workflow.
 
 The comparison tab's sticky top bar contains independent left and right connection and language selectors plus a swap action. The comparison tab remembers its selections per workspace and updates when connections are added or removed.
 
@@ -77,7 +77,7 @@ An item can expand into:
 - A flat field list in the **Field Diff** panel with shared and unversioned scope markers.
 - Child items.
 
-Fields have comparison states but are not rendered as tree nodes. Right-clicking an item and choosing **Show Detailed Field Diff** opens its field table in a bottom-panel tab. While visible, that tab follows selection in the comparison tree; closing it stops synchronization. The summary displays each available item ID as a one-click clipboard action using VS Code's extension-host clipboard API and reports success inline. A sticky visibility toolbar applies one retained, panel-level profile across item selections. System fields are identified first by an internal name beginning with `__`; remaining Standard Template fields form the second category, and all other rows are content fields. Content fields support **All** and **Differences**. Standard Template and system fields support **Hidden**, **Differences**, and **All**. The default profile shows differences for content and Standard Template fields and hides system fields. Selecting a differing textual field opens VS Code's native text diff editor with the left and right Authoring values. When both sides contain a field with a **Value** difference, a right arrow above the indicator copies left-to-right and a left arrow below copies right-to-left. Each action confirms the overwrite and sends only the field ID and direction to the extension host. The host resolves the current source value and target field name, then issues one non-retried Authoring `updateItem` mutation for the target item, language, and latest version. Literal copying uses `reset: false`, so empty, inherited, and Standard Values become explicit target values; fallback-derived values are rejected. The comparison also records whether each value is stored, inherited, supplied by Standard Values, or resolved through fallback so equal text does not hide a different value source.
+Fields have comparison states but are not rendered as tree nodes. Right-clicking an item and choosing **Show Detailed Field Diff** opens its field table in a bottom-panel tab. While visible, that tab follows selection in the comparison tree; closing it stops synchronization. The summary displays each available item ID as a one-click clipboard action using VS Code's extension-host clipboard API and reports success inline. A sticky visibility toolbar applies one retained, panel-level profile across item selections. System fields are identified first by an internal name beginning with `__`; remaining Standard Template fields form the second category, and all other rows are content fields. Content fields support **All** and **Differences**. Standard Template and system fields support **Hidden**, **Differences**, and **All**. The default profile shows differences for content and Standard Template fields and hides system fields. Selecting a differing textual field opens VS Code's native text diff editor with the left and right Authoring values. When both sides contain a field with a **Value** difference, a right arrow above the indicator queues left-to-right and a left arrow below queues right-to-left. Each action confirms the overwrite and sends only the field ID and direction to the extension host. The host snapshots source and target fingerprints; the processor later verifies both, issues one non-retried Authoring `updateItem` mutation, and verifies the stored result. Literal copying uses `reset: false`, so empty, inherited, and Standard Values become explicit target values; fallback-derived values are rejected. The comparison also records whether each value is stored, inherited, supplied by Standard Values, or resolved through fallback so equal text does not hide a different value source.
 
 Selecting an item never refreshes it. Loaded item metadata, fields, versions, languages, and children are cached. Collapsing and re-expanding a loaded node reuses the cache.
 
@@ -195,25 +195,15 @@ The default is `none` so the tool never hides content differences without an exp
 
 This setting affects comparison and diff presentation only. It never rewrites a value during sync. No whitespace trimming, HTML normalization, or Unicode normalization is performed in the MVP.
 
-## Sync operations
+## Transfers
 
-The first executable sync path is a confirmed, transfer-backed subtree operation available directly from a paired item's context menu in either direction. It uses `ItemAndDescendants` with `OverrideExistingItem`, transfers every language and version, preserves item IDs, blocks same-environment transfer and same-path/different-ID conflicts, verifies source identity and target-parent existence, refreshes loaded target data after completion, and writes an execution journal. Only an explicit Item Transfer `Finished` state is terminal success; `consumed` history entries with an unknown state remain pending. Destination `.raif` blobs are retained automatically until a reliable cleanup workflow is introduced. The generated removable operation-list workflow below remains the next layer over this proven execution primitive.
+Confirmed subtree actions in the comparison and field-value arrows in Field Diff append durable records to one workspace-scoped FIFO. They do not perform network mutations inline. The **Transfers** view shows queue order, source and target, operation type, and current status. Play starts or resumes the single worker; Pause stops it at the next safe boundary. Completed records are removed only after their journals are written. A failed head record remains visible and pauses the queue until retried or removed.
 
-Comparison generates a proposed operation list in the selected sync direction. Users may remove operations before execution. The MVP does not allow manually adding, reversing, or editing generated operations.
+Queue records, insertion sequence, processor state, and pending Content/Item Transfer checkpoints are retained in workspace state. An extension restart recovers interrupted local phases as queued and resumes persisted remote polling checkpoints. This supports unattended multi-hour processing without keeping a comparison tab open. Connections referenced by records cannot be deleted.
 
-Supported workflow:
+Subtree execution uses `ItemAndDescendants` with `OverrideExistingItem`, transfers every language and version, preserves item IDs, blocks same-environment transfer and same-path/different-ID conflicts, verifies source identity and target-parent existence, and refreshes loaded target data after completion. Only explicit Item Transfer `Finished` is terminal success; consumed history with an unknown state remains pending. Destination `.raif` blobs are retained automatically until a reliable cleanup workflow is introduced.
 
-1. Compare snapshots.
-2. Generate proposed operations in the selected direction.
-3. Let the user remove unwanted operations.
-4. Choose `Preview Sync` or `Execute Sync`.
-5. Run preflight validation.
-6. Execute in dependency order.
-7. Re-read affected items.
-8. Refresh comparison state.
-9. Record results and errors.
-
-`Preview Sync` is the normal dry run. After a successful preview, `Execute Sync` is presented as the primary call to action. Users may also execute without previewing.
+Field-value execution re-reads both items and checks scope-aware field fingerprints captured at enqueue time. A stale source or target fails before mutation. Otherwise it issues one Authoring `updateItem` mutation and re-reads the target to verify the literal value. Identical pending requests are deduplicated.
 
 ### Preflight validation
 

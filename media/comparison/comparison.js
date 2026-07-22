@@ -976,12 +976,12 @@ function showContextMenu(event, pair, forceDisabled = false) {
   const syncLeftToRight = document.createElement("button");
   syncLeftToRight.className = "context-menu-item";
   syncLeftToRight.type = "button";
-  syncLeftToRight.textContent = "Sync Subtree Left → Right…";
+  syncLeftToRight.textContent = "Add Subtree Transfer Left → Right…";
   syncLeftToRight.disabled = disabled || sameEnvironment || !pair.left || pathIdentityConflict;
   syncLeftToRight.title = sameEnvironment
     ? "Subtree transfer requires two different XM Cloud environments."
     : pathIdentityConflict
-      ? "Resolve the same-path item ID conflict before synchronizing."
+      ? "Resolve the same-path item ID conflict before transferring."
       : !pair.left
         ? "The source item does not exist on the left."
         : "Transfer this item, its descendants, and all languages and versions from left to right.";
@@ -990,12 +990,12 @@ function showContextMenu(event, pair, forceDisabled = false) {
   const syncRightToLeft = document.createElement("button");
   syncRightToLeft.className = "context-menu-item";
   syncRightToLeft.type = "button";
-  syncRightToLeft.textContent = "Sync Subtree Right → Left…";
+  syncRightToLeft.textContent = "Add Subtree Transfer Right → Left…";
   syncRightToLeft.disabled = disabled || sameEnvironment || !pair.right || pathIdentityConflict;
   syncRightToLeft.title = sameEnvironment
     ? "Subtree transfer requires two different XM Cloud environments."
     : pathIdentityConflict
-      ? "Resolve the same-path item ID conflict before synchronizing."
+      ? "Resolve the same-path item ID conflict before transferring."
       : !pair.right
         ? "The source item does not exist on the right."
         : "Transfer this item, its descendants, and all languages and versions from right to left.";
