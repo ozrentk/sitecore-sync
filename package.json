@@ -2,7 +2,7 @@
   "name": "sitecore-xm-cloud-sync",
   "displayName": "XM Cloud Sync",
   "description": "Compare and synchronize Sitecore XM Cloud authoring content from VS Code.",
-  "version": "0.8.0",
+  "version": "0.8.1",
   "publisher": "OzrenTK",
   "license": "MIT",
   "engines": {

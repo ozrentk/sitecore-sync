@@ -1480,7 +1480,7 @@ export class ComparisonPanelManager implements vscode.Disposable {
         !selection.leftConnectionId ||
         !selection.rightConnectionId
       ) {
-        await vscode.window.showErrorMessage(
+        void vscode.window.showErrorMessage(
           "Both items and connections must be available to copy a field value.",
         );
         return;
@@ -1505,7 +1505,7 @@ export class ComparisonPanelManager implements vscode.Disposable {
         (field) => normalizeItemId(field.fieldId) === normalizedFieldId,
       );
       if (!leftField || !rightField) {
-        await vscode.window.showErrorMessage(
+        void vscode.window.showErrorMessage(
           "The field is no longer available on both sides of the comparison.",
         );
         return;
@@ -1527,11 +1527,11 @@ export class ComparisonPanelManager implements vscode.Disposable {
       const sourceConnection = this.connectionStore.get(sourceConnectionId);
       const targetConnection = this.connectionStore.get(targetConnectionId);
       if (!sourceConnection || !targetConnection) {
-        await vscode.window.showErrorMessage("A comparison connection is no longer available.");
+        void vscode.window.showErrorMessage("A comparison connection is no longer available.");
         return;
       }
       if (sourceField.containsFallbackValue) {
-        await vscode.window.showWarningMessage(
+        void vscode.window.showWarningMessage(
           "Fallback-derived values cannot be copied as stored field values.",
         );
         return;
@@ -1543,7 +1543,7 @@ export class ComparisonPanelManager implements vscode.Disposable {
       const normalizeValue = (value: string): string =>
         normalization === "lineEndings" ? value.replace(/\r\n?|\n/g, "\n") : value;
       if (normalizeValue(sourceField.value) === normalizeValue(targetField.value)) {
-        await vscode.window.showInformationMessage("The field values no longer differ.");
+        void vscode.window.showInformationMessage("The field values no longer differ.");
         return;
       }
 
@@ -1574,7 +1574,7 @@ export class ComparisonPanelManager implements vscode.Disposable {
         currentSelection.leftLanguage !== selection.leftLanguage ||
         currentSelection.rightLanguage !== selection.rightLanguage
       ) {
-        await vscode.window.showWarningMessage(
+        void vscode.window.showWarningMessage(
           "The comparison changed before the field value could be copied.",
         );
         return;
@@ -1618,16 +1618,16 @@ export class ComparisonPanelManager implements vscode.Disposable {
       });
       if (enqueueResult.added) {
         this.log.info(`Queued field ${normalizedFieldId} ${sourceSide} to ${targetSide}.`);
-        await vscode.window.showInformationMessage(
+        void vscode.window.showInformationMessage(
           `Added “${fieldLabel}” from ${sourceLabel} to ${targetLabel} to Transfers.`,
         );
       } else {
-        await vscode.window.showInformationMessage(
+        void vscode.window.showInformationMessage(
           `That “${fieldLabel}” transfer is already queued.`,
         );
       }
     } catch (error: unknown) {
-      await vscode.window.showErrorMessage(`Unable to queue field transfer: ${errorMessage(error)}`);
+      void vscode.window.showErrorMessage(`Unable to queue field transfer: ${errorMessage(error)}`);
     } finally {
       this.copyingFieldIds.delete(normalizedFieldId);
     }

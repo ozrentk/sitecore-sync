@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.8.1
+
+- Released Field Diff transfer arrows immediately after enqueueing instead of keeping them disabled until the informational notification was dismissed.
+
 ## 0.8.0
 
 - Replaced synchronous subtree and field-value execution with a durable, workspace-scoped FIFO transfer queue.
