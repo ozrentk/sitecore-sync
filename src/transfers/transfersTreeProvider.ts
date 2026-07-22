@@ -17,6 +17,7 @@ export class TransfersTreeProvider
 implements vscode.TreeDataProvider<TransferTreeItem>, vscode.Disposable {
   private readonly changeEmitter = new vscode.EventEmitter<TransferTreeItem | undefined>();
   private readonly storeSubscription: vscode.Disposable;
+  private readonly durationRefresh: ReturnType<typeof setInterval>;
 
   readonly onDidChangeTreeData = this.changeEmitter.event;
 
@@ -25,6 +26,15 @@ implements vscode.TreeDataProvider<TransferTreeItem>, vscode.Disposable {
     private readonly connections: ConnectionStore,
   ) {
     this.storeSubscription = store.onDidChange(() => this.changeEmitter.fire(undefined));
+    this.durationRefresh = setInterval(() => {
+      if (store.list().some((record) =>
+        record.kind === "subtree" &&
+        record.status === "waitingForSitecore" &&
+        record.progress?.stage === "sitecore"
+      )) {
+        this.changeEmitter.fire(undefined);
+      }
+    }, 5_000);
   }
 
   getTreeItem(element: TransferTreeItem): vscode.TreeItem {
@@ -57,6 +67,7 @@ implements vscode.TreeDataProvider<TransferTreeItem>, vscode.Disposable {
   }
 
   dispose(): void {
+    clearInterval(this.durationRefresh);
     this.storeSubscription.dispose();
     this.changeEmitter.dispose();
   }
@@ -113,8 +124,12 @@ function subtreeProgressLabel(
     case "exportingContent": return "exporting content (3/6)";
     case "copyingChunks":
       return `copying chunks (4/6, chunk ${record.progress.current}/${record.progress.total})`;
-    case "sitecore":
-      return `Sitecore (5/6, import ${record.progress.current}/${record.progress.total})`;
+    case "sitecore": {
+      const elapsed = record.status === "waitingForSitecore"
+        ? `, ${formatElapsed(record.progress.startedAt)}`
+        : "";
+      return `Sitecore (5/6, blob ${record.progress.completed}/${record.progress.total} imported${elapsed})`;
+    }
     case "verifying": return "verifying (6/6)";
     default: return undefined;
   }
@@ -125,7 +140,7 @@ function transferIcon(record: TransferRecord): vscode.ThemeIcon {
     case "queued": return new vscode.ThemeIcon("clock");
     case "preflighting": return new vscode.ThemeIcon("search");
     case "executing": return new vscode.ThemeIcon("sync~spin");
-    case "waitingForSitecore": return new vscode.ThemeIcon("cloud-download");
+    case "waitingForSitecore": return new vscode.ThemeIcon("sync~spin");
     case "verifying": return new vscode.ThemeIcon("pass-pending");
     case "failed": return new vscode.ThemeIcon("error", new vscode.ThemeColor("errorForeground"));
   }
@@ -163,4 +178,21 @@ function transferTooltip(record: TransferRecord): vscode.MarkdownString {
 
 function escapeMarkdown(value: string): string {
   return value.replace(/[\\`*_{}[\]()#+.!-]/gu, "\\$&");
+}
+
+function formatElapsed(startedAt: string): string {
+  const started = Date.parse(startedAt);
+  const totalSeconds = Number.isFinite(started)
+    ? Math.max(0, Math.floor((Date.now() - started) / 1_000))
+    : 0;
+  const hours = Math.floor(totalSeconds / 3_600);
+  const minutes = Math.floor((totalSeconds % 3_600) / 60);
+  const seconds = totalSeconds % 60;
+  if (hours > 0) {
+    return `${hours}h ${minutes}m ${seconds}s`;
+  }
+  if (minutes > 0) {
+    return `${minutes}m ${seconds}s`;
+  }
+  return `${seconds}s`;
 }

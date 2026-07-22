@@ -4,7 +4,8 @@
 
 - Added phase counters to queued subtree and field-value transfer statuses.
 - Reported actual Content Transfer chunk progress as `copying chunks (4/6, chunk x/y)`.
-- Reported actual Item Transfer job progress as `Sitecore (5/6, import x/y)` and persisted progress with the queue record.
+- Reported completed Item Transfer blobs and elapsed phase time as `Sitecore (5/6, blob x/y imported, 8m 15s)` and persisted the phase start with the queue record.
+- Added adaptive Item Transfer polling: approximately every 2 seconds initially, then 5, 10, and 15 seconds as the Sitecore phase grows longer, with small jitter and no separate between-window delay.
 - Switched subtree status to `verifying (6/6)` before destination verification begins and retained the last detailed phase when a transfer fails.
 
 ## 0.8.1

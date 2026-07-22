@@ -24,7 +24,12 @@ export interface TransferRefreshPlanEntry {
 export type SubtreeProgress =
   | { readonly stage: "exportingContent" }
   | { readonly stage: "copyingChunks"; readonly current: number; readonly total: number }
-  | { readonly stage: "sitecore"; readonly current: number; readonly total: number }
+  | {
+      readonly stage: "sitecore";
+      readonly completed: number;
+      readonly total: number;
+      readonly startedAt: string;
+    }
   | { readonly stage: "verifying" };
 
 interface TransferRecordBase {
