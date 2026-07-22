@@ -21,6 +21,12 @@ export interface TransferRefreshPlanEntry {
   readonly loadLevel: boolean;
 }
 
+export type SubtreeProgress =
+  | { readonly stage: "exportingContent" }
+  | { readonly stage: "copyingChunks"; readonly current: number; readonly total: number }
+  | { readonly stage: "sitecore"; readonly current: number; readonly total: number }
+  | { readonly stage: "verifying" };
+
 interface TransferRecordBase {
   readonly id: string;
   readonly sequence: number;
@@ -67,6 +73,7 @@ export interface SubtreeTransferRecord extends TransferRecordBase {
   readonly targetSide: "left" | "right";
   readonly targetRefreshPlan: readonly TransferRefreshPlanEntry[];
   readonly checkpoint?: ContentTransferResult;
+  readonly progress?: SubtreeProgress;
 }
 
 export type TransferRecord = FieldValueTransferRecord | SubtreeTransferRecord;

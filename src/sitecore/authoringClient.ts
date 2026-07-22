@@ -45,6 +45,12 @@ export interface ContentTransferResult {
   readonly destinationVersions?: readonly { readonly language: string; readonly version: number }[];
 }
 
+export type ContentTransferProgress =
+  | { readonly stage: "exportingContent" }
+  | { readonly stage: "copyingChunks"; readonly current: number; readonly total: number }
+  | { readonly stage: "sitecore"; readonly current: number; readonly total: number }
+  | { readonly stage: "verifying" };
+
 interface TestQueryResponse {
   readonly data?: {
     readonly sites?: readonly {
@@ -226,6 +232,7 @@ export class AuthoringContentClient {
     destinationLanguage: string,
     signal: AbortSignal,
     onCheckpoint?: (checkpoint: ContentTransferResult) => Promise<void>,
+    onProgress?: (progress: ContentTransferProgress) => Promise<void>,
   ): Promise<ContentTransferResult> {
     const sourceToken = await this.getAccessToken(source, sourceSecret, signal);
     const destinationToken = await this.getAccessToken(destination, destinationSecret, signal);
@@ -261,6 +268,8 @@ export class AuthoringContentClient {
         `The destination path already exists with a different item ID (${existingDestination.itemId}).`,
       );
     }
+
+    await onProgress?.({ stage: "exportingContent" });
 
     const transferId = randomUUID();
     const sourceTransferBase = new URL("/sitecore/api/content/transfer/v1/transfers", source.serverUrl);
@@ -323,6 +332,21 @@ export class AuthoringContentClient {
         throw new Error("The completed content transfer did not contain chunk-set metadata.");
       }
 
+      const totalChunkCount = chunkSets.reduce<number>(
+        (total, rawChunkSet) => total + requiredNumberProperty(
+          rawChunkSet,
+          "ChunkCount",
+          "chunkCount",
+        ),
+        0,
+      );
+      let copiedChunkCount = 0;
+      await onProgress?.({
+        stage: "copyingChunks",
+        current: copiedChunkCount,
+        total: totalChunkCount,
+      });
+
       for (const rawChunkSet of chunkSets) {
         const chunkSetId = requiredStringProperty(rawChunkSet, "ChunkSetId", "chunkSetId");
         const chunkCount = requiredNumberProperty(rawChunkSet, "ChunkCount", "chunkCount");
@@ -360,6 +384,12 @@ export class AuthoringContentClient {
             signal,
             true,
           );
+          copiedChunkCount += 1;
+          await onProgress?.({
+            stage: "copyingChunks",
+            current: copiedChunkCount,
+            total: totalChunkCount,
+          });
         }
 
         const completion = await this.requestJsonObject(
@@ -406,7 +436,12 @@ export class AuthoringContentClient {
     };
     await onCheckpoint?.(checkpoint);
 
-    for (const blobName of destinationBlobNames) {
+    for (const [blobIndex, blobName] of destinationBlobNames.entries()) {
+      await onProgress?.({
+        stage: "sitecore",
+        current: blobIndex + 1,
+        total: destinationBlobNames.length,
+      });
       const blobListUrl = new URL("sources/blobs", itemTransferBase);
       await this.pollJson(
         blobListUrl,
@@ -456,6 +491,7 @@ export class AuthoringContentClient {
       }
     }
 
+    await onProgress?.({ stage: "verifying" });
     const destinationItem = await this.loadTreeLevel(
       destination,
       destinationSecret,
@@ -494,6 +530,7 @@ export class AuthoringContentClient {
     checkpoint: ContentTransferResult,
     signal: AbortSignal,
     onCheckpoint?: (checkpoint: ContentTransferResult) => Promise<void>,
+    onProgress?: (progress: ContentTransferProgress) => Promise<void>,
   ): Promise<ContentTransferResult> {
     const destinationToken = await this.getAccessToken(destination, destinationSecret, signal);
     const itemTransferBase = new URL(
@@ -537,7 +574,12 @@ export class AuthoringContentClient {
       await onCheckpoint?.(currentCheckpoint);
     }
 
-    for (const itemTransferId of itemTransferIds) {
+    for (const [itemTransferIndex, itemTransferId] of itemTransferIds.entries()) {
+      await onProgress?.({
+        stage: "sitecore",
+        current: itemTransferIndex + 1,
+        total: checkpoint.chunkSets.length,
+      });
       const status = await this.pollItemTransfer(
         new URL(`transfers/${encodeURIComponent(itemTransferId)}`, itemTransferBase),
         destinationToken,
@@ -549,6 +591,7 @@ export class AuthoringContentClient {
       }
     }
 
+    await onProgress?.({ stage: "verifying" });
     const destinationItem = await this.loadTreeLevel(
       destination,
       destinationSecret,

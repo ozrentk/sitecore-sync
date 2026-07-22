@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.8.2
+
+- Added phase counters to queued subtree and field-value transfer statuses.
+- Reported actual Content Transfer chunk progress as `copying chunks (4/6, chunk x/y)`.
+- Reported actual Item Transfer job progress as `Sitecore (5/6, import x/y)` and persisted progress with the queue record.
+- Switched subtree status to `verifying (6/6)` before destination verification begins and retained the last detailed phase when a transfer fails.
+
 ## 0.8.1
 
 - Released Field Diff transfer arrows immediately after enqueueing instead of keeping them disabled until the informational notification was dismissed.
