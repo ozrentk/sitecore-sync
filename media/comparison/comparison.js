@@ -840,7 +840,7 @@ function createContextMenuSeparator() {
   return separator;
 }
 
-function showContextMenu(event, pair, forceDisabled = false) {
+function showContextMenu(event, pair, clickedSide, forceDisabled = false) {
   event.preventDefault();
   closeContextMenu();
 
@@ -965,13 +965,19 @@ function showContextMenu(event, pair, forceDisabled = false) {
   runTask.className = "context-menu-item";
   runTask.type = "button";
   runTask.textContent = "Run task…";
-  runTask.disabled = disabled || (!pair.left && !pair.right);
+  const clickedItem = clickedSide ? pair[clickedSide] : undefined;
+  runTask.disabled = disabled || (clickedSide ? !clickedItem : (!pair.left && !pair.right));
   runTask.title = runTask.disabled
-    ? "Item context is unavailable while this item is locked."
-    : "Select a matching workspace PowerShell task for this item.";
+    ? clickedSide && !clickedItem
+      ? `The item does not exist on the ${clickedSide}.`
+      : "Item context is unavailable while this item is locked."
+    : clickedSide
+      ? `Select a matching workspace PowerShell task for the ${clickedSide} item.`
+      : "Select a matching workspace PowerShell task for this item.";
   runTask.addEventListener("click", () => {
     vscode.postMessage({
       type: "runItemTask",
+      side: clickedSide,
       leftItemId: pair.left?.itemId,
       rightItemId: pair.right?.itemId,
       leftName: pair.left?.name,
@@ -1494,7 +1500,15 @@ function renderPair(pair, depth, ancestorRefreshing = false) {
     }
     togglePairExpansion(pair);
   });
-  row.addEventListener("contextmenu", (event) => showContextMenu(event, pair, refreshing));
+  row.addEventListener("contextmenu", (event) => {
+    const cell = event.target.closest(".comparison-cell");
+    const clickedSide = cell?.classList.contains("left")
+      ? "left"
+      : cell?.classList.contains("right")
+        ? "right"
+        : undefined;
+    showContextMenu(event, pair, clickedSide, refreshing);
+  });
   row.append(
     createItemCell(pair.left, "left", depth, pair),
     createRowControl(pair, refreshing, refreshRoot),
