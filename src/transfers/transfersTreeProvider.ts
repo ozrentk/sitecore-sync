@@ -4,8 +4,8 @@ import type { TransferQueueStore } from "./transferQueueStore";
 import type { TransferRecord } from "./transferTypes";
 
 export class TransferTreeItem extends vscode.TreeItem {
-  constructor(readonly record: TransferRecord, position: number, description: string) {
-    super(transferLabel(record, position), vscode.TreeItemCollapsibleState.None);
+  constructor(readonly record: TransferRecord, description: string) {
+    super(transferLabel(record), vscode.TreeItemCollapsibleState.None);
     this.description = description;
     this.contextValue = `xmCloudTransfer.${record.status}`;
     this.iconPath = transferIcon(record);
@@ -32,9 +32,8 @@ implements vscode.TreeDataProvider<TransferTreeItem>, vscode.Disposable {
   }
 
   getChildren(): TransferTreeItem[] {
-    return this.store.list().map((record, index) => new TransferTreeItem(
+    return this.store.list().map((record) => new TransferTreeItem(
       record,
-      index + 1,
       this.description(record),
     ));
   }
@@ -63,10 +62,14 @@ implements vscode.TreeDataProvider<TransferTreeItem>, vscode.Disposable {
   }
 }
 
-function transferLabel(record: TransferRecord, position: number): string {
+function transferLabel(record: TransferRecord): string {
   return record.kind === "fieldValue"
-    ? `${position}. Field · ${fieldName(record)}`
-    : `${position}. Subtree · ${record.sourcePath}`;
+    ? `Field ${fieldName(record)} · ${itemName(record.source.itemPath)}`
+    : `Subtree · ${itemName(record.sourcePath)}`;
+}
+
+function itemName(path: string): string {
+  return path.split("/").filter(Boolean).at(-1) ?? path;
 }
 
 function fieldName(record: Extract<TransferRecord, { readonly kind: "fieldValue" }>): string {
