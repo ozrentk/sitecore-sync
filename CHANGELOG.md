@@ -6,6 +6,7 @@
 - Limited the field-transfer overwrite confirmation to the first accepted transfer for the extension profile.
 - Displayed the internal field name in Transfers and included source and target field paths in its tooltip.
 - Shortened transfer labels to the field plus item name or subtree root name while retaining connection and status details in the gray description.
+- Paused transfer processing automatically when the queue drains, so later additions wait for an explicit Play action.
 
 ## 0.8.0
 
