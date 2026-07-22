@@ -4,6 +4,7 @@ import type {
   AuthoringItemField,
   ContentTransferResult,
 } from "../sitecore/authoringClient";
+import type { DeploymentBaseline } from "../sitecore/deploymentClient";
 
 export type TransferProcessorState = "paused" | "running" | "pausing";
 export type TransferRecordStatus =
@@ -79,6 +80,11 @@ export interface SubtreeTransferRecord extends TransferRecordBase {
   readonly targetRefreshPlan: readonly TransferRefreshPlanEntry[];
   readonly checkpoint?: ContentTransferResult;
   readonly progress?: SubtreeProgress;
+  readonly deploymentBaselines?: {
+    readonly source: DeploymentBaseline;
+    readonly target: DeploymentBaseline;
+  };
+  readonly failureKind?: "deploymentChanged";
 }
 
 export type TransferRecord = FieldValueTransferRecord | SubtreeTransferRecord;

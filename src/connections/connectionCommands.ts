@@ -6,6 +6,7 @@ import {
   type AuthoringContentClient,
   type AuthoringSite,
 } from "../sitecore/authoringClient";
+import { DeploymentClient } from "../sitecore/deploymentClient";
 
 export async function addConnection(
   store: ConnectionStore,
@@ -141,6 +142,73 @@ export async function testConnection(
     const message = errorMessage(error);
     provider.setTestState(connection.id, "failure", message);
     await vscode.window.showErrorMessage(`${connection.name}: ${message}`);
+  }
+}
+
+export async function configureDeploymentMonitoring(
+  argument: ConnectionTreeItem | XmCloudConnection | undefined,
+  store: ConnectionStore,
+  deploymentClient: DeploymentClient,
+): Promise<void> {
+  const connection = resolveConnection(argument, store);
+  if (!connection) {
+    await vscode.window.showErrorMessage("The XM Cloud connection no longer exists.");
+    return;
+  }
+  const clientId = await vscode.window.showInputBox({
+    title: `Configure Deployment Monitoring for ${connection.name} (1/2)`,
+    prompt: "Enter an organization automation client ID with Deploy API access.",
+    value: connection.deploymentClientId,
+    ignoreFocusOut: true,
+    validateInput: required("Organization automation client ID"),
+  });
+  if (clientId === undefined) {
+    return;
+  }
+  const clientSecret = await vscode.window.showInputBox({
+    title: `Configure Deployment Monitoring for ${connection.name} (2/2)`,
+    prompt: "Enter its secret. It will be stored in VS Code SecretStorage.",
+    password: true,
+    ignoreFocusOut: true,
+    validateInput: required("Organization automation client secret"),
+  });
+  if (clientSecret === undefined) {
+    return;
+  }
+  const controller = new AbortController();
+  try {
+    const baseline = await vscode.window.withProgress(
+      {
+        location: vscode.ProgressLocation.Notification,
+        title: `Matching ${connection.name} to its deployment environment`,
+        cancellable: true,
+      },
+      async (_progress, token) => {
+        const subscription = token.onCancellationRequested(() => controller.abort());
+        try {
+          return await deploymentClient.resolveEnvironment(
+            connection,
+            { clientId: clientId.trim(), clientSecret },
+            controller.signal,
+          );
+        } finally {
+          subscription.dispose();
+        }
+      },
+    );
+    await store.configureDeploymentMonitoring(
+      connection.id,
+      clientId.trim(),
+      clientSecret,
+      baseline.environmentId,
+    );
+    await vscode.window.showInformationMessage(
+      `${connection.name}: deployment monitoring configured.`,
+    );
+  } catch (error: unknown) {
+    await vscode.window.showErrorMessage(
+      `${connection.name}: ${errorMessage(error)}`,
+    );
   }
 }
 

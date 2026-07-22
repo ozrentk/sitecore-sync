@@ -2,6 +2,7 @@ import * as vscode from "vscode";
 import { ComparisonPanelManager } from "./comparison/comparisonPanel";
 import {
   addConnection,
+  configureDeploymentMonitoring,
   pasteAsConnectionUrl,
   removeConnection,
   testConnection,
@@ -13,6 +14,7 @@ import {
   FavoriteTreeItem,
 } from "./connections/connectionTreeProvider";
 import { AuthoringContentClient } from "./sitecore/authoringClient";
+import { DeploymentClient } from "./sitecore/deploymentClient";
 import { TransferProcessor } from "./transfers/transferProcessor";
 import { TransferQueueStore } from "./transfers/transferQueueStore";
 import { TransfersTreeProvider, TransferTreeItem } from "./transfers/transfersTreeProvider";
@@ -22,12 +24,14 @@ export function activate(context: vscode.ExtensionContext): void {
   const connectionStore = new ConnectionStore(context.globalState, context.secrets);
   const connectionProvider = new ConnectionTreeProvider(connectionStore);
   const authoringClient = new AuthoringContentClient(log);
+  const deploymentClient = new DeploymentClient(log);
   const extensionVersion = String(context.extension.packageJSON.version ?? "unknown");
   const transferQueue = new TransferQueueStore(context.workspaceState);
   const transferProcessor = new TransferProcessor(
     transferQueue,
     connectionStore,
     authoringClient,
+    deploymentClient,
     context.globalStorageUri,
     extensionVersion,
     log,
@@ -81,7 +85,10 @@ export function activate(context: vscode.ExtensionContext): void {
     transferQueue,
     transferProcessor,
     transfersProvider,
-    { dispose: () => authoringClient.clear() },
+    { dispose: () => {
+      authoringClient.clear();
+      deploymentClient.clear();
+    } },
     comparisonPanelManager,
     connectionsView,
     transfersView,
@@ -129,6 +136,9 @@ export function activate(context: vscode.ExtensionContext): void {
     }),
     vscode.commands.registerCommand("xmCloudSync.testConnection", async (argument) => {
       await testConnection(argument, connectionStore, connectionProvider, authoringClient);
+    }),
+    vscode.commands.registerCommand("xmCloudSync.configureDeploymentMonitoring", async (argument) => {
+      await configureDeploymentMonitoring(argument, connectionStore, deploymentClient);
     }),
     vscode.commands.registerCommand("xmCloudSync.removeConnection", async (argument) => {
       await removeConnection(

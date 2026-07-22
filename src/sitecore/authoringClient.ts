@@ -233,6 +233,7 @@ export class AuthoringContentClient {
     signal: AbortSignal,
     onCheckpoint?: (checkpoint: ContentTransferResult) => Promise<void>,
     onProgress?: (progress: ContentTransferProgress) => Promise<void>,
+    onPoll?: () => Promise<void>,
   ): Promise<ContentTransferResult> {
     const sourceToken = await this.getAccessToken(source, sourceSecret, signal);
     const destinationToken = await this.getAccessToken(destination, destinationSecret, signal);
@@ -326,6 +327,7 @@ export class AuthoringContentClient {
         },
         signal,
         300,
+        onPoll,
       );
       const chunkSets = arrayProperty(status, "ChunkSetsMetadata", "chunkSetsMetadata");
       if (chunkSets.length === 0) {
@@ -454,6 +456,7 @@ export class AuthoringContentClient {
         },
         signal,
         150,
+        onPoll,
       );
 
       const startUrl = new URL("transfers/databases/master/sources", itemTransferBase);
@@ -487,6 +490,7 @@ export class AuthoringContentClient {
         decodedItemTransferId,
         signal,
         sitecorePhaseStartedAt,
+        onPoll,
       );
       if (!itemTransferStatus) {
         return checkpoint;
@@ -539,6 +543,7 @@ export class AuthoringContentClient {
     sitecorePhaseStartedAt: number,
     onCheckpoint?: (checkpoint: ContentTransferResult) => Promise<void>,
     onProgress?: (progress: ContentTransferProgress) => Promise<void>,
+    onPoll?: () => Promise<void>,
   ): Promise<ContentTransferResult> {
     const destinationToken = await this.getAccessToken(destination, destinationSecret, signal);
     const itemTransferBase = new URL(
@@ -563,6 +568,7 @@ export class AuthoringContentClient {
         },
         signal,
         150,
+        onPoll,
       );
       const startUrl = new URL("transfers/databases/master/sources", itemTransferBase);
       startUrl.searchParams.set("blobName", blobName);
@@ -594,6 +600,7 @@ export class AuthoringContentClient {
         itemTransferId,
         signal,
         sitecorePhaseStartedAt,
+        onPoll,
       );
       if (!status) {
         return { ...currentCheckpoint, state: "Pending" };
@@ -669,8 +676,10 @@ export class AuthoringContentClient {
     complete: (payload: unknown) => boolean,
     signal: AbortSignal,
     maxAttempts = 60,
+    onPoll?: () => Promise<void>,
   ): Promise<unknown> {
     for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+      await onPoll?.();
       const payload = await this.requestJsonObject(
         url,
         token,
@@ -693,9 +702,11 @@ export class AuthoringContentClient {
     transferId: string,
     signal: AbortSignal,
     sitecorePhaseStartedAt: number,
+    onPoll?: () => Promise<void>,
   ): Promise<unknown | undefined> {
     const pollingWindowEndsAt = Date.now() + 120_000;
     while (Date.now() < pollingWindowEndsAt) {
+      await onPoll?.();
       const response = await this.http.request(
         url,
         { method: "GET", headers: { authorization: `Bearer ${token}` } },
