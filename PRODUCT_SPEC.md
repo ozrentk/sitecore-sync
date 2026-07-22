@@ -17,6 +17,14 @@ The MVP supports:
 
 The MVP does not support publishing.
 
+## Item task plug-ins
+
+The comparison item context menu provides **Run task…**. The extension discovers trusted-workspace plug-ins from `.xm-cloud-sync/tasks/**/task.json`; every plug-in consists of a validated manifest and a PowerShell script contained in the same plug-in directory. A manifest has a unique ID, display name, optional description, relative `.ps1` path, and at least one match rule. Match rules support normalized template IDs, normalized item IDs, exact case-insensitive immediate-parent paths, and exact case-insensitive ancestor paths. Rules are combined with OR semantics.
+
+Before presenting the picker, the extension loads complete item details for each available comparison side. Each matching task-side combination is selectable and identifies its side, connection, language, and item path. Execution uses a direct child process without shell command construction. PowerShell 7 is preferred and Windows PowerShell is the Windows fallback; both run without profiles and in non-interactive mode. Workspace Trust is mandatory and task execution is never automatic.
+
+The runner writes a schema-versioned, secret-free JSON context to extension-owned temporary storage and passes its path plus a result path as named script parameters. Context includes task identity, side, non-secret connection identity, language, item/tree metadata, template, available versions, complete fields, parent, and ancestors. Stdout and stderr stream to a dedicated **XM Cloud Tasks** output channel. Exit code zero is success unless result JSON declares error; non-zero is failure. Optional result JSON supplies `status` and a user-facing `message`. A progress notification supports cancellation, completion produces an OK or error notification, and temporary files are deleted afterward. Task runs remain separate from the Transfers FIFO.
+
 Experience Edge comparison is a possible later diagnostic feature for inspecting published content. It is not part of the authoring diff or sync engine because Edge contains a published, flattened representation rather than the complete authoring item representation.
 
 ## Connections

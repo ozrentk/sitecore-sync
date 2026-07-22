@@ -18,6 +18,10 @@ import {
   normalizeTransferId,
   type TransferRecord,
 } from "../transfers/transferTypes";
+import {
+  ItemTaskRunner,
+  type ItemTaskCandidateContext,
+} from "../tasks/itemTaskRunner";
 
 const selectionKey = "sitecoreXmCloudSync.comparisonSelection.v1";
 const fieldTransferConfirmationKey = "sitecoreXmCloudSync.fieldTransferConfirmationAccepted.v1";
@@ -56,6 +60,10 @@ interface WebviewMessage {
   readonly found?: unknown;
   readonly leftPath?: unknown;
   readonly rightPath?: unknown;
+  readonly leftDisplayName?: unknown;
+  readonly rightDisplayName?: unknown;
+  readonly leftHasChildren?: unknown;
+  readonly rightHasChildren?: unknown;
 }
 
 interface FavoriteNavigation {
@@ -127,6 +135,7 @@ export class ComparisonPanelManager implements vscode.Disposable {
     private readonly connectionStore: ConnectionStore,
     private readonly authoringClient: AuthoringContentClient,
     private readonly transferQueue: TransferQueueStore,
+    private readonly itemTaskRunner: ItemTaskRunner,
     private readonly log: vscode.LogOutputChannel,
   ) {
     this.connectionSignature = this.currentConnectionSignature();
@@ -577,6 +586,14 @@ export class ComparisonPanelManager implements vscode.Disposable {
     }
 
     if (
+      message.type === "runItemTask" &&
+      (typeof message.leftItemId === "string" || typeof message.rightItemId === "string")
+    ) {
+      await this.runItemTask(message);
+      return;
+    }
+
+    if (
       message.type === "syncSubtree" &&
       typeof message.rowKey === "string" &&
       (message.direction === "leftToRight" || message.direction === "rightToLeft") &&
@@ -589,6 +606,88 @@ export class ComparisonPanelManager implements vscode.Disposable {
         message.sourceItemId,
         message.sourcePath,
         parseRefreshPlan(message.targetRefreshPlan),
+      );
+    }
+  }
+
+  private async runItemTask(message: WebviewMessage): Promise<void> {
+    const selection = this.getSelection();
+    const candidates: ItemTaskCandidateContext[] = [];
+    const inputs = [
+      {
+        side: "left" as const,
+        itemId: typeof message.leftItemId === "string" ? message.leftItemId : undefined,
+        name: typeof message.leftName === "string" ? message.leftName : undefined,
+        displayName: typeof message.leftDisplayName === "string"
+          ? message.leftDisplayName
+          : undefined,
+        hasChildren: message.leftHasChildren === true,
+        connectionId: selection.leftConnectionId,
+        language: selection.leftLanguage,
+      },
+      {
+        side: "right" as const,
+        itemId: typeof message.rightItemId === "string" ? message.rightItemId : undefined,
+        name: typeof message.rightName === "string" ? message.rightName : undefined,
+        displayName: typeof message.rightDisplayName === "string"
+          ? message.rightDisplayName
+          : undefined,
+        hasChildren: message.rightHasChildren === true,
+        connectionId: selection.rightConnectionId,
+        language: selection.rightLanguage,
+      },
+    ];
+    try {
+      await vscode.window.withProgress(
+        {
+          location: vscode.ProgressLocation.Notification,
+          title: "Loading item context for tasks",
+          cancellable: false,
+        },
+        async () => {
+          const availableInputs = inputs.filter((input): input is typeof input & {
+            readonly itemId: string;
+            readonly connectionId: string;
+          } => Boolean(input.itemId && input.connectionId));
+          const results = await Promise.allSettled(availableInputs.map(async (input) => {
+            const connection = this.connectionStore.get(input.connectionId);
+            if (!connection) {
+              throw new Error(`The ${input.side} connection no longer exists.`);
+            }
+            const details = await this.getItemDetails(input.connectionId, input.language, input.itemId);
+            const fallbackName = details.path.split("/").filter(Boolean).at(-1) ?? details.path;
+            return {
+              side: input.side,
+              connection: {
+                id: connection.id,
+                name: connection.name,
+                serverUrl: connection.serverUrl,
+              },
+              language: input.language,
+              item: {
+                ...details,
+                name: input.name ?? fallbackName,
+                displayName: input.displayName ?? input.name ?? fallbackName,
+                hasChildren: input.hasChildren,
+              },
+            } satisfies ItemTaskCandidateContext;
+          }));
+          for (const result of results) {
+            if (result.status === "fulfilled") {
+              candidates.push(result.value);
+            } else {
+              this.log.warn(`Could not load one item-task context: ${errorMessage(result.reason)}`);
+            }
+          }
+        },
+      );
+      if (candidates.length === 0) {
+        throw new Error("Item details could not be loaded for either comparison side.");
+      }
+      await this.itemTaskRunner.selectAndRun(candidates);
+    } catch (error: unknown) {
+      await vscode.window.showErrorMessage(
+        `Unable to prepare the item task: ${errorMessage(error)}`,
       );
     }
   }
