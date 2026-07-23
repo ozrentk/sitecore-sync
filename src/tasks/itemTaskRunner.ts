@@ -511,7 +511,7 @@ export class ItemTaskRunner implements vscode.Disposable {
         : `Unable to check for the local SPE module: ${errorMessage(error)}`;
       this.output.appendLine(`[SPE preflight] ${message}`);
       this.output.show(true);
-      await vscode.window.showErrorMessage(message);
+      void vscode.window.showErrorMessage(message);
       return false;
     } finally {
       tokenSource.dispose();
@@ -524,18 +524,26 @@ export class ItemTaskRunner implements vscode.Disposable {
     this.output.appendLine(`Run in ${process.platform === "win32" ? "Windows PowerShell" : "PowerShell"}:`);
     this.output.appendLine(`  ${speInstallCommand}`);
     this.output.show(true);
-    const selected = await vscode.window.showWarningMessage(
-      "The local SPE remoting module is required before this task can run.",
-      "Copy Install Command",
-      "Open SPE Package",
-    );
-    if (selected === "Copy Install Command") {
-      await vscode.env.clipboard.writeText(speInstallCommand);
-      await vscode.window.showInformationMessage("SPE installation command copied to the clipboard.");
-    } else if (selected === "Open SPE Package") {
-      await vscode.env.openExternal(vscode.Uri.parse(speGalleryUrl));
-    }
+    this.showSpeInstallSuggestion();
     return false;
+  }
+
+  private showSpeInstallSuggestion(): void {
+    void (async () => {
+      const selected = await vscode.window.showWarningMessage(
+        "The local SPE remoting module is required before this task can run.",
+        "Copy Install Command",
+        "Open SPE Package",
+      );
+      if (selected === "Copy Install Command") {
+        await vscode.env.clipboard.writeText(speInstallCommand);
+        await vscode.window.showInformationMessage("SPE installation command copied to the clipboard.");
+      } else if (selected === "Open SPE Package") {
+        await vscode.env.openExternal(vscode.Uri.parse(speGalleryUrl));
+      }
+    })().catch((error: unknown) => {
+      this.output.appendLine(`[SPE preflight] Unable to handle the installation action: ${errorMessage(error)}`);
+    });
   }
 }
 

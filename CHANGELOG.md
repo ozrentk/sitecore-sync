@@ -6,7 +6,7 @@
 - Added optional `spe-remoting` task execution against the CM environment from the clicked comparison side.
 - Prompted for SPE credentials only when an SPE task requires them, stored them per connection in VS Code Secret Storage, and offered replacement after an authentication failure.
 - Removed stored SPE credentials automatically when their XM Cloud Sync connection is deleted.
-- Checked for the local `SPE` remoting module before collecting task inputs or credentials and offered installation guidance when it is missing.
+- Checked for the local `SPE` remoting module before collecting task inputs or credentials, offered non-blocking installation guidance when it is missing, and released the task lock immediately.
 
 ## 0.9.1
 
