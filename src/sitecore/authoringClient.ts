@@ -2,12 +2,14 @@ import type { XmCloudConnection } from "../connections/connection";
 import { randomUUID } from "node:crypto";
 import { print } from "graphql";
 import {
+  createItemMutation,
+  deleteItemMutation,
   itemDetailsQuery,
   languagesQuery,
   nonStandardFieldIdsQuery,
   testConnectionQuery,
   treeLevelQuery,
-  updateFieldValueMutation,
+  updateItemMutation,
 } from "./graphql/authoringQueries";
 import { SitecoreHttpClient, type SitecoreHttpLogger } from "./sitecoreHttpClient";
 
@@ -146,7 +148,10 @@ interface RawItemField {
 
 interface RawItemDetails {
   readonly itemId?: unknown;
+  readonly name?: unknown;
+  readonly displayName?: unknown;
   readonly path?: unknown;
+  readonly hasChildren?: unknown;
   readonly version?: unknown;
   readonly language?: { readonly name?: unknown };
   readonly template?: { readonly templateId?: unknown; readonly name?: unknown };
@@ -177,16 +182,24 @@ interface NonStandardFieldIdsQueryResponse {
   readonly errors?: readonly GraphQlError[];
 }
 
-interface UpdateFieldValueMutationResponse {
+interface ItemMutationResponse {
   readonly data?: {
-    readonly updateItem?: {
-      readonly item?: {
-        readonly itemId?: unknown;
-        readonly path?: unknown;
-        readonly version?: unknown;
-        readonly language?: { readonly name?: unknown };
-      } | null;
-    } | null;
+    readonly createItem?: { readonly item?: RawMutatedItem | null } | null;
+    readonly updateItem?: { readonly item?: RawMutatedItem | null } | null;
+  };
+  readonly errors?: readonly GraphQlError[];
+}
+
+interface RawMutatedItem {
+  readonly itemId?: unknown;
+  readonly path?: unknown;
+  readonly version?: unknown;
+  readonly language?: { readonly name?: unknown };
+}
+
+interface DeleteItemMutationResponse {
+  readonly data?: {
+    readonly deleteItem?: { readonly successful?: unknown } | null;
   };
   readonly errors?: readonly GraphQlError[];
 }
@@ -207,6 +220,25 @@ export interface AuthoringTreeLevel {
 export type AuthoringItemLocator =
   | { readonly path: string }
   | { readonly itemId: string };
+
+export interface CreateAuthoringItemInput {
+  readonly name: string;
+  readonly templateId: string;
+  readonly parent: string;
+  readonly language: string;
+  readonly fields?: Readonly<Record<string, string>>;
+}
+
+export interface UpdateAuthoringItemInput {
+  readonly itemId: string;
+  readonly language: string;
+  readonly version: number;
+  readonly fields: Readonly<Record<string, string>>;
+}
+
+export type DeleteAuthoringItemInput = AuthoringItemLocator & {
+  readonly permanently?: boolean;
+};
 
 interface CachedToken {
   readonly value: string;
@@ -862,8 +894,31 @@ export class AuthoringContentClient {
     language: string,
     signal: AbortSignal,
   ): Promise<AuthoringItemDetails> {
+    return this.loadItem(
+      connection,
+      clientSecret,
+      { itemId },
+      language,
+      undefined,
+      signal,
+    );
+  }
+
+  async loadItem(
+    connection: XmCloudConnection,
+    clientSecret: string,
+    locator: AuthoringItemLocator,
+    language: string,
+    version: number | undefined,
+    signal: AbortSignal,
+  ): Promise<AuthoringItemDetails> {
     const accessToken = await this.getAccessToken(connection, clientSecret, signal);
-    const where = { database: "master", itemId, language };
+    const where = {
+      database: "master",
+      ...locator,
+      language,
+      ...(version === undefined ? {} : { version }),
+    };
     const [rawDetails, nonStandardFieldIds] = await Promise.all([
       this.loadItemDetailsPages(connection.serverUrl, accessToken, where, signal),
       this.loadNonStandardFieldIds(connection.serverUrl, accessToken, where, signal),
@@ -881,32 +936,121 @@ export class AuthoringContentClient {
     value: string,
     signal: AbortSignal,
   ): Promise<void> {
+    await this.mutateItemFields(
+      connection,
+      clientSecret,
+      { itemId, language, version, fields: { [fieldName]: value } },
+      signal,
+    );
+  }
+
+  async createItem(
+    connection: XmCloudConnection,
+    clientSecret: string,
+    input: CreateAuthoringItemInput,
+    signal: AbortSignal,
+  ): Promise<AuthoringItemDetails> {
     const accessToken = await this.getAccessToken(connection, clientSecret, signal);
-    const payload = await this.postGraphQl<UpdateFieldValueMutationResponse>(
+    const payload = await this.postGraphQl<ItemMutationResponse>(
       connection.serverUrl,
       accessToken,
-      "update Authoring field value",
-      "XmCloudSyncUpdateFieldValue",
-      print(updateFieldValueMutation),
+      "create Authoring item",
+      "XmCloudSyncCreateItem",
+      print(createItemMutation),
       {
         input: {
-          database: "master",
-          itemId,
-          language,
-          version,
-          fields: [{ name: fieldName, value, reset: false }],
+          name: input.name,
+          templateId: input.templateId,
+          parent: input.parent,
+          language: input.language,
+          fields: createFieldEntries(input.fields),
         },
       },
       signal,
       false,
     );
-    const updatedItem = payload.data?.updateItem?.item;
-    if (
-      !updatedItem ||
-      typeof updatedItem.itemId !== "string" ||
-      normalizeGuid(updatedItem.itemId) !== normalizeGuid(itemId)
-    ) {
+    const createdItem = parseMutatedItem(payload.data?.createItem?.item, "created");
+    return this.loadItemDetails(
+      connection,
+      clientSecret,
+      createdItem.itemId,
+      createdItem.language,
+      signal,
+    );
+  }
+
+  async updateItemFields(
+    connection: XmCloudConnection,
+    clientSecret: string,
+    input: UpdateAuthoringItemInput,
+    signal: AbortSignal,
+  ): Promise<AuthoringItemDetails> {
+    const updatedItem = await this.mutateItemFields(connection, clientSecret, input, signal);
+    return this.loadItemDetails(
+      connection,
+      clientSecret,
+      updatedItem.itemId,
+      updatedItem.language,
+      signal,
+    );
+  }
+
+  private async mutateItemFields(
+    connection: XmCloudConnection,
+    clientSecret: string,
+    input: UpdateAuthoringItemInput,
+    signal: AbortSignal,
+  ): Promise<{ readonly itemId: string; readonly language: string }> {
+    const accessToken = await this.getAccessToken(connection, clientSecret, signal);
+    const payload = await this.postGraphQl<ItemMutationResponse>(
+      connection.serverUrl,
+      accessToken,
+      "update Authoring item",
+      "XmCloudSyncUpdateItem",
+      print(updateItemMutation),
+      {
+        input: {
+          database: "master",
+          itemId: input.itemId,
+          language: input.language,
+          version: input.version,
+          fields: fieldEntries(input.fields),
+        },
+      },
+      signal,
+      false,
+    );
+    const updatedItem = parseMutatedItem(payload.data?.updateItem?.item, "updated");
+    if (normalizeGuid(updatedItem.itemId) !== normalizeGuid(input.itemId)) {
       throw new Error("Authoring API did not confirm the updated item.");
+    }
+    return updatedItem;
+  }
+
+  async deleteItem(
+    connection: XmCloudConnection,
+    clientSecret: string,
+    input: DeleteAuthoringItemInput,
+    signal: AbortSignal,
+  ): Promise<void> {
+    const accessToken = await this.getAccessToken(connection, clientSecret, signal);
+    const payload = await this.postGraphQl<DeleteItemMutationResponse>(
+      connection.serverUrl,
+      accessToken,
+      "delete Authoring item",
+      "XmCloudSyncDeleteItem",
+      print(deleteItemMutation),
+      {
+        input: {
+          ...input,
+          permanently: input.permanently === true,
+        },
+      },
+      signal,
+      false,
+    );
+    if (payload.data?.deleteItem?.successful !== true) {
+      throw new Error("Authoring API did not confirm that the item was deleted.");
     }
   }
 
@@ -1270,7 +1414,10 @@ export interface AuthoringItemField {
 
 export interface AuthoringItemDetails {
   readonly itemId: string;
+  readonly name: string;
+  readonly displayName: string;
   readonly path: string;
+  readonly hasChildren: boolean;
   readonly language: string;
   readonly version: number;
   readonly template: { readonly templateId: string; readonly name: string };
@@ -1302,6 +1449,7 @@ function parseItemDetails(
 ): AuthoringItemDetails {
   if (
     typeof value.itemId !== "string" ||
+    typeof value.name !== "string" ||
     typeof value.path !== "string" ||
     typeof value.language?.name !== "string" ||
     typeof value.version !== "number" ||
@@ -1358,13 +1506,42 @@ function parseItemDetails(
 
   return {
     itemId: value.itemId,
+    name: value.name,
+    displayName: typeof value.displayName === "string" ? value.displayName : value.name,
     path: value.path,
+    hasChildren: value.hasChildren === true,
     language: value.language.name,
     version: value.version,
     template: { templateId: value.template.templateId, name: value.template.name },
     availableVersions,
     fields,
   };
+}
+
+function fieldEntries(
+  fields: Readonly<Record<string, string>> | undefined,
+): readonly { readonly name: string; readonly value: string; readonly reset: false }[] {
+  return Object.entries(fields ?? {}).map(([name, value]) => ({ name, value, reset: false }));
+}
+
+function createFieldEntries(
+  fields: Readonly<Record<string, string>> | undefined,
+): readonly { readonly name: string; readonly value: string }[] {
+  return Object.entries(fields ?? {}).map(([name, value]) => ({ name, value }));
+}
+
+function parseMutatedItem(
+  value: RawMutatedItem | null | undefined,
+  operation: "created" | "updated",
+): { readonly itemId: string; readonly language: string } {
+  if (
+    !value ||
+    typeof value.itemId !== "string" ||
+    typeof value.language?.name !== "string"
+  ) {
+    throw new Error(`Authoring API did not confirm the ${operation} item.`);
+  }
+  return { itemId: value.itemId, language: value.language.name };
 }
 
 function nextCursor(pageInfo: RawPageInfo | undefined, collectionName: string): string | undefined {

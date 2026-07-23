@@ -70,7 +70,10 @@ export const itemDetailsQuery = gql`
   ) {
     item(where: $where) {
       itemId
+      name
+      displayName
       path
+      hasChildren
       version
       language {
         name
@@ -151,8 +154,23 @@ export const nonStandardFieldIdsQuery = gql`
   }
 `;
 
-export const updateFieldValueMutation = gql`
-  mutation XmCloudSyncUpdateFieldValue($input: UpdateItemInput!) {
+export const createItemMutation = gql`
+  mutation XmCloudSyncCreateItem($input: CreateItemInput!) {
+    createItem(input: $input) {
+      item {
+        itemId
+        path
+        version
+        language {
+          name
+        }
+      }
+    }
+  }
+`;
+
+export const updateItemMutation = gql`
+  mutation XmCloudSyncUpdateItem($input: UpdateItemInput!) {
     updateItem(input: $input) {
       item {
         itemId
@@ -162,6 +180,14 @@ export const updateFieldValueMutation = gql`
           name
         }
       }
+    }
+  }
+`;
+
+export const deleteItemMutation = gql`
+  mutation XmCloudSyncDeleteItem($input: DeleteItemInput!) {
+    deleteItem(input: $input) {
+      successful
     }
   }
 `;

@@ -1,0 +1,31 @@
+{
+  "id": "update-modal-slide-in-structure",
+  "name": "Update modal slide-in structure",
+  "description": "Validates and applies table changes for this ModalSlideInButton through the Authoring API.",
+  "script": "update-modal-slide-in-structure.js",
+  "execution": {
+    "type": "javascript"
+  },
+  "inputs": [
+    {
+      "id": "market",
+      "type": "pick",
+      "label": "Market",
+      "description": "Select the market used for KVF region and trim-code lookup.",
+      "required": true,
+      "default": "uk",
+      "options": [
+        { "label": "United Kingdom", "value": "uk" },
+        { "label": "Germany", "value": "de" },
+        { "label": "Spain", "value": "es" },
+        { "label": "United States", "value": "us" },
+        { "label": "Canada", "value": "ca" },
+        { "label": "Australia", "value": "au" },
+        { "label": "South Africa", "value": "za" }
+      ]
+    }
+  ],
+  "matches": {
+    "templateIds": ["{6F0F698D-E5BD-4FBD-85EA-972976FA0E09}"]
+  }
+}
