@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.9.3
+
+- Added isolated JavaScript item tasks with a brokered Authoring API that never exposes connection secrets or access tokens to plug-in code.
+- Reused the extension's existing OAuth token cache, retry handling, GraphQL error handling, and item readers for plug-in operations.
+- Added brokered item read, child-listing, create, field-update, and delete operations, with cancellation propagated to in-flight Authoring API requests.
+- Preserved local PowerShell and optional SPE-remoting tasks, while keeping the new Authoring API broker JavaScript-only for this release.
+- Added a JavaScript task example and documented its manifest, runtime contract, item API, result handling, and security boundary.
+- Ported the modal slide-in inspection and update tasks to JavaScript, preserving page/rendering lookup, structure validation, KVF mapping, HTML transformation, and linked Table create/update/delete behavior without SPE.
+
 ## 0.9.2
 
 - Added reusable `text`, `number`, `pick`, and `boolean` manifest inputs and passed collected values through the task context.

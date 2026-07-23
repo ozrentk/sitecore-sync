@@ -31,6 +31,7 @@ export function activate(context: vscode.ExtensionContext): void {
     context.globalStorageUri,
     context.extensionUri,
     connectionStore,
+    authoringClient,
     taskOutput,
   );
   const extensionVersion = String(context.extension.packageJSON.version ?? "unknown");

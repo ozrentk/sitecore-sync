@@ -3,7 +3,11 @@ import { spawn } from "node:child_process";
 import * as path from "node:path";
 import * as vscode from "vscode";
 import type { ConnectionStore, SpeCredential } from "../connections/connectionStore";
-import type { AuthoringItemDetails } from "../sitecore/authoringClient";
+import type {
+  AuthoringContentClient,
+  AuthoringItemDetails,
+} from "../sitecore/authoringClient";
+import { JavaScriptTaskHost } from "./javascriptTaskHost";
 
 const maximumManifestCount = 200;
 const speInstallCommand = "Install-Module -Name SPE -Scope CurrentUser";
@@ -29,6 +33,7 @@ interface ItemTaskPlugin {
 
 type ItemTaskExecution =
   | { readonly type: "powershell" }
+  | { readonly type: "javascript" }
   | { readonly type: "spe-remoting" };
 
 interface ItemTaskInputBase {
@@ -116,13 +121,17 @@ interface ProcessResult {
 
 export class ItemTaskRunner implements vscode.Disposable {
   private running = false;
+  private readonly javaScriptHost: JavaScriptTaskHost;
 
   constructor(
     private readonly storageUri: vscode.Uri,
     private readonly extensionUri: vscode.Uri,
     private readonly connectionStore: ConnectionStore,
+    authoringClient: AuthoringContentClient,
     private readonly output: vscode.OutputChannel,
-  ) {}
+  ) {
+    this.javaScriptHost = new JavaScriptTaskHost(authoringClient);
+  }
 
   async selectAndRun(candidates: readonly ItemTaskCandidateContext[]): Promise<void> {
     if (this.running) {
@@ -283,20 +292,58 @@ export class ItemTaskRunner implements vscode.Disposable {
       this.output.appendLine("");
       this.output.show(true);
 
-      let processResult = await vscode.window.withProgress(
-        {
-          location: vscode.ProgressLocation.Notification,
-          title: `Running item task “${plugin.name}”`,
-          cancellable: plugin.execution.type === "powershell",
-        },
-        async (_progress, token) => await this.runPowerShell(
-          plugin,
-          contextUri.fsPath,
-          resultUri.fsPath,
-          token,
-          speCredential,
-        ),
-      );
+      let declaredResult: ItemTaskResult | undefined;
+      let processResult: ProcessResult;
+      if (plugin.execution.type === "javascript") {
+        const connection = this.connectionStore.get(candidate.connection.id);
+        const clientSecret = await this.connectionStore.getClientSecret(candidate.connection.id);
+        if (!connection || !clientSecret) {
+          throw new Error("The selected XM Cloud connection or its credentials are unavailable.");
+        }
+        const javaScriptOutcome = await vscode.window.withProgress(
+          {
+            location: vscode.ProgressLocation.Notification,
+            title: `Running item task “${plugin.name}”`,
+            cancellable: true,
+          },
+          async (_progress, token) => await this.javaScriptHost.run({
+            workerPath: vscode.Uri.joinPath(
+              this.extensionUri,
+              "out",
+              "javascriptTaskWorker.js",
+            ).fsPath,
+            scriptPath: plugin.scriptPath,
+            workingDirectory: plugin.directoryPath,
+            context: executionContext,
+            connection,
+            clientSecret,
+            defaultLanguage: candidate.language,
+            cancellationToken: token,
+            output: this.output,
+          }),
+        );
+        declaredResult = javaScriptOutcome.result;
+        processResult = {
+          exitCode: javaScriptOutcome.exitCode,
+          cancelled: javaScriptOutcome.cancelled,
+          outputText: "",
+        };
+      } else {
+        processResult = await vscode.window.withProgress(
+          {
+            location: vscode.ProgressLocation.Notification,
+            title: `Running item task “${plugin.name}”`,
+            cancellable: plugin.execution.type === "powershell",
+          },
+          async (_progress, token) => await this.runPowerShell(
+            plugin,
+            contextUri.fsPath,
+            resultUri.fsPath,
+            token,
+            speCredential,
+          ),
+        );
+      }
       if (
         plugin.execution.type === "spe-remoting" &&
         !processResult.cancelled &&
@@ -337,7 +384,7 @@ export class ItemTaskRunner implements vscode.Disposable {
         await vscode.window.showInformationMessage(`Task “${plugin.name}” was cancelled.`);
         return;
       }
-      const declaredResult = await readTaskResult(resultUri);
+      declaredResult ??= await readTaskResult(resultUri);
       const declaredStatus = typeof declaredResult?.status === "string"
         ? declaredResult.status.trim().toLowerCase()
         : undefined;
@@ -571,8 +618,16 @@ async function readPlugin(manifestUri: vscode.Uri): Promise<ItemTaskPlugin> {
   if (relativeScriptPath.startsWith("..") || path.isAbsolute(relativeScriptPath)) {
     throw new Error("The task script must be inside its manifest directory.");
   }
-  if (path.extname(scriptPath).toLowerCase() !== ".ps1") {
-    throw new Error("The initial task-plugin version supports .ps1 scripts only.");
+  const extension = path.extname(scriptPath).toLowerCase();
+  if (
+    (execution.type === "javascript" && ![".js", ".cjs", ".mjs"].includes(extension)) ||
+    (execution.type !== "javascript" && extension !== ".ps1")
+  ) {
+    throw new Error(
+      execution.type === "javascript"
+        ? "JavaScript tasks require a .js, .cjs, or .mjs script."
+        : "PowerShell tasks require a .ps1 script.",
+    );
   }
   try {
     const metadata = await vscode.workspace.fs.stat(vscode.Uri.file(scriptPath));
@@ -602,8 +657,10 @@ function parseExecution(value: unknown): ItemTaskExecution {
     throw new Error("Manifest property “execution” must be an object.");
   }
   const type = requiredText((value as Record<string, unknown>).type, "execution.type");
-  if (type !== "powershell" && type !== "spe-remoting") {
-    throw new Error("Manifest property “execution.type” must be “powershell” or “spe-remoting”.");
+  if (type !== "powershell" && type !== "javascript" && type !== "spe-remoting") {
+    throw new Error(
+      "Manifest property “execution.type” must be “javascript”, “powershell”, or “spe-remoting”.",
+    );
   }
   return { type };
 }

@@ -2,7 +2,7 @@
   "name": "sitecore-xm-cloud-sync",
   "displayName": "XM Cloud Sync",
   "description": "Compare and synchronize Sitecore XM Cloud authoring content from VS Code.",
-  "version": "0.9.2",
+  "version": "0.9.3",
   "publisher": "OzrenTK",
   "license": "MIT",
   "engines": {
@@ -11,7 +11,7 @@
   "capabilities": {
     "untrustedWorkspaces": {
       "supported": "limited",
-      "description": "Item task plug-ins are disabled because they execute PowerShell scripts from the workspace."
+      "description": "Item task plug-ins are disabled because they execute workspace JavaScript or PowerShell code."
     }
   },
   "categories": [
