@@ -55,6 +55,26 @@ try {
         -Password ([string] $credential.password) `
         -ConnectionUri $serverUrl
 
+    Write-Output "Validating SPE credentials..."
+    $probeMarker = "__XM_CLOUD_SPE_AUTHENTICATED__$([Guid]::NewGuid().ToString('N'))"
+    try {
+        $probeOutput = @(Invoke-RemoteScript -Session $session -Arguments @{
+            ProbeMarker = $probeMarker
+        } -ScriptBlock {
+            Write-Output $params.ProbeMarker
+        })
+    } catch {
+        $probeMessage = $_.Exception.Message
+        if ($probeMessage -match "Element 'Objs'.*powershell/2004/04.*was not found") {
+            throw "SPE authentication failed. Sitecore rejected the supplied username or password."
+        }
+        throw
+    }
+    if (-not ($probeOutput | Where-Object { [string] $_ -eq $probeMarker })) {
+        throw "SPE authentication failed or the remoting service returned no validation response."
+    }
+    Write-Output "SPE credentials accepted."
+
     $arguments = @{
         ContextJson = $contextJson
         ScriptText = $scriptText

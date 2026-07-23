@@ -5,6 +5,7 @@
 - Added reusable `text`, `number`, `pick`, and `boolean` manifest inputs and passed collected values through the task context.
 - Added optional `spe-remoting` task execution against the CM environment from the clicked comparison side.
 - Prompted for SPE credentials only when an SPE task requires them, stored them per connection in VS Code Secret Storage, and offered replacement after an authentication failure.
+- Validated SPE credentials with a read-only probe before sending the actual task and translated Sitecore's malformed login-failure response into the credential-replacement flow.
 - Removed stored SPE credentials automatically when their XM Cloud Sync connection is deleted.
 - Checked for the local `SPE` remoting module before collecting task inputs or credentials, offered non-blocking installation guidance when it is missing, and released the task lock immediately.
 
