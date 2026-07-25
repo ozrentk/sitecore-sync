@@ -8,6 +8,7 @@
 - Remembered the last selected subtree transfer type globally and placed it first in the next transfer picker.
 - Displayed each subtree transfer type and its preflight counts in the Transfers panel.
 - Allowed exact-mirror transfers to replace same-path items with different IDs, counting the target IDs as removals and the source IDs as additions.
+- Clarified that Exact mirror deletes and recreates the target subtree, and labeled its preflight counts as matching, source-only, and target-only.
 
 ## 0.9.3
 

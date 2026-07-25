@@ -2479,7 +2479,12 @@ function subtreeTransferConfirmation(
     case "exactMirror":
       return {
         message: "Replace target tree?",
-        detail: `Target-only items under ${sourcePath} will be deleted.\n\n${counts}`,
+        detail:
+          "The target subtree will be deleted and recreated from source.\n\n" +
+          `Path: ${sourcePath}\n\n` +
+          `Source: ${preflight.sourceItems} item(s) · Target: ${preflight.targetItems} item(s)\n` +
+          `Matching: ${preflight.updateItems} · Source-only: ${preflight.addItems} · ` +
+          `Target-only: ${preflight.removeItems}`,
         action: "Replace",
       };
   }
