@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.9.4
+
+- Added **Add missing content**, **Synchronize from source**, and **Exact mirror** subtree transfer types backed by the Content Transfer API's native merge strategies.
+- Added a cancellable structural preflight that reports source and target item counts plus the items that will be added, overwritten, or removed before a transfer is queued.
+- Added a short destructive confirmation for exact-mirror transfers without a separate production-target checkbox.
+- Remembered the last selected subtree transfer type globally and placed it first in the next transfer picker.
+- Displayed each subtree transfer type and its preflight counts in the Transfers panel.
+
 ## 0.9.3
 
 - Added isolated JavaScript item tasks with a brokered Authoring API that never exposes connection secrets or access tokens to plug-in code.

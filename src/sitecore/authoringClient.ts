@@ -53,6 +53,11 @@ export type ContentTransferProgress =
   | { readonly stage: "sitecore"; readonly completed: number; readonly total: number }
   | { readonly stage: "verifying" };
 
+export type ContentTransferMergeStrategy =
+  | "KeepExistingItem"
+  | "OverrideExistingItem"
+  | "OverrideExistingTree";
+
 interface TestQueryResponse {
   readonly data?: {
     readonly sites?: readonly {
@@ -262,6 +267,7 @@ export class AuthoringContentClient {
     expectedSourceItemId: string,
     sourceLanguage: string,
     destinationLanguage: string,
+    mergeStrategy: ContentTransferMergeStrategy,
     signal: AbortSignal,
     onCheckpoint?: (checkpoint: ContentTransferResult) => Promise<void>,
     onProgress?: (progress: ContentTransferProgress) => Promise<void>,
@@ -334,7 +340,7 @@ export class AuthoringContentClient {
             DataTrees: [{
               ItemPath: itemPath,
               Scope: "ItemAndDescendants",
-              MergeStrategy: "OverrideExistingItem",
+              MergeStrategy: mergeStrategy,
             }],
             Database: "master",
           },
@@ -548,6 +554,14 @@ export class AuthoringContentClient {
       if (!destinationChildIds.includes(childId)) {
         throw new Error(`Destination verification did not find transferred child ${childId}.`);
       }
+    }
+    if (
+      mergeStrategy === "OverrideExistingTree" &&
+      destinationChildIds.some((childId) => !sourceChildIds.includes(childId))
+    ) {
+      throw new Error(
+        "Destination verification found a target-only direct child after the exact-mirror transfer.",
+      );
     }
 
     // Destination .raif blobs are intentionally retained. Sitecore exposes imported items

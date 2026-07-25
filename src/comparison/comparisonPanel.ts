@@ -5,6 +5,7 @@ import {
   type AuthoringItemDetails,
   type AuthoringItemLocator,
   type AuthoringLanguage,
+  type AuthoringTreeItem,
   type AuthoringTreeLevel,
 } from "../sitecore/authoringClient";
 import {
@@ -16,6 +17,9 @@ import type { TransferQueueStore } from "../transfers/transferQueueStore";
 import {
   fieldStateFingerprint,
   normalizeTransferId,
+  subtreeTransferModeLabel,
+  type SubtreeTransferMode,
+  type SubtreeTransferPreflight,
   type TransferRecord,
 } from "../transfers/transferTypes";
 import {
@@ -25,6 +29,7 @@ import {
 
 const selectionKey = "sitecoreXmCloudSync.comparisonSelection.v1";
 const fieldTransferConfirmationKey = "sitecoreXmCloudSync.fieldTransferConfirmationAccepted.v1";
+const subtreeTransferModeKey = "sitecoreXmCloudSync.subtreeTransferMode.v1";
 const defaultLanguage = "en";
 const authoringRootPath = "/sitecore";
 const traversalConcurrencyPerSide = 2;
@@ -82,6 +87,10 @@ interface RefreshPlanEntry {
 interface TraversalEntry {
   readonly locator: AuthoringItemLocator;
   readonly requestedItemId?: string;
+}
+
+interface SubtreeTransferModeQuickPickItem extends vscode.QuickPickItem {
+  readonly mode: SubtreeTransferMode;
 }
 
 class FieldDiffContentProvider implements vscode.TextDocumentContentProvider {
@@ -737,12 +746,39 @@ export class ComparisonPanelManager implements vscode.Disposable {
       return;
     }
 
+    const mode = await this.pickSubtreeTransferMode();
+    if (!mode) {
+      return;
+    }
+    await this.globalState.update(subtreeTransferModeKey, mode);
+
+    let preflight: SubtreeTransferPreflight;
+    try {
+      preflight = await this.preflightSubtreeTransfer(
+        sourceConnection.id,
+        targetConnection.id,
+        sourceItemId,
+        sourcePath,
+        this.sideLanguage(sourceSide),
+        this.sideLanguage(targetSide),
+        mode,
+      );
+    } catch (error: unknown) {
+      if (!isAbortError(error)) {
+        await vscode.window.showErrorMessage(
+          `Unable to prepare the subtree transfer: ${errorMessage(error)}`,
+        );
+      }
+      return;
+    }
+
+    const confirmation = subtreeTransferConfirmation(mode, sourcePath, preflight);
     const confirmed = await vscode.window.showWarningMessage(
-      `Add ${sourcePath} and all descendants to Transfers from “${sourceConnection.name}” to “${targetConnection.name}”? Processing transfers every language and version and overwrites matching target items using OverrideExistingItem.`,
-      { modal: true },
-      "Add Transfer",
+      confirmation.message,
+      { modal: true, detail: confirmation.detail },
+      confirmation.action,
     );
-    if (confirmed !== "Add Transfer") {
+    if (confirmed !== confirmation.action) {
       return;
     }
     const duplicateKey = [
@@ -754,6 +790,8 @@ export class ComparisonPanelManager implements vscode.Disposable {
     ].join(":");
     const queued = await this.transferQueue.enqueue({
       kind: "subtree",
+      mode,
+      preflight,
       duplicateKey,
       direction,
       sourceConnectionId: sourceConnection.id,
@@ -769,8 +807,198 @@ export class ComparisonPanelManager implements vscode.Disposable {
       targetRefreshPlan,
     });
     await vscode.window.showInformationMessage(queued.added
-      ? `Added ${sourcePath} to Transfers.`
+      ? `Added ${subtreeTransferModeLabel(mode).toLowerCase()} transfer for ${sourcePath}.`
       : `${sourcePath} is already queued for this destination.`);
+  }
+
+  private async pickSubtreeTransferMode(): Promise<SubtreeTransferMode | undefined> {
+    const remembered = this.globalState.get<SubtreeTransferMode>(
+      subtreeTransferModeKey,
+      "synchronize",
+    );
+    const modes: readonly SubtreeTransferModeQuickPickItem[] = [
+      {
+        mode: "addMissing",
+        label: "$(add) Add missing content",
+        description: "Keep existing target items",
+        detail: "Adds source items that do not exist at the target; nothing is deleted.",
+      },
+      {
+        mode: "synchronize",
+        label: "$(sync) Synchronize from source",
+        description: "Add and update",
+        detail: "Adds missing items and replaces matching target items; target-only items remain.",
+      },
+      {
+        mode: "exactMirror",
+        label: "$(replace-all) Exact mirror",
+        description: "Add, update, and remove",
+        detail: "Replaces the target subtree and deletes target-only items.",
+      },
+    ];
+    const ordered = [
+      ...modes.filter((item) => item.mode === remembered).map((item) => ({
+        ...item,
+        description: `${item.description} · last used`,
+      })),
+      ...modes.filter((item) => item.mode !== remembered),
+    ];
+    return (await vscode.window.showQuickPick(ordered, {
+      title: "Choose subtree transfer type",
+      placeHolder: "How should the target subtree be handled?",
+      matchOnDescription: true,
+      matchOnDetail: true,
+    }))?.mode;
+  }
+
+  private async preflightSubtreeTransfer(
+    sourceConnectionId: string,
+    targetConnectionId: string,
+    expectedSourceItemId: string,
+    sourcePath: string,
+    sourceLanguage: string,
+    targetLanguage: string,
+    mode: SubtreeTransferMode,
+  ): Promise<SubtreeTransferPreflight> {
+    return vscode.window.withProgress(
+      {
+        location: vscode.ProgressLocation.Notification,
+        title: `Checking ${itemNameFromPath(sourcePath)} before transfer`,
+        cancellable: true,
+      },
+      async (progress, cancellationToken) => {
+        const controller = new AbortController();
+        const cancellation = cancellationToken.onCancellationRequested(() =>
+          controller.abort(new DOMException("Cancelled.", "AbortError")));
+        let inspectedLevels = 0;
+        const report = (): void => {
+          inspectedLevels += 1;
+          progress.report({ message: `${inspectedLevels} tree level(s) checked` });
+        };
+        try {
+          const destinationParentPath = sourcePath.slice(0, sourcePath.lastIndexOf("/"));
+          const [sourceRoot, targetParent] = await Promise.all([
+            this.getTreeLevel(
+              sourceConnectionId,
+              sourceLanguage,
+              { path: sourcePath },
+              controller.signal,
+            ),
+            this.getTreeLevel(
+              targetConnectionId,
+              targetLanguage,
+              { path: destinationParentPath },
+              controller.signal,
+            ),
+          ]);
+          if (
+            normalizeItemId(sourceRoot.item.itemId) !==
+            normalizeItemId(expectedSourceItemId)
+          ) {
+            throw new Error(
+              `${sourcePath} now resolves to item ${sourceRoot.item.itemId}. Refresh the comparison and try again.`,
+            );
+          }
+          const targetRootItem = targetParent.children.find(
+            (item) => normalizedPath(item.path) === normalizedPath(sourcePath),
+          );
+          if (
+            targetRootItem &&
+            normalizeItemId(targetRootItem.itemId) !== normalizeItemId(sourceRoot.item.itemId)
+          ) {
+            throw new Error(
+              `The target path already exists with a different item ID (${targetRootItem.itemId}).`,
+            );
+          }
+
+          const [sourceItems, targetItems] = await Promise.all([
+            this.collectSubtreeInventory(
+              sourceConnectionId,
+              sourceLanguage,
+              sourceRoot,
+              controller.signal,
+              report,
+            ),
+            targetRootItem
+              ? this.getTreeLevel(
+                  targetConnectionId,
+                  targetLanguage,
+                  { itemId: targetRootItem.itemId },
+                  controller.signal,
+                ).then((targetRoot) => this.collectSubtreeInventory(
+                  targetConnectionId,
+                  targetLanguage,
+                  targetRoot,
+                  controller.signal,
+                  report,
+                ))
+              : Promise.resolve(new Map<string, AuthoringTreeItem>()),
+          ]);
+
+          const targetPaths = new Map(
+            [...targetItems.values()].map((item) => [
+              normalizedPath(item.path),
+              normalizeItemId(item.itemId),
+            ]),
+          );
+          for (const sourceItem of sourceItems.values()) {
+            const targetId = targetPaths.get(normalizedPath(sourceItem.path));
+            if (targetId && targetId !== normalizeItemId(sourceItem.itemId)) {
+              throw new Error(
+                `The target path ${sourceItem.path} exists with a different item ID.`,
+              );
+            }
+          }
+
+          const sourceIds = new Set(sourceItems.keys());
+          const targetIds = new Set(targetItems.keys());
+          const commonItems = [...sourceIds].filter((id) => targetIds.has(id)).length;
+          return {
+            sourceItems: sourceIds.size,
+            targetItems: targetIds.size,
+            addItems: sourceIds.size - commonItems,
+            updateItems: mode === "addMissing" ? 0 : commonItems,
+            removeItems: mode === "exactMirror" ? targetIds.size - commonItems : 0,
+          };
+        } finally {
+          cancellation.dispose();
+        }
+      },
+    );
+  }
+
+  private async collectSubtreeInventory(
+    connectionId: string,
+    language: string,
+    root: AuthoringTreeLevel,
+    signal: AbortSignal,
+    reportLevel: () => void,
+  ): Promise<Map<string, AuthoringTreeItem>> {
+    const items = new Map<string, AuthoringTreeItem>();
+    const addLevel = (level: AuthoringTreeLevel): readonly AuthoringTreeItem[] => {
+      items.set(normalizeItemId(level.item.itemId), level.item);
+      for (const child of level.children) {
+        items.set(normalizeItemId(child.itemId), child);
+      }
+      reportLevel();
+      return level.children.filter((child) => child.hasChildren);
+    };
+    let frontier = [...addLevel(root)];
+    while (frontier.length) {
+      throwIfAborted(signal);
+      const levels = await mapWithConcurrency(
+        frontier,
+        traversalConcurrencyPerSide,
+        (item) => this.getTreeLevel(
+          connectionId,
+          language,
+          { itemId: item.itemId },
+          signal,
+        ),
+      );
+      frontier = levels.flatMap((level) => [...addLevel(level)]);
+    }
+    return items;
   }
 
   private async confirmAndLoadSubtree(
@@ -2214,6 +2442,44 @@ function throwIfAborted(signal: AbortSignal): void {
 
 function normalizeItemId(itemId: string): string {
   return itemId.replace(/[{}-]/g, "").toLowerCase();
+}
+
+function normalizedPath(path: string): string {
+  return path.replace(/\/+$/u, "").toLowerCase();
+}
+
+function itemNameFromPath(path: string): string {
+  return path.split("/").filter(Boolean).at(-1) ?? path;
+}
+
+function subtreeTransferConfirmation(
+  mode: SubtreeTransferMode,
+  sourcePath: string,
+  preflight: SubtreeTransferPreflight,
+): { readonly message: string; readonly detail: string; readonly action: string } {
+  const counts =
+    `Source: ${preflight.sourceItems} item(s) · Target: ${preflight.targetItems} item(s)\n` +
+    `Will add: ${preflight.addItems} · update: ${preflight.updateItems} · remove: ${preflight.removeItems}`;
+  switch (mode) {
+    case "addMissing":
+      return {
+        message: "Add missing content?",
+        detail: `Existing target items under ${sourcePath} will be kept.\n\n${counts}`,
+        action: "Add Transfer",
+      };
+    case "synchronize":
+      return {
+        message: "Synchronize target tree?",
+        detail: `Matching items under ${sourcePath} will be replaced. Target-only items will remain.\n\n${counts}`,
+        action: "Add Transfer",
+      };
+    case "exactMirror":
+      return {
+        message: "Replace target tree?",
+        detail: `Target-only items under ${sourcePath} will be deleted.\n\n${counts}`,
+        action: "Replace",
+      };
+  }
 }
 
 function favoriteAncestorPaths(path: string): readonly string[] {
