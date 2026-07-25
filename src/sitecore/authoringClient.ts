@@ -301,6 +301,7 @@ export class AuthoringContentClient {
     );
     if (
       existingDestination &&
+      mergeStrategy !== "OverrideExistingTree" &&
       normalizeGuid(existingDestination.itemId) !== normalizeGuid(sourceItem.item.itemId)
     ) {
       throw new Error(
