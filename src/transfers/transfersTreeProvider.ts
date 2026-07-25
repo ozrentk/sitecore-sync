@@ -1,7 +1,11 @@
 import * as vscode from "vscode";
 import type { ConnectionStore } from "../connections/connectionStore";
 import type { TransferQueueStore } from "./transferQueueStore";
-import type { TransferRecord } from "./transferTypes";
+import {
+  subtreeTransferMode,
+  subtreeTransferModeLabel,
+  type TransferRecord,
+} from "./transferTypes";
 
 export class TransferTreeItem extends vscode.TreeItem {
   constructor(readonly record: TransferRecord, description: string) {
@@ -76,7 +80,9 @@ implements vscode.TreeDataProvider<TransferTreeItem>, vscode.Disposable {
 function transferLabel(record: TransferRecord): string {
   return record.kind === "fieldValue"
     ? `Field ${fieldName(record)} · ${itemName(record.source.itemPath)}`
-    : `Subtree · ${itemName(record.sourcePath)}`;
+    : `Subtree · ${itemName(record.sourcePath)} · ${
+        subtreeTransferModeLabel(subtreeTransferMode(record))
+      }`;
 }
 
 function itemName(path: string): string {
@@ -164,8 +170,18 @@ function transferTooltip(record: TransferRecord): vscode.MarkdownString {
     tooltip.appendMarkdown(`Source item: \`${record.source.itemId}\` (${record.source.language}, v${record.source.version})  \n`);
     tooltip.appendMarkdown(`Target item: \`${record.target.itemId}\` (${record.target.language}, v${record.target.version})  \n`);
   } else {
+    tooltip.appendMarkdown(
+      `Type: ${subtreeTransferModeLabel(subtreeTransferMode(record))}  \n`,
+    );
     tooltip.appendMarkdown(`Path: ${escapeMarkdown(record.sourcePath)}  \n`);
     tooltip.appendMarkdown(`Source item: \`${record.sourceItemId}\`  \n`);
+    if (record.preflight) {
+      tooltip.appendMarkdown(
+        `Preflight: source ${record.preflight.sourceItems}, target ${record.preflight.targetItems}, ` +
+        `add ${record.preflight.addItems}, update ${record.preflight.updateItems}, ` +
+        `remove ${record.preflight.removeItems}  \n`,
+      );
+    }
     if (record.checkpoint) {
       tooltip.appendMarkdown(`Remote transfer: \`${record.checkpoint.transferId}\`  \n`);
     }

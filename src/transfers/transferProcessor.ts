@@ -14,6 +14,7 @@ import { TransferQueueStore } from "./transferQueueStore";
 import {
   fieldStateFingerprint,
   normalizeTransferId,
+  subtreeTransferMode,
   type FieldValueTransferRecord,
   type SubtreeTransferRecord,
   type TransferRecord,
@@ -265,6 +266,7 @@ export class TransferProcessor implements vscode.Disposable {
         record.sourceItemId,
         record.sourceLanguage,
         record.targetLanguage,
+        mergeStrategy(subtreeTransferMode(record)),
         controller.signal,
         async (nextCheckpoint) => {
           await this.persistSubtreeCheckpoint(record.id, nextCheckpoint);
@@ -555,6 +557,16 @@ export class TransferProcessor implements vscode.Disposable {
     this.startEmitter.dispose();
     this.completeEmitter.dispose();
     this.failureEmitter.dispose();
+  }
+}
+
+function mergeStrategy(
+  mode: ReturnType<typeof subtreeTransferMode>,
+): "KeepExistingItem" | "OverrideExistingItem" | "OverrideExistingTree" {
+  switch (mode) {
+    case "addMissing": return "KeepExistingItem";
+    case "synchronize": return "OverrideExistingItem";
+    case "exactMirror": return "OverrideExistingTree";
   }
 }
 

@@ -7,6 +7,16 @@ import type {
 import type { DeploymentBaseline } from "../sitecore/deploymentClient";
 
 export type TransferProcessorState = "paused" | "running" | "pausing";
+export type SubtreeTransferMode = "addMissing" | "synchronize" | "exactMirror";
+
+export interface SubtreeTransferPreflight {
+  readonly sourceItems: number;
+  readonly targetItems: number;
+  readonly addItems: number;
+  readonly updateItems: number;
+  readonly removeItems: number;
+}
+
 export type TransferRecordStatus =
   | "queued"
   | "preflighting"
@@ -66,6 +76,8 @@ export interface FieldValueTransferRecord extends TransferRecordBase {
 
 export interface SubtreeTransferRecord extends TransferRecordBase {
   readonly kind: "subtree";
+  readonly mode?: SubtreeTransferMode;
+  readonly preflight?: SubtreeTransferPreflight;
   readonly direction: "leftToRight" | "rightToLeft";
   readonly sourceConnectionId: string;
   readonly sourceConnectionName: string;
@@ -131,6 +143,20 @@ export function fieldStateFingerprint(
 
 export function normalizeTransferId(value: string): string {
   return normalizeId(value);
+}
+
+export function subtreeTransferMode(
+  record: Pick<SubtreeTransferRecord, "mode">,
+): SubtreeTransferMode {
+  return record.mode ?? "synchronize";
+}
+
+export function subtreeTransferModeLabel(mode: SubtreeTransferMode): string {
+  switch (mode) {
+    case "addMissing": return "Add missing";
+    case "synchronize": return "Synchronize";
+    case "exactMirror": return "Exact mirror";
+  }
 }
 
 function normalizeId(value: string): string {
