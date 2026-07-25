@@ -904,6 +904,7 @@ export class ComparisonPanelManager implements vscode.Disposable {
           );
           if (
             targetRootItem &&
+            mode !== "exactMirror" &&
             normalizeItemId(targetRootItem.itemId) !== normalizeItemId(sourceRoot.item.itemId)
           ) {
             throw new Error(
@@ -941,12 +942,14 @@ export class ComparisonPanelManager implements vscode.Disposable {
               normalizeItemId(item.itemId),
             ]),
           );
-          for (const sourceItem of sourceItems.values()) {
-            const targetId = targetPaths.get(normalizedPath(sourceItem.path));
-            if (targetId && targetId !== normalizeItemId(sourceItem.itemId)) {
-              throw new Error(
-                `The target path ${sourceItem.path} exists with a different item ID.`,
-              );
+          if (mode !== "exactMirror") {
+            for (const sourceItem of sourceItems.values()) {
+              const targetId = targetPaths.get(normalizedPath(sourceItem.path));
+              if (targetId && targetId !== normalizeItemId(sourceItem.itemId)) {
+                throw new Error(
+                  `The target path ${sourceItem.path} exists with a different item ID.`,
+                );
+              }
             }
           }
 
