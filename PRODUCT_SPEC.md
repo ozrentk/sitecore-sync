@@ -195,6 +195,8 @@ Item tooltips report field comparison as not loaded, loading, equal, different, 
 
 TODO: Decide whether Authoring field queries should use `withLanguageFallback: true` or `false`. The decision must distinguish comparison of the stored localization state from comparison of the effective value visible through language fallback. Before settling it, verify missing-language behavior, `containsFallbackValue`, item-level fallback, field-level fallback, and how a fallback-derived source value should generate a synchronization operation. Do not let fallback silently hide a missing translation or cause a resolved fallback value to be written as if it were locally stored.
 
+TODO: Replace the subtree-transfer preflight message `X tree levels checked` with clearer wording such as `X branches scanned` or `X parent items scanned`. The counter represents source and target parent items whose direct-child collections have been loaded, not the depth of either tree, and there is no known total until traversal finishes.
+
 ## Text normalization
 
 Text comparison has a user configuration setting:
