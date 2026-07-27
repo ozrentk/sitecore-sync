@@ -30,6 +30,7 @@ export interface PublishSnapshot {
 export interface PublishFieldSelection {
   readonly itemId: string;
   readonly fieldName: string;
+  readonly browserSelector?: string;
 }
 
 export interface ReferenceEdge {
@@ -39,7 +40,13 @@ export interface ReferenceEdge {
 }
 
 export interface TraceStage {
-  readonly id: "authoring" | "publishing" | "edgeItem" | "edgeLayout" | "application";
+  readonly id:
+    | "authoring"
+    | "publishing"
+    | "edgeItem"
+    | "edgeLayout"
+    | "application"
+    | "browserDom";
   readonly label: string;
   readonly status: TraceStageStatus;
   readonly summary?: string;

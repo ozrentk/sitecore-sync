@@ -9,6 +9,7 @@
 - Added contextual Publish Trace recovery actions: retry failed diagnostics without republishing, start a newly confirmed publish after publishing failure, or re-check saved operation IDs after local tracking was abandoned.
 - Preserved up to ten previous trace attempts with their conclusions and stage evidence, and never started a missing publishing batch during a status-only re-check.
 - Reported successful application responses that omit expected text as **inconclusive** instead of failed, because a plain HTTP probe cannot observe text added later by browser-side rendering or hydration.
+- Added optional Browser DOM assertions for selected Traced-publish fields. Users can associate CSS selectors with assertions, then verify hydrated `textContent` in an isolated installed Chrome or Edge browser without changing the ordinary HTTP-response check.
 
 ## 0.9.5
 

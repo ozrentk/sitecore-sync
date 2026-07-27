@@ -4,7 +4,7 @@ await Promise.all([
   build({
     entryPoints: ["src/extension.ts"],
     bundle: true,
-    external: ["vscode"],
+    external: ["vscode", "playwright-core"],
     format: "cjs",
     platform: "node",
     target: "node20",
