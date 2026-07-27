@@ -2,7 +2,7 @@
   "name": "sitecore-xm-cloud-sync",
   "displayName": "XM Cloud Sync",
   "description": "Compare and synchronize Sitecore XM Cloud authoring content from VS Code.",
-  "version": "0.9.4",
+  "version": "0.9.5",
   "publisher": "OzrenTK",
   "license": "MIT",
   "engines": {
@@ -37,6 +37,9 @@
     "onCommand:xmCloudSync.openFavorite",
     "onCommand:xmCloudSync.removeFavorite",
     "onCommand:xmCloudSync.showLogs",
+    "onCommand:xmCloudSync.showPublishOutput",
+    "onCommand:xmCloudSync.showLatestPublishTrace",
+    "onCommand:xmCloudSync.configurePublishing",
     "onCommand:xmCloudSync.compareWithConnection",
     "onCommand:xmCloudSync.refreshAll",
     "onCommand:xmCloudSync.openProductSpec"
@@ -86,6 +89,18 @@
       {
         "command": "xmCloudSync.showLogs",
         "title": "XM Cloud Sync: Show Logs"
+      },
+      {
+        "command": "xmCloudSync.showPublishOutput",
+        "title": "XM Cloud Sync: Show Publish Output"
+      },
+      {
+        "command": "xmCloudSync.showLatestPublishTrace",
+        "title": "XM Cloud Sync: Show Latest Publish Trace"
+      },
+      {
+        "command": "xmCloudSync.configurePublishing",
+        "title": "XM Cloud Sync: Configure Traced Publishing"
       },
       {
         "command": "xmCloudSync.compareWithConnection",
@@ -229,6 +244,11 @@
         },
         {
           "command": "xmCloudSync.configureDeploymentMonitoring",
+          "when": "view == xmCloudSync.connections && viewItem == xmCloudConnection",
+          "group": "1_connections"
+        },
+        {
+          "command": "xmCloudSync.configurePublishing",
           "when": "view == xmCloudSync.connections && viewItem == xmCloudConnection",
           "group": "1_connections"
         },

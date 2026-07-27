@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.9.5
+
+- Added **Publish → Standard publish…**, **Traced publish…**, and **Power publish…** to each available comparison-side item.
+- Added official Authoring GraphQL publishing with Smart/Full mode, exact language, optional descendants and related items, operation-ID polling, non-retried publish mutations, and restart recovery.
+- Added Traced publish verification across the authoring snapshot, raw Experience Edge items, optional rendered route layout, and optional public application response.
+- Added Power publish discovery of an editable **Observed Reference Graph**, dependency-first item ordering, and root/page-last publishing in individually monitored batches.
+- Added one progressive **Publish Trace** document with expandable evidence and graph details, while keeping transport and polling details in **XM Cloud Publish** output.
+- Stored Experience Edge tokens in VS Code Secret Storage and made the generic application-response probe optional, public-URL based, and independent of Vercel credentials.
+- Added per-connection traced-publishing configuration for replacing the Edge endpoint, token, or default Sitecore site.
+- Persisted the latest 30 publish runs and wrote redacted JSON publish journals beneath VS Code extension storage.
+
 ## 0.9.4
 
 - Added **Add missing content**, **Synchronize from source**, and **Exact mirror** subtree transfer types backed by the Content Transfer API's native merge strategies.

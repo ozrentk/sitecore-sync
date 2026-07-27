@@ -26,6 +26,7 @@ import {
   ItemTaskRunner,
   type ItemTaskCandidateContext,
 } from "../tasks/itemTaskRunner";
+import type { PublishingManager } from "../publishing/publishingManager";
 
 const selectionKey = "sitecoreXmCloudSync.comparisonSelection.v1";
 const fieldTransferConfirmationKey = "sitecoreXmCloudSync.fieldTransferConfirmationAccepted.v1";
@@ -48,6 +49,7 @@ interface WebviewMessage {
   readonly side?: unknown;
   readonly connectionId?: unknown;
   readonly itemId?: unknown;
+  readonly path?: unknown;
   readonly rowKey?: unknown;
   readonly leftItemId?: unknown;
   readonly rightItemId?: unknown;
@@ -145,6 +147,7 @@ export class ComparisonPanelManager implements vscode.Disposable {
     private readonly authoringClient: AuthoringContentClient,
     private readonly transferQueue: TransferQueueStore,
     private readonly itemTaskRunner: ItemTaskRunner,
+    private readonly publishingManager: PublishingManager,
     private readonly log: vscode.LogOutputChannel,
   ) {
     this.connectionSignature = this.currentConnectionSignature();
@@ -599,6 +602,42 @@ export class ComparisonPanelManager implements vscode.Disposable {
       (typeof message.leftItemId === "string" || typeof message.rightItemId === "string")
     ) {
       await this.runItemTask(message);
+      return;
+    }
+
+    if (
+      (message.type === "standardPublish" ||
+        message.type === "tracedPublish" ||
+        message.type === "powerPublish") &&
+      (message.side === "left" || message.side === "right") &&
+      typeof message.itemId === "string" &&
+      typeof message.path === "string"
+    ) {
+      const selection = this.getSelection();
+      const connectionId = message.side === "left"
+        ? selection.leftConnectionId
+        : selection.rightConnectionId;
+      const language = message.side === "left"
+        ? selection.leftLanguage
+        : selection.rightLanguage;
+      if (!connectionId) {
+        await vscode.window.showErrorMessage("The selected comparison side has no connection.");
+        return;
+      }
+      await this.publishingManager.start(
+        message.type === "standardPublish"
+          ? "standard"
+          : message.type === "tracedPublish"
+            ? "traced"
+            : "power",
+        {
+          connectionId,
+          side: message.side,
+          itemId: message.itemId,
+          path: message.path,
+          language,
+        },
+      );
       return;
     }
 
