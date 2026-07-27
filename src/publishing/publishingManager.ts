@@ -15,6 +15,7 @@ import type {
   PublishRun,
   PublishSnapshot,
   PublishTarget,
+  PublishTraceAttempt,
   PublishingSiteProfile,
   ReferenceEdge,
   TraceStage,
@@ -26,6 +27,10 @@ const profilesKey = "sitecoreXmCloudSync.publishingProfiles.v1";
 const maximumReferenceItems = 50;
 const maximumReferenceDepth = 8;
 const maximumTracedFieldItems = 200;
+const retryVerificationCommand = "xmCloudSync.retryPublishTraceVerification";
+const republishTraceCommand = "xmCloudSync.republishTrace";
+const recheckStatusCommand = "xmCloudSync.recheckPublishTraceStatus";
+const diagnosticStageIds = ["edgeItem", "edgeLayout", "application"] as const;
 
 interface PublishOptions {
   readonly mode: PublishMode;
@@ -354,6 +359,217 @@ export class PublishingManager implements vscode.Disposable {
       this.openTrace(latest);
     } else {
       void vscode.window.showInformationMessage("No publish traces have been recorded yet.");
+    }
+  }
+
+  async retryFailedVerification(runId: string): Promise<void> {
+    const original = this.listRuns().find((run) => run.id === runId);
+    if (!original) {
+      await vscode.window.showErrorMessage("The selected publish trace is no longer available.");
+      return;
+    }
+    if (this.controllers.size > 0) {
+      await vscode.window.showInformationMessage(
+        "Wait for the current publish operation or verification retry to finish.",
+      );
+      return;
+    }
+    const firstFailedStage = diagnosticStageIds.find((id) => {
+      const status = original.stages.find((stage) => stage.id === id)?.status;
+      return status === "diverged" || status === "failed";
+    });
+    if (!firstFailedStage) {
+      await vscode.window.showInformationMessage(
+        "This trace has no failed diagnostic stage to retry.",
+      );
+      return;
+    }
+    const settings = await this.loadRetrySettings(original);
+    if (!settings) {
+      return;
+    }
+    const controller = new AbortController();
+    let run = prepareDiagnosticRetry(original, firstFailedStage);
+    await this.saveRun(run);
+    this.openTrace(run);
+    this.controllers.set(run.id, controller);
+    try {
+      await vscode.window.withProgress(
+        {
+          location: vscode.ProgressLocation.Notification,
+          title: `Retrying publish verification: ${run.rootPath}`,
+          cancellable: true,
+        },
+        async (_progress, token) => {
+          const subscription = token.onCancellationRequested(() => controller.abort());
+          try {
+            const firstIndex = diagnosticStageIds.indexOf(firstFailedStage);
+            if (firstIndex <= diagnosticStageIds.indexOf("edgeItem")) {
+              run = await this.verifyEdgeItems(run, settings, controller.signal);
+            }
+            if (firstIndex <= diagnosticStageIds.indexOf("edgeLayout")) {
+              run = await this.verifyLayout(run, settings, controller.signal);
+            }
+            if (firstIndex <= diagnosticStageIds.indexOf("application")) {
+              run = await this.verifyApplication(run, controller.signal);
+            }
+          } finally {
+            subscription.dispose();
+          }
+        },
+      );
+      await this.complete(run, classify(run));
+    } catch (error: unknown) {
+      if (isAbort(error)) {
+        await this.saveRun(original);
+        this.renderIfDisplayed(original);
+        await vscode.window.showInformationMessage("Verification retry was cancelled.");
+        return;
+      }
+      const failed = finishRetryWithFailure(run, "Verification retry failed", errorMessage(error));
+      await this.saveRun(failed);
+      this.renderIfDisplayed(failed);
+      await vscode.window.showErrorMessage(
+        failed.conclusion ?? "Verification retry failed.",
+      );
+    } finally {
+      this.controllers.delete(run.id);
+    }
+  }
+
+  async publishAgain(runId: string): Promise<void> {
+    const run = this.listRuns().find((candidate) => candidate.id === runId);
+    if (!run) {
+      await vscode.window.showErrorMessage("The selected publish trace is no longer available.");
+      return;
+    }
+    await this.start(run.kind, {
+      connectionId: run.connectionId,
+      side: "left",
+      itemId: run.rootItemId,
+      path: run.rootPath,
+      language: run.language,
+    });
+  }
+
+  async recheckPublishStatus(runId: string): Promise<void> {
+    const original = this.listRuns().find((run) => run.id === runId);
+    if (!original) {
+      await vscode.window.showErrorMessage("The selected publish trace is no longer available.");
+      return;
+    }
+    if (this.controllers.size > 0) {
+      await vscode.window.showInformationMessage(
+        "Wait for the current publish operation or status check to finish.",
+      );
+      return;
+    }
+    const operationBatches = original.batches.filter((batch) => batch.operationId);
+    if (!isAbandonedRun(original) || operationBatches.length === 0) {
+      await vscode.window.showInformationMessage(
+        "This trace has no abandoned publishing operation to check.",
+      );
+      return;
+    }
+    const connection = this.connections.get(original.connectionId);
+    const clientSecret = await this.connections.getClientSecret(original.connectionId);
+    if (!connection || !clientSecret) {
+      await vscode.window.showErrorMessage(
+        "The publish connection or its stored secret is unavailable.",
+      );
+      return;
+    }
+    const controller = new AbortController();
+    let run = prepareStatusRecheck(original);
+    await this.saveRun(run);
+    this.openTrace(run);
+    this.controllers.set(run.id, controller);
+    try {
+      await vscode.window.withProgress(
+        {
+          location: vscode.ProgressLocation.Notification,
+          title: `Checking XM Cloud publish status: ${run.rootPath}`,
+          cancellable: true,
+        },
+        async (_progress, token) => {
+          const subscription = token.onCancellationRequested(() => controller.abort());
+          try {
+            for (const batch of operationBatches) {
+              if (batch.operationId) {
+                await this.pollPublishing(
+                  connection,
+                  clientSecret,
+                  batch.operationId,
+                  controller.signal,
+                );
+              }
+            }
+          } finally {
+            subscription.dispose();
+          }
+        },
+      );
+      const missingOperations = run.batches.filter((batch) => !batch.operationId);
+      if (missingOperations.length > 0) {
+        run = await this.setStage(
+          run,
+          "publishing",
+          "diverged",
+          `${operationBatches.length} saved operation(s) finished, but ${missingOperations.length} batch(es) had not been started.`,
+          missingOperations.map((batch) => `${batch.label}: no operation ID`),
+        );
+        await this.complete(
+          run,
+          "Saved XM Cloud operations finished, but the original publishing plan was incomplete.",
+        );
+        return;
+      }
+      run = await this.setStage(
+        run,
+        "publishing",
+        "matched",
+        `${operationBatches.length} saved publishing operation(s) completed.`,
+        operationBatches.flatMap((batch) =>
+          batch.operationId ? [`${batch.label}: ${batch.operationId}`] : []
+        ),
+      );
+      if (run.kind === "standard") {
+        await this.complete(run, "Sitecore completed the publishing operation.");
+        return;
+      }
+      const settings = await this.loadRetrySettings(run);
+      if (!settings) {
+        run = await this.setStage(
+          run,
+          "edgeItem",
+          "failed",
+          "Saved Experience Edge settings are unavailable.",
+        );
+        await this.complete(
+          run,
+          "Publishing completed, but saved verification settings are unavailable.",
+        );
+        return;
+      }
+      run = await this.verifyEdgeItems(run, settings, controller.signal);
+      run = await this.verifyLayout(run, settings, controller.signal);
+      run = await this.verifyApplication(run, controller.signal);
+      await this.complete(run, classify(run));
+    } catch (error: unknown) {
+      if (isAbort(error)) {
+        await this.saveRun(original);
+        this.renderIfDisplayed(original);
+        await vscode.window.showInformationMessage("Publish status check was cancelled.");
+        return;
+      }
+      const failed = finishRetryWithFailure(run, "Publish status check failed", errorMessage(error));
+      await this.saveRun(failed);
+      this.renderIfDisplayed(failed);
+      await vscode.window.showErrorMessage(
+        failed.conclusion ?? "Publish status check failed.",
+      );
+    } finally {
+      this.controllers.delete(run.id);
     }
   }
 
@@ -1418,6 +1634,31 @@ export class PublishingManager implements vscode.Disposable {
     return selection === action;
   }
 
+  private async loadRetrySettings(
+    run: PublishRun,
+  ): Promise<ProfileRunSettings | undefined> {
+    const profile = this.listProfiles().find((candidate) =>
+      candidate.connectionId === run.connectionId
+    );
+    const edgeToken = await this.connections.getEdgeToken(run.connectionId);
+    if (!profile || !edgeToken) {
+      await vscode.window.showErrorMessage(
+        "Saved Experience Edge settings are unavailable. Configure Traced Publishing before retrying.",
+      );
+      return undefined;
+    }
+    return {
+      profile: {
+        ...profile,
+        siteName: run.siteName ?? profile.siteName,
+      },
+      edgeToken,
+      route: run.route,
+      routeItemId: run.routeItemId,
+      applicationUrl: run.applicationUrl,
+    };
+  }
+
   private async confirm(
     kind: PublishKind,
     connectionName: string,
@@ -1480,10 +1721,12 @@ export class PublishingManager implements vscode.Disposable {
   }
 
   private finishWithFailure(run: PublishRun, message: string): PublishRun {
+    const activeStage = run.stages.find((stage) => stage.status === "running");
+    const phase = activeStage?.id === "publishing" ? "Publishing" : "Verification";
     return {
       ...run,
       completedAt: new Date().toISOString(),
-      conclusion: `Publishing failed: ${message}`,
+      conclusion: `${phase} failed: ${message}`,
       stages: run.stages.map((stage) => stage.status === "running"
         ? { ...stage, status: "failed", summary: message, updatedAt: new Date().toISOString() }
         : stage),
@@ -1556,7 +1799,15 @@ export class PublishingManager implements vscode.Disposable {
         "xmCloudSync.publishTrace",
         "Publish Trace",
         vscode.ViewColumn.Active,
-        { enableScripts: false, retainContextWhenHidden: true },
+        {
+          enableScripts: false,
+          retainContextWhenHidden: true,
+          enableCommandUris: [
+            retryVerificationCommand,
+            republishTraceCommand,
+            recheckStatusCommand,
+          ],
+        },
       );
       this.panel.iconPath = vscode.Uri.joinPath(this.extensionUri, "media", "sitecore-xm-cloud-sync.svg");
       this.panel.onDidDispose(() => {
@@ -1592,6 +1843,144 @@ function snapshotFromDetails(details: AuthoringItemDetails): PublishSnapshot {
     version: details.version,
     fields,
     references: details.fields.filter(isReferenceField).flatMap((field) => extractItemIds(field.value)),
+  };
+}
+
+function prepareDiagnosticRetry(
+  run: PublishRun,
+  firstStage: typeof diagnosticStageIds[number],
+): PublishRun {
+  const firstIndex = diagnosticStageIds.indexOf(firstStage);
+  const attemptedAt = new Date().toISOString();
+  return {
+    ...archiveTraceAttempt(run, "verificationRetry", attemptedAt),
+    completedAt: undefined,
+    conclusion: undefined,
+    journalPath: undefined,
+    stages: run.stages.map((stage) => {
+      const diagnosticIndex = diagnosticStageIds.indexOf(
+        stage.id as typeof diagnosticStageIds[number],
+      );
+      if (diagnosticIndex < firstIndex) {
+        return stage;
+      }
+      if (stage.id === "edgeLayout" && (!run.route || !run.siteName)) {
+        return {
+          ...stage,
+          status: "skipped",
+          summary: "Route or Sitecore site name was not configured.",
+          evidence: undefined,
+          updatedAt: attemptedAt,
+        };
+      }
+      if (stage.id === "application" && !run.applicationUrl) {
+        return {
+          ...stage,
+          status: "skipped",
+          summary: "Application response verification was not configured.",
+          evidence: undefined,
+          updatedAt: attemptedAt,
+        };
+      }
+      return {
+        ...stage,
+        status: "pending",
+        summary: "Queued for verification retry.",
+        evidence: undefined,
+        updatedAt: attemptedAt,
+      };
+    }),
+  };
+}
+
+function prepareStatusRecheck(run: PublishRun): PublishRun {
+  const attemptedAt = new Date().toISOString();
+  return {
+    ...archiveTraceAttempt(run, "statusRecheck", attemptedAt),
+    completedAt: undefined,
+    conclusion: undefined,
+    journalPath: undefined,
+    stages: run.stages.map((stage) => {
+      if (stage.id === "publishing") {
+        return {
+          ...stage,
+          status: "running",
+          summary: "Checking saved XM Cloud publishing operation IDs.",
+          evidence: undefined,
+          updatedAt: attemptedAt,
+        };
+      }
+      if (diagnosticStageIds.includes(stage.id as typeof diagnosticStageIds[number])) {
+        if (run.kind === "standard") {
+          return {
+            ...stage,
+            status: "skipped",
+            summary: "Not requested for Standard publish.",
+            evidence: undefined,
+            updatedAt: attemptedAt,
+          };
+        }
+        if (stage.id === "edgeLayout" && (!run.route || !run.siteName)) {
+          return {
+            ...stage,
+            status: "skipped",
+            summary: "Route or Sitecore site name was not configured.",
+            evidence: undefined,
+            updatedAt: attemptedAt,
+          };
+        }
+        if (stage.id === "application" && !run.applicationUrl) {
+          return {
+            ...stage,
+            status: "skipped",
+            summary: "Application response verification was not configured.",
+            evidence: undefined,
+            updatedAt: attemptedAt,
+          };
+        }
+        return {
+          ...stage,
+          status: "pending",
+          summary: "Waiting for publishing status re-check.",
+          evidence: undefined,
+          updatedAt: attemptedAt,
+        };
+      }
+      return stage;
+    }),
+  };
+}
+
+function archiveTraceAttempt(
+  run: PublishRun,
+  action: PublishTraceAttempt["action"],
+  attemptedAt: string,
+): PublishRun {
+  const attempt: PublishTraceAttempt = {
+    attemptedAt,
+    action,
+    conclusion: run.conclusion,
+    stages: run.stages,
+  };
+  return {
+    ...run,
+    retryAttempts: [...(run.retryAttempts ?? []), attempt].slice(-10),
+  };
+}
+
+function finishRetryWithFailure(
+  run: PublishRun,
+  label: string,
+  message: string,
+): PublishRun {
+  const completedAt = new Date().toISOString();
+  return {
+    ...run,
+    completedAt,
+    conclusion: `${label}: ${message}`,
+    stages: run.stages.map((stage) => stage.status === "running"
+      ? { ...stage, status: "failed", summary: message, updatedAt: completedAt }
+      : stage),
   };
 }
 
@@ -1916,8 +2305,26 @@ function traceHtml(run: PublishRun, cspSource: string): string {
         )
         .join("")}</ul></details>`
     : "";
+  const action = traceAction(run);
+  const actionHtml = action
+    ? `<p class="actions"><a class="button" href="${commandHref(action.command, run.id)}">${escapeHtml(action.label)}</a></p>`
+    : "";
+  const attempts = run.retryAttempts?.length
+    ? `<details class="attempts"><summary>Show previous attempts (${run.retryAttempts.length})</summary>${
+        [...run.retryAttempts].reverse().map((attempt) =>
+          `<article><strong>${escapeHtml(traceAttemptLabel(attempt.action))}</strong>
+          <span> · ${escapeHtml(formatTimestamp(attempt.attemptedAt))}</span>
+          ${attempt.conclusion ? `<p>${escapeHtml(attempt.conclusion)}</p>` : ""}
+          <ul>${attempt.stages.map((stage) =>
+            `<li>${escapeHtml(stage.label)} — ${escapeHtml(stage.status)}${
+              stage.summary ? `: ${escapeHtml(stage.summary)}` : ""
+            }</li>`
+          ).join("")}</ul></article>`
+        ).join("")
+      }</details>`
+    : "";
   const conclusion = run.conclusion
-    ? `<aside><strong>Conclusion</strong><p>${escapeHtml(run.conclusion)}</p></aside>`
+    ? `<aside><strong>Conclusion</strong><p>${escapeHtml(run.conclusion)}</p>${actionHtml}</aside>`
     : `<aside><strong>Publishing…</strong><p>The trace updates as each stage completes.</p></aside>`;
   return `<!doctype html><html><head>
     <meta charset="utf-8">
@@ -1931,12 +2338,59 @@ function traceHtml(run: PublishRun, cspSource: string): string {
       .symbol{font-size:16px}.matched .symbol{color:var(--vscode-testing-iconPassed)}.diverged .symbol,.failed .symbol{color:var(--vscode-testing-iconFailed)}
       .running .symbol{color:var(--vscode-progressBar-background)}.skipped{color:var(--vscode-descriptionForeground)}
       details{margin-top:8px}summary{color:var(--vscode-textLink-foreground);cursor:pointer}.graph{margin-top:18px}
+      .actions{margin-top:12px}.button{display:inline-block;padding:5px 10px;color:var(--vscode-button-foreground);background:var(--vscode-button-background);text-decoration:none;border-radius:2px}
+      .button:hover{background:var(--vscode-button-hoverBackground)}.attempts{margin-top:18px}.attempts article{padding:10px 0;border-bottom:1px solid var(--vscode-panel-border)}.attempts article p{margin:5px 0}
       code{font-family:var(--vscode-editor-font-family);font-size:12px}li{margin:5px 0}
     </style></head><body>
     <h1>${escapeHtml(run.rootPath)}</h1>
     <div class="meta">${escapeHtml(publishKindLabel(run.kind))} · ${escapeHtml(run.connectionName)} · ${escapeHtml(run.language)}</div>
-    ${conclusion}${stageHtml}${graph}
+    ${conclusion}${stageHtml}${attempts}${graph}
   </body></html>`;
+}
+
+function traceAction(
+  run: PublishRun,
+): { readonly command: string; readonly label: string } | undefined {
+  if (isAbandonedRun(run)) {
+    return run.batches.some((batch) => batch.operationId)
+      ? { command: recheckStatusCommand, label: "Check status again" }
+      : { command: republishTraceCommand, label: "Publish again…" };
+  }
+  const publishingStatus = run.stages.find((stage) => stage.id === "publishing")?.status;
+  if (
+    publishingStatus === "failed" ||
+    publishingStatus === "diverged" ||
+    (
+      publishingStatus !== "matched" &&
+      run.conclusion?.startsWith("Publishing failed:")
+    )
+  ) {
+    return { command: republishTraceCommand, label: "Publish again…" };
+  }
+  const diagnosticFailed = run.stages.some((stage) =>
+    diagnosticStageIds.includes(stage.id as typeof diagnosticStageIds[number]) &&
+    (stage.status === "failed" || stage.status === "diverged")
+  );
+  return diagnosticFailed
+    ? { command: retryVerificationCommand, label: "Retry failed verification" }
+    : undefined;
+}
+
+function commandHref(command: string, runId: string): string {
+  return `command:${command}?${encodeURIComponent(JSON.stringify([runId]))}`;
+}
+
+function traceAttemptLabel(action: PublishTraceAttempt["action"]): string {
+  return action === "verificationRetry" ? "Verification retry" : "Publish status re-check";
+}
+
+function formatTimestamp(value: string): string {
+  const timestamp = new Date(value);
+  return Number.isNaN(timestamp.getTime()) ? value : timestamp.toLocaleString();
+}
+
+function isAbandonedRun(run: PublishRun): boolean {
+  return run.conclusion?.startsWith("Local tracking was abandoned by the user.") === true;
 }
 
 function stageSymbol(status: TraceStageStatus): string {

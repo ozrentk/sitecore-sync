@@ -46,6 +46,13 @@ export interface TraceStage {
   readonly updatedAt?: string;
 }
 
+export interface PublishTraceAttempt {
+  readonly attemptedAt: string;
+  readonly action: "verificationRetry" | "statusRecheck";
+  readonly conclusion?: string;
+  readonly stages: readonly TraceStage[];
+}
+
 export interface PublishBatch {
   readonly itemIds: readonly string[];
   readonly label: string;
@@ -68,6 +75,7 @@ export interface PublishRun {
   readonly completedAt?: string;
   readonly snapshots: readonly PublishSnapshot[];
   readonly fieldSelections?: readonly PublishFieldSelection[];
+  readonly retryAttempts?: readonly PublishTraceAttempt[];
   readonly referenceEdges: readonly ReferenceEdge[];
   readonly batches: readonly PublishBatch[];
   readonly stages: readonly TraceStage[];

@@ -198,6 +198,27 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.commands.registerCommand("xmCloudSync.showLatestPublishTrace", () => {
       publishingManager.showLatestTrace();
     }),
+    vscode.commands.registerCommand(
+      "xmCloudSync.retryPublishTraceVerification",
+      async (runId: unknown) => {
+        if (typeof runId === "string") {
+          await publishingManager.retryFailedVerification(runId);
+        }
+      },
+    ),
+    vscode.commands.registerCommand("xmCloudSync.republishTrace", async (runId: unknown) => {
+      if (typeof runId === "string") {
+        await publishingManager.publishAgain(runId);
+      }
+    }),
+    vscode.commands.registerCommand(
+      "xmCloudSync.recheckPublishTraceStatus",
+      async (runId: unknown) => {
+        if (typeof runId === "string") {
+          await publishingManager.recheckPublishStatus(runId);
+        }
+      },
+    ),
     vscode.commands.registerCommand("xmCloudSync.abandonCurrentPublish", async () => {
       await publishingManager.abandonCurrentPublish();
     }),
