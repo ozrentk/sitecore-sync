@@ -122,20 +122,27 @@ export class ConnectionTreeProvider
       const favorites = this.store.listFavoritePaths(element.connection.id).map(
         (path) => new FavoriteTreeItem(element.connection, path),
       );
-      const sites = (this.testStates.get(element.connection.id)?.sites ?? []).map(
+      const sites = (
+        this.testStates.get(element.connection.id)?.sites ??
+        this.store.listVerifiedSites(element.connection.id)
+      ).map(
         (site) => new SiteTreeItem(site),
       );
       return [...favorites, ...sites];
     }
 
-    return this.store.list().map(
-      (connection) =>
-        new ConnectionTreeItem(
-          connection,
-          this.testStates.get(connection.id) ?? { status: "unknown" },
-          this.store.listFavoritePaths(connection.id).length,
-        ),
-    );
+    return this.store.list().map((connection) => {
+      const storedSites = this.store.listVerifiedSites(connection.id);
+      const testState = this.testStates.get(connection.id) ?? {
+        status: "unknown" as const,
+        sites: storedSites,
+      };
+      return new ConnectionTreeItem(
+        connection,
+        testState,
+        this.store.listFavoritePaths(connection.id).length,
+      );
+    });
   }
 
   setTestState(

@@ -1,16 +1,23 @@
 import { randomUUID } from "node:crypto";
 import * as vscode from "vscode";
 import type { NewXmCloudConnection, XmCloudConnection } from "./connection";
+import type { AuthoringSite } from "../sitecore/authoringClient";
 
 const connectionsKey = "sitecoreXmCloudSync.connections.v1";
 const secretPrefix = "sitecoreXmCloudSync.connectionSecret.v1";
 const deploymentSecretPrefix = "sitecoreXmCloudSync.deploymentSecret.v1";
 const speCredentialSecretPrefix = "sitecoreXmCloudSync.speCredential.v1";
 const favoritePathsKey = "sitecoreXmCloudSync.favoritePaths.v1";
+const verifiedSitesKey = "sitecoreXmCloudSync.verifiedSites.v1";
 
 interface StoredFavoritePath {
   readonly connectionId: string;
   readonly path: string;
+}
+
+interface StoredVerifiedSites {
+  readonly connectionId: string;
+  readonly sites: readonly AuthoringSite[];
 }
 
 function secretKey(connectionId: string): string {
@@ -81,6 +88,33 @@ export class ConnectionStore implements vscode.Disposable {
       .filter((favorite) => favorite.connectionId === connectionId)
       .map((favorite) => favorite.path)
       .sort((left, right) => left.localeCompare(right, undefined, { sensitivity: "base" }));
+  }
+
+  listVerifiedSites(connectionId: string): readonly AuthoringSite[] {
+    return this.readVerifiedSites()
+      .find((entry) => entry.connectionId === connectionId)
+      ?.sites ?? [];
+  }
+
+  hasVerifiedSiteCatalog(connectionId: string): boolean {
+    return this.readVerifiedSites().some((entry) => entry.connectionId === connectionId);
+  }
+
+  async storeVerifiedSites(
+    connectionId: string,
+    sites: readonly AuthoringSite[],
+  ): Promise<void> {
+    if (!this.get(connectionId)) {
+      throw new Error("The XM Cloud connection no longer exists.");
+    }
+    const remaining = this.readVerifiedSites().filter((entry) =>
+      entry.connectionId !== connectionId
+    );
+    await this.globalState.update(verifiedSitesKey, [
+      ...remaining,
+      { connectionId, sites: [...sites] },
+    ]);
+    this.changeEmitter.fire();
   }
 
   async addFavoritePath(connectionId: string, path: string): Promise<boolean> {
@@ -211,6 +245,10 @@ export class ConnectionStore implements vscode.Disposable {
       favoritePathsKey,
       this.readFavorites().filter((favorite) => favorite.connectionId !== connectionId),
     );
+    await this.globalState.update(
+      verifiedSitesKey,
+      this.readVerifiedSites().filter((entry) => entry.connectionId !== connectionId),
+    );
     await this.secrets.delete(secretKey(connectionId));
     await this.secrets.delete(deploymentSecretKey(connectionId));
     await this.secrets.delete(speCredentialSecretKey(connectionId));
@@ -228,6 +266,36 @@ export class ConnectionStore implements vscode.Disposable {
       typeof (favorite as Partial<StoredFavoritePath>).connectionId === "string" &&
       typeof (favorite as Partial<StoredFavoritePath>).path === "string",
     ));
+  }
+
+  private readVerifiedSites(): readonly StoredVerifiedSites[] {
+    const stored = this.globalState.get<unknown>(verifiedSitesKey, []);
+    if (!Array.isArray(stored)) {
+      return [];
+    }
+    return stored.flatMap((entry): readonly StoredVerifiedSites[] => {
+      if (
+        !entry ||
+        typeof entry !== "object" ||
+        typeof (entry as Partial<StoredVerifiedSites>).connectionId !== "string" ||
+        !Array.isArray((entry as Partial<StoredVerifiedSites>).sites)
+      ) {
+        return [];
+      }
+      const sites = (entry as Partial<StoredVerifiedSites>).sites?.filter(
+        (site): site is AuthoringSite => Boolean(
+          site &&
+          typeof site === "object" &&
+          typeof (site as Partial<AuthoringSite>).name === "string" &&
+          typeof (site as Partial<AuthoringSite>).rootPath === "string" &&
+          (
+            (site as Partial<AuthoringSite>).rootItemId === undefined ||
+            typeof (site as Partial<AuthoringSite>).rootItemId === "string"
+          ),
+        ),
+      ) ?? [];
+      return [{ connectionId: (entry as StoredVerifiedSites).connectionId, sites }];
+    });
   }
 
   dispose(): void {

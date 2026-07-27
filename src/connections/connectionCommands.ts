@@ -130,6 +130,7 @@ export async function testConnection(
       ? `; omitted ${result.duplicateSiteCount} duplicate API record(s)`
       : "";
     const message = `Connected in ${result.elapsedMilliseconds} ms; found ${result.sites.length} unique configured site(s)${duplicateSummary}.`;
+    await store.storeVerifiedSites(connection.id, result.sites);
     provider.setTestState(connection.id, "success", message, result.sites);
     const selection = await vscode.window.showInformationMessage(
       `${connection.name}: ${message}`,
