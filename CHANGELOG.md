@@ -6,6 +6,8 @@
 - Kept **Related items** independent from field verification: it can affect Sitecore publishing scope but never adds referenced-item fields to the assertion picker.
 - Reported selected values explicitly across the Authoring snapshot, raw Experience Edge, rendered route layout, and optional public application response, treating a selected field that is missing from rendered data as a divergence.
 - Derived the route of an item below a conventional page-local `Data` subtree from its owning page path instead of suggesting the datasource item's structural path.
+- Added contextual Publish Trace recovery actions: retry failed diagnostics without republishing, start a newly confirmed publish after publishing failure, or re-check saved operation IDs after local tracking was abandoned.
+- Preserved up to ten previous trace attempts with their conclusions and stage evidence, and never started a missing publishing batch during a status-only re-check.
 
 ## 0.9.5
 

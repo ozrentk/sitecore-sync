@@ -81,6 +81,8 @@ When a route is configured, Traced publish offers an optional searchable field p
 
 If saved monitoring state becomes stale, run **XM Cloud Sync: Abandon Current Publish Tracking**. The same recovery is offered as **Abandon and Continue** when a new publish is blocked. It aborts local monitoring, marks incomplete traces as locally abandoned with unknown server status, and releases the extension lock. It cannot cancel a publishing operation that is still running in XM Cloud.
 
+Completed Publish Traces provide a contextual recovery button when appropriate. **Retry failed verification** reruns diagnostic reads from the first failed Edge, layout, or application stage without publishing again. **Publish again…** starts the normal, newly confirmed publish flow after a publishing failure or an abandoned trace with no operation ID. **Check status again** polls only the saved operation IDs from an abandoned trace; it never starts a batch that has no operation ID. Up to ten previous attempts and their stage evidence remain expandable in the same trace.
+
 Traced and Power operations use one progressive **Publish Trace** document. Evidence and the Observed Reference Graph stay collapsed until opened. Standard publish normally uses only progress notifications; the trace opens if it fails. Run **XM Cloud Sync: Show Latest Publish Trace** to reopen recent evidence or **XM Cloud Sync: Show Publish Output** for low-level polling details.
 
 Publish operations and their Sitecore operation IDs are persisted so monitoring can resume after VS Code restarts. Redacted JSON journals are written beneath VS Code extension storage. Publish mutations are not retried automatically.
