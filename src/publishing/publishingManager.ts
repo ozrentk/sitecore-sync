@@ -212,6 +212,7 @@ export class PublishingManager implements vscode.Disposable {
         async () =>
           this.execute(run as PublishRun, connection, clientSecret, profileSettings, controller.signal),
       );
+      this.controllers.delete(run.id);
       if (kind === "standard") {
         await vscode.window.showInformationMessage(
           `${connection.name}: published ${rootDetails.path} (${target.language}).`,
