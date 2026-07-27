@@ -12,6 +12,7 @@
 - Added optional Browser DOM assertions for selected Traced-publish fields. Users can associate CSS selectors with assertions, then verify hydrated `textContent` in an isolated installed Chrome or Edge browser without changing the ordinary HTTP-response check.
 - Made Browser DOM text comparison case-insensitive and exposed the exact verification URL beside selectors to prevent silent environment mismatches.
 - Replaced the Traced-publish prompt chain with one compact configuration page for mode, scope, site, route, application URL, searchable field assertions, and optional CSS selectors; descendant fields load only when requested.
+- Compacted Traced-publish field assertions into a searchable HTML datalist with an explicit selected-assertion list, and corrected publishing-scope checkbox sizing and label alignment.
 
 ## 0.9.5
 
