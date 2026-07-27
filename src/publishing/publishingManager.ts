@@ -22,7 +22,6 @@ import type {
 
 const runsKey = "sitecoreXmCloudSync.publishRuns.v1";
 const profilesKey = "sitecoreXmCloudSync.publishingProfiles.v1";
-const edgeTokenPrefix = "sitecoreXmCloudSync.edgeToken.v1";
 const maximumReferenceItems = 50;
 const maximumReferenceDepth = 8;
 
@@ -56,7 +55,6 @@ export class PublishingManager implements vscode.Disposable {
     private readonly extensionUri: vscode.Uri,
     private readonly workspaceState: vscode.Memento,
     private readonly globalState: vscode.Memento,
-    private readonly secrets: vscode.SecretStorage,
     private readonly globalStorageUri: vscode.Uri,
     private readonly connections: ConnectionStore,
     private readonly authoring: AuthoringContentClient,
@@ -257,7 +255,7 @@ export class PublishingManager implements vscode.Disposable {
     const existing = this.listProfiles().find((profile) =>
       profile.connectionId === resolvedConnectionId
     );
-    const existingToken = await this.secrets.get(edgeTokenKey(resolvedConnectionId));
+    const existingToken = await this.connections.getEdgeToken(resolvedConnectionId);
     const endpoint = await vscode.window.showInputBox({
       title: "Configure traced publishing (1/3)",
       prompt: "Enter the Experience Edge GraphQL endpoint.",
@@ -454,7 +452,7 @@ export class PublishingManager implements vscode.Disposable {
     const profile = this.listProfiles().find((candidate) =>
       candidate.connectionId === run.connectionId
     );
-    const edgeToken = await this.secrets.get(edgeTokenKey(run.connectionId));
+    const edgeToken = await this.connections.getEdgeToken(run.connectionId);
     if (!profile || !edgeToken) {
       await this.complete(
         run,
@@ -858,7 +856,7 @@ export class PublishingManager implements vscode.Disposable {
     signal: AbortSignal,
   ): Promise<ProfileRunSettings | undefined> {
     let profile = this.listProfiles().find((candidate) => candidate.connectionId === connectionId);
-    let edgeToken = await this.secrets.get(edgeTokenKey(connectionId));
+    let edgeToken = await this.connections.getEdgeToken(connectionId);
     if (!profile || !edgeToken) {
       const endpoint = await vscode.window.showInputBox({
         title: "Configure traced publishing (1/2)",
@@ -870,14 +868,21 @@ export class PublishingManager implements vscode.Disposable {
       if (endpoint === undefined) {
         return undefined;
       }
-      edgeToken = await vscode.window.showInputBox({
+      const suppliedToken = await vscode.window.showInputBox({
         title: "Configure traced publishing (2/2)",
-        prompt: "Enter the Experience Edge API token. It is stored in VS Code SecretStorage.",
+        prompt: edgeToken
+          ? "A token is already stored for this connection. Enter a replacement, or leave empty to keep it."
+          : "Enter the Experience Edge API token. It is stored with this connection in VS Code Secret Storage.",
         password: true,
         ignoreFocusOut: true,
-        validateInput: (value) => value ? undefined : "Experience Edge token is required.",
+        validateInput: (value) =>
+          value || edgeToken ? undefined : "Experience Edge token is required.",
       });
-      if (edgeToken === undefined) {
+      if (suppliedToken === undefined) {
+        return undefined;
+      }
+      edgeToken = suppliedToken || edgeToken;
+      if (!edgeToken) {
         return undefined;
       }
       profile = {
@@ -1091,7 +1096,7 @@ export class PublishingManager implements vscode.Disposable {
       ...this.listProfiles().filter((candidate) => candidate.connectionId !== profile.connectionId),
       profile,
     ];
-    await this.secrets.store(edgeTokenKey(profile.connectionId), token);
+    await this.connections.storeEdgeToken(profile.connectionId, token);
     await this.globalState.update(profilesKey, profiles);
   }
 
@@ -1103,7 +1108,7 @@ export class PublishingManager implements vscode.Disposable {
       return;
     }
     await Promise.all(orphaned.map((profile) =>
-      this.secrets.delete(edgeTokenKey(profile.connectionId))
+      this.connections.deleteEdgeToken(profile.connectionId)
     ));
     await this.globalState.update(
       profilesKey,
@@ -1454,10 +1459,6 @@ function publishKindLabel(kind: PublishKind): string {
     case "traced": return "Traced publish";
     case "power": return "Power publish";
   }
-}
-
-function edgeTokenKey(connectionId: string): string {
-  return `${edgeTokenPrefix}.${connectionId}`;
 }
 
 function normalizeId(value: string): string {

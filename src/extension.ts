@@ -37,7 +37,6 @@ export function activate(context: vscode.ExtensionContext): void {
     context.extensionUri,
     context.workspaceState,
     context.globalState,
-    context.secrets,
     context.globalStorageUri,
     connectionStore,
     authoringClient,
