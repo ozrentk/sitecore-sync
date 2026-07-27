@@ -5,6 +5,7 @@ import type {
   AuthoringContentClient,
   AuthoringItemDetails,
   AuthoringItemField,
+  AuthoringSite,
 } from "../sitecore/authoringClient";
 import { ExperienceEdgeClient } from "../sitecore/experienceEdgeClient";
 import { PublishingClient, type PublishingStatus } from "../sitecore/publishingClient";
@@ -25,6 +26,10 @@ import type {
   TraceStage,
   TraceStageStatus,
 } from "./publishingTypes";
+import {
+  showTracedPublishForm,
+  type TracedPublishFieldCandidate,
+} from "./tracedPublishForm";
 
 const runsKey = "sitecoreXmCloudSync.publishRuns.v1";
 const profilesKey = "sitecoreXmCloudSync.publishingProfiles.v1";
@@ -59,6 +64,12 @@ interface ProfileRunSettings {
 interface TracedFieldSelectionResult {
   readonly snapshots: readonly PublishSnapshot[];
   readonly fields: readonly PublishFieldSelection[];
+}
+
+interface TracedPublishSetup {
+  readonly options: PublishOptions;
+  readonly profileSettings: ProfileRunSettings;
+  readonly tracedFields: TracedFieldSelectionResult;
 }
 
 export class PublishingManager implements vscode.Disposable {
@@ -107,6 +118,8 @@ export class PublishingManager implements vscode.Disposable {
     }
 
     const controller = new AbortController();
+    const preparationId = `preparation:${randomUUID()}`;
+    this.controllers.set(preparationId, controller);
     let run: PublishRun | undefined;
     try {
       const rootDetails = await vscode.window.withProgress(
@@ -130,9 +143,32 @@ export class PublishingManager implements vscode.Disposable {
           }
         },
       );
-      const options = await this.collectPublishOptions(kind);
-      if (!options) {
-        return;
+      let profileSettings: ProfileRunSettings | undefined;
+      let tracedFields: TracedFieldSelectionResult = {
+        snapshots: [snapshotFromDetails(rootDetails)],
+        fields: [],
+      };
+      let options: PublishOptions;
+      if (kind === "traced") {
+        const setup = await this.collectTracedPublishSetup(
+          connection,
+          clientSecret,
+          rootDetails,
+          target.language,
+          controller.signal,
+        );
+        if (!setup) {
+          return;
+        }
+        options = setup.options;
+        profileSettings = setup.profileSettings;
+        tracedFields = setup.tracedFields;
+      } else {
+        const collectedOptions = await this.collectPublishOptions(kind);
+        if (!collectedOptions) {
+          return;
+        }
+        options = collectedOptions;
       }
 
       const graph = kind === "power"
@@ -149,13 +185,13 @@ export class PublishingManager implements vscode.Disposable {
         return;
       }
 
-      let profileSettings = kind === "standard"
-        ? undefined
-        : await this.collectProfileSettings(
-            target.connectionId,
-            rootDetails.path,
-            controller.signal,
-          );
+      if (kind === "power") {
+        profileSettings = await this.collectProfileSettings(
+          target.connectionId,
+          rootDetails.path,
+          controller.signal,
+        );
+      }
       if (kind !== "standard" && !profileSettings) {
         return;
       }
@@ -179,20 +215,7 @@ export class PublishingManager implements vscode.Disposable {
           );
         }
       }
-      const tracedFields = kind === "traced" && profileSettings?.route
-        ? await this.selectTracedFields(
-            connection,
-            clientSecret,
-            rootDetails,
-            options.publishSubItems,
-            profileSettings.applicationUrl,
-            controller.signal,
-          )
-        : { snapshots: [snapshotFromDetails(rootDetails)], fields: [] };
-      if (!tracedFields) {
-        return;
-      }
-      const confirmed = await this.confirm(
+      const confirmed = kind === "traced" || await this.confirm(
         kind,
         connection.name,
         connection.serverUrl,
@@ -200,9 +223,6 @@ export class PublishingManager implements vscode.Disposable {
         target.language,
         options,
         selectedIds.length,
-        tracedFields.fields.length,
-        tracedFields.fields.filter((field) => field.browserSelector).length,
-        profileSettings?.applicationUrl,
       );
       if (!confirmed) {
         return;
@@ -245,6 +265,7 @@ export class PublishingManager implements vscode.Disposable {
         applicationUrl: profileSettings?.applicationUrl,
       };
       await this.saveRun(run);
+      this.controllers.delete(preparationId);
       this.controllers.set(run.id, controller);
       if (kind !== "standard") {
         this.openTrace(run);
@@ -278,6 +299,7 @@ export class PublishingManager implements vscode.Disposable {
       }
       await vscode.window.showErrorMessage(`XM Cloud publish failed: ${message}`);
     } finally {
+      this.controllers.delete(preparationId);
       if (run) {
         this.controllers.delete(run.id);
       }
@@ -1190,112 +1212,102 @@ export class PublishingManager implements vscode.Disposable {
     throw new Error(`Publishing operation ${operationId} did not finish within 30 minutes.`);
   }
 
-  private async selectTracedFields(
+  private async collectTracedPublishSetup(
     connection: NonNullable<ReturnType<ConnectionStore["get"]>>,
     clientSecret: string,
     root: AuthoringItemDetails,
-    includeDescendants: boolean,
-    applicationUrl: string | undefined,
+    language: string,
     signal: AbortSignal,
-  ): Promise<TracedFieldSelectionResult | undefined> {
-    const discovery = includeDescendants
-      ? await this.loadStructuralDescendants(
+  ): Promise<TracedPublishSetup | undefined> {
+    const prepared = await this.ensurePublishingProfile(connection.id, signal);
+    if (!prepared) {
+      return undefined;
+    }
+    const sites = await this.loadVerifiedSites(connection.id, signal);
+    const selectedSiteName = canonicalSiteName(sites, prepared.profile.siteName) ??
+      (sites.length === 1 ? sites[0].name : prepared.profile.siteName);
+    const selectedSite = sites.find((site) => site.name === selectedSiteName);
+    const initialRoute = selectedSite
+      ? suggestRoute(root.path, selectedSite.rootPath)
+      : suggestRoute(root.path);
+    const initialApplicationUrl = prepared.profile.applicationBaseUrl
+      ? new URL(
+          initialRoute.replace(/^\//u, ""),
+          ensureTrailingSlash(prepared.profile.applicationBaseUrl),
+        ).toString()
+      : undefined;
+    let discoveredDetails: readonly AuthoringItemDetails[] = [root];
+    const result = await showTracedPublishForm(
+      this.extensionUri,
+      {
+        connectionName: connection.name,
+        targetHost: new URL(connection.serverUrl).hostname,
+        rootPath: root.path,
+        language,
+        sites: sites.map((site) => ({
+          name: site.name,
+          rootPath: site.rootPath,
+          suggestedRoute: suggestRoute(root.path, site.rootPath),
+        })),
+        selectedSiteName,
+        route: initialRoute,
+        applicationUrl: initialApplicationUrl,
+        fields: tracedFieldCandidates([root], false),
+      },
+      async () => {
+        const discovery = await this.loadStructuralDescendants(
           connection,
           clientSecret,
           root,
           signal,
-        )
-      : { details: [root], truncated: false };
-    const choices = discovery.details.flatMap((details) =>
-      details.fields
-        .filter((field) => !field.isStandardTemplate)
-        .map((field) => ({
-          label: `${details.displayName} › ${field.name}`,
-          description: summarizeFieldValue(field.value),
-          detail: details.path,
-          itemId: details.itemId,
-          fieldName: field.name,
-        }))
-    );
-    if (choices.length === 0) {
-      await vscode.window.showInformationMessage(
-        "No non-standard fields are available in the selected publish tree.",
-      );
-      return { snapshots: [snapshotFromDetails(root)], fields: [] };
-    }
-    if (discovery.truncated) {
-      this.output.appendLine(
-        `Traced field discovery stopped after ${maximumTracedFieldItems} structural items.`,
-      );
-    }
-    const selected = await vscode.window.showQuickPick(
-      choices,
-      {
-        title: discovery.truncated
-          ? `Traced publish: fields to verify (first ${maximumTracedFieldItems} items)`
-          : "Traced publish: fields to verify",
-        placeHolder:
-          "Select fields from the selected item and structural descendants, or press Enter to skip",
-        canPickMany: true,
-        matchOnDescription: true,
-        matchOnDetail: true,
-      },
-    );
-    if (!selected) {
-      return undefined;
-    }
-    const browserFields = applicationUrl && selected.length
-      ? await vscode.window.showQuickPick(
-          selected,
-          {
-            title: "Traced publish: optional Browser DOM fields",
-            placeHolder:
-              `Select fields to check at ${applicationUrl}, or press Enter to skip Browser DOM verification`,
-            canPickMany: true,
-            matchOnDescription: true,
-            matchOnDetail: true,
-          },
-        )
-      : [];
-    if (browserFields === undefined) {
-      return undefined;
-    }
-    const browserSelectors = new Map<string, string>();
-    for (let index = 0; index < browserFields.length; index += 1) {
-      const choice = browserFields[index];
-      const selector = await vscode.window.showInputBox({
-        title: `Browser DOM selector (${index + 1}/${browserFields.length})`,
-        prompt:
-          `Paste a CSS selector for “${choice.label}” at ${applicationUrl}. Browser-generated selectors can be brittle; leave empty to skip this field.`,
-        placeHolder: "[data-testid=\"product-heading\"]",
-        ignoreFocusOut: true,
-      });
-      if (selector === undefined) {
-        return undefined;
-      }
-      if (selector.trim()) {
-        browserSelectors.set(
-          `${normalizeId(choice.itemId)}:${choice.fieldName}`,
-          selector.trim(),
         );
-      }
+        discoveredDetails = discovery.details;
+        if (discovery.truncated) {
+          this.output.appendLine(
+            `Traced field discovery stopped after ${maximumTracedFieldItems} structural items.`,
+          );
+        }
+        return tracedFieldCandidates(discovery.details.slice(1), true);
+      },
+      signal,
+    );
+    if (!result) {
+      return undefined;
     }
-    const fields = selected.map((choice) => ({
-      itemId: choice.itemId,
-      fieldName: choice.fieldName,
-      browserSelector: browserSelectors.get(
-        `${normalizeId(choice.itemId)}:${choice.fieldName}`,
-      ),
+    const siteName = canonicalSiteName(sites, result.siteName) ?? result.siteName;
+    const profile = {
+      ...prepared.profile,
+      siteName,
+    };
+    await this.saveProfile(profile, prepared.edgeToken);
+    const fields: readonly PublishFieldSelection[] = result.fields.map((field) => ({
+      itemId: field.itemId,
+      fieldName: field.fieldName,
+      browserSelector: field.browserSelector,
     }));
     const ownerIds = new Set(fields.map((field) => normalizeId(field.itemId)));
     const snapshots = [
       root,
-      ...discovery.details.filter((details) =>
+      ...discoveredDetails.filter((details) =>
         normalizeId(details.itemId) !== normalizeId(root.itemId) &&
         ownerIds.has(normalizeId(details.itemId))
       ),
     ].map(snapshotFromDetails);
-    return { snapshots, fields };
+    return {
+      options: {
+        mode: result.mode,
+        publishSubItems: result.publishSubItems,
+        publishRelatedItems: result.publishRelatedItems,
+      },
+      profileSettings: {
+        profile,
+        edgeToken: prepared.edgeToken,
+        route: result.route ? normalizeRoute(result.route) : undefined,
+        routeItemId: undefined,
+        applicationUrl: result.applicationUrl,
+      },
+      tracedFields: { snapshots, fields },
+    };
   }
 
   private async loadStructuralDescendants(
@@ -1537,53 +1549,12 @@ export class PublishingManager implements vscode.Disposable {
     itemPath: string,
     signal: AbortSignal,
   ): Promise<ProfileRunSettings | undefined> {
-    let profile = this.listProfiles().find((candidate) => candidate.connectionId === connectionId);
-    let edgeToken = await this.connections.getEdgeToken(connectionId);
-    if (!profile || !edgeToken) {
-      const endpoint = await vscode.window.showInputBox({
-        title: "Configure traced publishing (1/2)",
-        prompt: "Enter the Experience Edge GraphQL endpoint.",
-        value: profile?.edgeEndpoint ?? "https://edge.sitecorecloud.io/api/graphql/v1",
-        ignoreFocusOut: true,
-        validateInput: validateHttpsUrl,
-      });
-      if (endpoint === undefined) {
-        return undefined;
-      }
-      const suppliedToken = await vscode.window.showInputBox({
-        title: "Configure traced publishing (2/2)",
-        prompt: edgeToken
-          ? "A token is already stored for this connection. Enter a replacement, or leave empty to keep it."
-          : "Enter the Experience Edge API token. It is stored with this connection in VS Code Secret Storage.",
-        password: true,
-        ignoreFocusOut: true,
-        validateInput: (value) =>
-          value || edgeToken ? undefined : "Experience Edge token is required.",
-      });
-      if (suppliedToken === undefined) {
-        return undefined;
-      }
-      edgeToken = suppliedToken || edgeToken;
-      if (!edgeToken) {
-        return undefined;
-      }
-      const tokenApproved = await this.confirmEdgeTokenScope(
-        connectionId,
-        endpoint.trim(),
-        edgeToken,
-        signal,
-      );
-      if (!tokenApproved) {
-        return undefined;
-      }
-      profile = {
-        connectionId,
-        edgeEndpoint: endpoint.trim(),
-        siteName: profile?.siteName,
-        applicationBaseUrl: profile?.applicationBaseUrl,
-      };
-      await this.saveProfile(profile, edgeToken);
+    const prepared = await this.ensurePublishingProfile(connectionId, signal);
+    if (!prepared) {
+      return undefined;
     }
+    let profile = prepared.profile;
+    const edgeToken = prepared.edgeToken;
     const siteSelection = await this.selectSiteName(connectionId, profile.siteName, signal);
     if (!siteSelection) {
       return undefined;
@@ -1633,37 +1604,70 @@ export class PublishingManager implements vscode.Disposable {
     };
   }
 
+  private async ensurePublishingProfile(
+    connectionId: string,
+    signal: AbortSignal,
+  ): Promise<{
+    readonly profile: PublishingSiteProfile;
+    readonly edgeToken: string;
+  } | undefined> {
+    let profile = this.listProfiles().find((candidate) => candidate.connectionId === connectionId);
+    let edgeToken = await this.connections.getEdgeToken(connectionId);
+    if (profile && edgeToken) {
+      return { profile, edgeToken };
+    }
+    const endpoint = await vscode.window.showInputBox({
+      title: "Configure traced publishing (1/2)",
+      prompt: "Enter the Experience Edge GraphQL endpoint.",
+      value: profile?.edgeEndpoint ?? "https://edge.sitecorecloud.io/api/graphql/v1",
+      ignoreFocusOut: true,
+      validateInput: validateHttpsUrl,
+    });
+    if (endpoint === undefined) {
+      return undefined;
+    }
+    const suppliedToken = await vscode.window.showInputBox({
+      title: "Configure traced publishing (2/2)",
+      prompt: edgeToken
+        ? "A token is already stored for this connection. Enter a replacement, or leave empty to keep it."
+        : "Enter the Experience Edge API token. It is stored with this connection in VS Code Secret Storage.",
+      password: true,
+      ignoreFocusOut: true,
+      validateInput: (value) =>
+        value || edgeToken ? undefined : "Experience Edge token is required.",
+    });
+    if (suppliedToken === undefined) {
+      return undefined;
+    }
+    edgeToken = suppliedToken || edgeToken;
+    if (!edgeToken) {
+      return undefined;
+    }
+    const tokenApproved = await this.confirmEdgeTokenScope(
+      connectionId,
+      endpoint.trim(),
+      edgeToken,
+      signal,
+    );
+    if (!tokenApproved) {
+      return undefined;
+    }
+    profile = {
+      connectionId,
+      edgeEndpoint: endpoint.trim(),
+      siteName: profile?.siteName,
+      applicationBaseUrl: profile?.applicationBaseUrl,
+    };
+    await this.saveProfile(profile, edgeToken);
+    return { profile, edgeToken };
+  }
+
   private async selectSiteName(
     connectionId: string,
     currentSiteName: string | undefined,
     signal: AbortSignal,
   ): Promise<{ readonly siteName?: string } | undefined> {
-    let sites = this.connections.listVerifiedSites(connectionId);
-    if (!this.connections.hasVerifiedSiteCatalog(connectionId)) {
-      const connection = this.connections.get(connectionId);
-      const clientSecret = await this.connections.getClientSecret(connectionId);
-      if (connection && clientSecret) {
-        try {
-          const result = await vscode.window.withProgress(
-            {
-              location: vscode.ProgressLocation.Notification,
-              title: `Discovering configured sites for ${connection.name}`,
-              cancellable: false,
-            },
-            async () => this.authoring.testConnection(connection, clientSecret, signal),
-          );
-          sites = result.sites;
-          await this.connections.storeVerifiedSites(connectionId, sites);
-        } catch (error: unknown) {
-          if (isAbort(error)) {
-            throw error;
-          }
-          this.output.appendLine(
-            `Configured-site discovery failed; allowing manual site entry: ${errorMessage(error)}`,
-          );
-        }
-      }
-    }
+    const sites = await this.loadVerifiedSites(connectionId, signal);
     if (sites.length === 1) {
       return { siteName: sites[0].name };
     }
@@ -1698,6 +1702,41 @@ export class PublishingManager implements vscode.Disposable {
       ignoreFocusOut: true,
     });
     return manual === undefined ? undefined : { siteName: manual.trim() || undefined };
+  }
+
+  private async loadVerifiedSites(
+    connectionId: string,
+    signal: AbortSignal,
+  ): Promise<readonly AuthoringSite[]> {
+    let sites = this.connections.listVerifiedSites(connectionId);
+    if (this.connections.hasVerifiedSiteCatalog(connectionId)) {
+      return sites;
+    }
+    const connection = this.connections.get(connectionId);
+    const clientSecret = await this.connections.getClientSecret(connectionId);
+    if (!connection || !clientSecret) {
+      return sites;
+    }
+    try {
+      const result = await vscode.window.withProgress(
+        {
+          location: vscode.ProgressLocation.Notification,
+          title: `Discovering configured sites for ${connection.name}`,
+          cancellable: false,
+        },
+        async () => this.authoring.testConnection(connection, clientSecret, signal),
+      );
+      sites = result.sites;
+      await this.connections.storeVerifiedSites(connectionId, sites);
+    } catch (error: unknown) {
+      if (isAbort(error)) {
+        throw error;
+      }
+      this.output.appendLine(
+        `Configured-site discovery failed; allowing manual site entry: ${errorMessage(error)}`,
+      );
+    }
+    return sites;
   }
 
   private async confirmEdgeTokenScope(
@@ -1819,9 +1858,6 @@ export class PublishingManager implements vscode.Disposable {
     language: string,
     options: PublishOptions,
     itemCount: number,
-    fieldCount: number,
-    browserSelectorCount: number,
-    applicationUrl: string | undefined,
   ): Promise<boolean> {
     const scope = [
       options.publishSubItems ? "descendants" : undefined,
@@ -1833,15 +1869,6 @@ export class PublishingManager implements vscode.Disposable {
         `${root.path} — ${root.itemId}`,
         `Language: ${language}; mode: ${options.mode}; ${itemCount} explicit item(s)`,
         `Additional scope: ${scope.join(", ") || "none"}`,
-        kind === "traced"
-          ? `Rendered field assertions: ${fieldCount || "none"}`
-          : undefined,
-        kind === "traced"
-          ? `Browser DOM selectors: ${browserSelectorCount || "none"}`
-          : undefined,
-        kind === "traced" && applicationUrl
-          ? `Application verification URL: ${applicationUrl}`
-          : undefined,
       ].filter((value): value is string => Boolean(value)).join("\n"),
       { modal: true },
       "Publish",
@@ -2004,6 +2031,37 @@ function snapshotFromDetails(details: AuthoringItemDetails): PublishSnapshot {
     fields,
     references: details.fields.filter(isReferenceField).flatMap((field) => extractItemIds(field.value)),
   };
+}
+
+function tracedFieldCandidates(
+  details: readonly AuthoringItemDetails[],
+  descendant: boolean,
+): readonly TracedPublishFieldCandidate[] {
+  return details.flatMap((item) =>
+    item.fields
+      .filter((field) => !field.isStandardTemplate)
+      .map((field) => ({
+        key: `${normalizeId(item.itemId)}:${field.name.toLocaleLowerCase()}`,
+        itemId: item.itemId,
+        itemName: item.displayName,
+        itemPath: item.path,
+        fieldName: field.name,
+        value: summarizeFieldValue(field.value),
+        descendant,
+      }))
+  );
+}
+
+function canonicalSiteName(
+  sites: readonly AuthoringSite[],
+  requested: string | undefined,
+): string | undefined {
+  if (!requested) {
+    return undefined;
+  }
+  return sites.find((site) =>
+    site.name.localeCompare(requested, undefined, { sensitivity: "base" }) === 0
+  )?.name;
 }
 
 function prepareDiagnosticRetry(

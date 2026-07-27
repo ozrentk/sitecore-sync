@@ -1,0 +1,265 @@
+:root {
+  color-scheme: light dark;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  color: var(--vscode-editor-foreground);
+  background: var(--vscode-editor-background);
+  font: 13px var(--vscode-font-family);
+}
+
+main {
+  max-width: 1120px;
+  margin: 0 auto;
+  padding: 24px 28px 96px;
+}
+
+h1 {
+  margin: 0 0 5px;
+  font-size: 22px;
+}
+
+h2 {
+  margin: 0 0 4px;
+  font-size: 16px;
+}
+
+.muted,
+.hint,
+.optional {
+  color: var(--vscode-descriptionForeground);
+}
+
+.optional {
+  font-size: 11px;
+  font-weight: normal;
+}
+
+.settings-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+  margin: 22px 0;
+}
+
+fieldset {
+  min-width: 0;
+  margin: 0;
+  padding: 13px;
+  border: 1px solid var(--vscode-panel-border);
+  background: var(--vscode-sideBar-background);
+}
+
+legend {
+  padding: 0 5px;
+  font-weight: 600;
+}
+
+label:not(.check) {
+  display: block;
+  margin: 9px 0 4px;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.check {
+  display: block;
+  margin-top: 12px;
+}
+
+input,
+select,
+button {
+  color: var(--vscode-input-foreground);
+  background: var(--vscode-input-background);
+  border: 1px solid var(--vscode-input-border, transparent);
+  font: inherit;
+}
+
+input,
+select {
+  width: 100%;
+  min-height: 28px;
+  padding: 4px 7px;
+}
+
+input:focus,
+select:focus,
+button:focus {
+  outline: 1px solid var(--vscode-focusBorder);
+  outline-offset: -1px;
+}
+
+input:disabled {
+  opacity: .55;
+}
+
+.hint {
+  margin: 7px 0 0;
+  line-height: 1.4;
+}
+
+.assertions {
+  border-top: 1px solid var(--vscode-panel-border);
+  padding-top: 18px;
+}
+
+.assertion-heading {
+  display: grid;
+  grid-template-columns: 1fr minmax(260px, 38%);
+  gap: 20px;
+  align-items: end;
+}
+
+.status {
+  min-height: 22px;
+  padding: 9px 0 5px;
+}
+
+.field-list {
+  border: 1px solid var(--vscode-panel-border);
+}
+
+.field-row {
+  display: grid;
+  grid-template-columns: 28px minmax(210px, 1fr) minmax(180px, .8fr) minmax(230px, 1.15fr);
+  gap: 10px;
+  align-items: center;
+  padding: 9px 10px;
+  border-bottom: 1px solid var(--vscode-panel-border);
+}
+
+.field-row:last-child {
+  border-bottom: 0;
+}
+
+.field-row:hover {
+  background: var(--vscode-list-hoverBackground);
+}
+
+.field-row > input[type="checkbox"] {
+  width: auto;
+  min-height: auto;
+}
+
+.field-name {
+  min-width: 0;
+}
+
+.field-name strong,
+.field-name span,
+.value {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.field-name span,
+.value {
+  margin-top: 3px;
+  color: var(--vscode-descriptionForeground);
+  font-size: 12px;
+}
+
+.selector-wrap label {
+  display: block;
+  margin: 0 0 3px;
+  color: var(--vscode-descriptionForeground);
+  font-size: 11px;
+  font-weight: normal;
+}
+
+.empty {
+  padding: 22px;
+  text-align: center;
+  color: var(--vscode-descriptionForeground);
+}
+
+.error {
+  margin-top: 14px;
+  padding: 9px 11px;
+  color: var(--vscode-inputValidation-errorForeground);
+  background: var(--vscode-inputValidation-errorBackground);
+  border: 1px solid var(--vscode-inputValidation-errorBorder);
+}
+
+footer {
+  position: fixed;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  display: flex;
+  justify-content: space-between;
+  gap: 20px;
+  align-items: center;
+  padding: 12px max(28px, calc((100vw - 1120px) / 2 + 28px));
+  border-top: 1px solid var(--vscode-panel-border);
+  background: var(--vscode-editor-background);
+  box-shadow: 0 -5px 18px rgb(0 0 0 / 12%);
+}
+
+.summary {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--vscode-descriptionForeground);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.actions {
+  display: flex;
+  flex: none;
+  gap: 8px;
+}
+
+button {
+  min-width: 82px;
+  padding: 6px 13px;
+  color: var(--vscode-button-foreground);
+  background: var(--vscode-button-background);
+  border: 0;
+  cursor: pointer;
+}
+
+button:hover {
+  background: var(--vscode-button-hoverBackground);
+}
+
+button.secondary {
+  color: var(--vscode-button-secondaryForeground);
+  background: var(--vscode-button-secondaryBackground);
+}
+
+button.secondary:hover {
+  background: var(--vscode-button-secondaryHoverBackground);
+}
+
+button:disabled {
+  cursor: wait;
+  opacity: .6;
+}
+
+@media (max-width: 820px) {
+  .settings-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .assertion-heading {
+    grid-template-columns: 1fr;
+  }
+
+  .field-row {
+    grid-template-columns: 26px 1fr;
+  }
+
+  .field-row .value,
+  .field-row .selector-wrap {
+    grid-column: 2;
+  }
+}
