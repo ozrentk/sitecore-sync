@@ -13,6 +13,7 @@
 - Made Browser DOM text comparison case-insensitive and exposed the exact verification URL beside selectors to prevent silent environment mismatches.
 - Replaced the Traced-publish prompt chain with one compact configuration page for mode, scope, site, route, application URL, searchable field assertions, and optional CSS selectors; descendant fields load only when requested.
 - Compacted Traced-publish field assertions into a searchable HTML datalist with an explicit selected-assertion list, and corrected publishing-scope checkbox sizing and label alignment.
+- Allowed Browser DOM selectors to be entered before an application URL, while requiring and focusing the exact URL only when Publish is selected.
 
 ## 0.9.5
 
