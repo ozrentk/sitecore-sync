@@ -11,6 +11,7 @@
 - Added per-connection traced-publishing configuration for replacing the Edge endpoint, token, or default Sitecore site.
 - Persisted the latest 30 publish runs and wrote redacted JSON publish journals beneath VS Code extension storage.
 - Closed the Standard publish progress notification before showing its separate completion message.
+- Released the active publishing lock before displaying completion UI, so a finished publish never blocks the next Standard, Traced, or Power publish.
 
 ## 0.9.4
 
