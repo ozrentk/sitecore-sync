@@ -990,6 +990,46 @@ function showContextMenu(event, pair, clickedSide, forceDisabled = false) {
     closeContextMenu();
   });
 
+  const publishMenu = document.createElement("div");
+  publishMenu.className = "context-submenu";
+  const publishTrigger = document.createElement("button");
+  publishTrigger.className = "context-menu-item context-submenu-trigger";
+  publishTrigger.type = "button";
+  publishTrigger.textContent = "Publish";
+  publishTrigger.disabled = disabled || !clickedItem;
+  publishTrigger.title = publishTrigger.disabled
+    ? clickedSide
+      ? `The item does not exist on the ${clickedSide}.`
+      : "Right-click the left or right item cell to choose the publishing target."
+    : `Publish ${clickedItem.path} from the ${clickedSide} connection.`;
+  const publishFlyout = document.createElement("div");
+  publishFlyout.className = "context-submenu-flyout";
+  publishFlyout.setAttribute("role", "menu");
+  for (const [label, type] of [
+    ["Standard publish…", "standardPublish"],
+    ["Traced publish…", "tracedPublish"],
+    ["Power publish…", "powerPublish"],
+  ]) {
+    const action = document.createElement("button");
+    action.className = "context-menu-item";
+    action.type = "button";
+    action.textContent = label;
+    action.addEventListener("click", () => {
+      vscode.postMessage({
+        type,
+        side: clickedSide,
+        itemId: clickedItem?.itemId,
+        path: clickedItem?.path,
+      });
+      closeContextMenu();
+    });
+    publishFlyout.append(action);
+  }
+  publishMenu.append(publishTrigger, publishFlyout);
+  if (event.clientX > window.innerWidth / 2) {
+    publishFlyout.classList.add("open-left");
+  }
+
   const leftConnection = state.connections.find(
     (connection) => connection.id === state.selection.leftConnectionId,
   );
@@ -1032,6 +1072,7 @@ function showContextMenu(event, pair, clickedSide, forceDisabled = false) {
   menu.append(
     detailedDiff,
     runTask,
+    publishMenu,
     addFavorite,
     createContextMenuSeparator(),
     syncLeftToRight,

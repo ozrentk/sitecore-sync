@@ -61,6 +61,22 @@ Subtree processing uses Content Transfer and Item Transfer with `KeepExistingIte
 
 When deployment information is available for both sides, the processor records the latest source and destination deployment IDs at subtree start. It checks those IDs during long-running Content and Item Transfer polling, throttled to at most once every 15 seconds, and persists the baselines for restart recovery. If either ID changes, the transfer fails, the queue pauses, and retry discards the old remote checkpoint and starts a fresh transfer. Missing permissions and temporary monitoring errors are logged but never block or fail a transfer.
 
+## Publish with tracing
+
+Right-click the left or right item cell in the comparison and open **Publish**:
+
+- **Standard publish…** performs an ordinary Sitecore Smart or Full publish for the selected language, with optional descendants and related items. It monitors the Sitecore operation to completion and reports through a notification and the **XM Cloud Publish** output channel.
+- **Traced publish…** additionally snapshots authoring content and verifies propagation through raw Experience Edge items, optional rendered route layout, and an optional public application response.
+- **Power publish…** discovers an **Observed Reference Graph**, lets you select its items, publishes dependencies first and the selected root last, then performs the same trace.
+
+Traced publishing asks for the Experience Edge GraphQL endpoint and API token on first use. The token is stored in VS Code Secret Storage. Site name and route are optional unless rendered-layout verification is wanted. Right-click a saved connection and choose **Configure Traced Publishing**, or run **XM Cloud Sync: Configure Traced Publishing**, to replace the endpoint, token, or default site later.
+
+The application URL is always optional. When supplied, the extension makes a normal public HTTPS request and records status plus cache headers such as `Age`, `Cache-Control`, `x-vercel-cache`, and `x-vercel-id`. This requires no Vercel credentials. If the URL is omitted or inaccessible, only that stage is skipped or marked unavailable; Sitecore and Experience Edge tracing still run.
+
+Traced and Power operations use one progressive **Publish Trace** document. Evidence and the Observed Reference Graph stay collapsed until opened. Standard publish normally uses only progress notifications; the trace opens if it fails. Run **XM Cloud Sync: Show Latest Publish Trace** to reopen recent evidence or **XM Cloud Sync: Show Publish Output** for low-level polling details.
+
+Publish operations and their Sitecore operation IDs are persisted so monitoring can resume after VS Code restarts. Redacted JSON journals are written beneath VS Code extension storage. Publish mutations are not retried automatically.
+
 ## Item task plug-ins
 
 Right-click a comparison item and choose **Run task…** to run a matching workspace JavaScript or PowerShell plug-in. Create each plug-in beneath `.xm-cloud-sync/tasks/<task-name>/` with a `task.json` manifest and a script contained in the same directory. Tasks can match an item by template ID, item ID, exact immediate-parent path, or exact ancestor path; rules within a manifest are OR conditions. When both comparison sides match, the picker identifies the side, connection, language, and path.

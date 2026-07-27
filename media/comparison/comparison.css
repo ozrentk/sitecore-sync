@@ -485,6 +485,40 @@ select:focus {
   cursor: default;
 }
 
+.context-submenu {
+  position: relative;
+}
+
+.context-submenu-trigger::after {
+  position: absolute;
+  right: 8px;
+  content: "›";
+}
+
+.context-submenu-flyout {
+  position: absolute;
+  top: -4px;
+  left: calc(100% - 2px);
+  display: none;
+  min-width: 175px;
+  padding: 3px;
+  color: var(--vscode-menu-foreground);
+  background: var(--vscode-menu-background);
+  border: 1px solid var(--vscode-menu-border, var(--vscode-panel-border));
+  border-radius: 3px;
+  box-shadow: 0 2px 8px var(--vscode-widget-shadow);
+}
+
+.context-submenu-flyout.open-left {
+  right: calc(100% - 2px);
+  left: auto;
+}
+
+.context-submenu:hover > .context-submenu-flyout,
+.context-submenu:focus-within > .context-submenu-flyout {
+  display: block;
+}
+
 .context-menu-separator {
   height: 1px;
   margin: 3px 5px;

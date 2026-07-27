@@ -14,8 +14,7 @@ The MVP supports:
 - A durable FIFO queue for subtree and field-value transfers.
 - Dry runs and real execution.
 - Dedicated execution journals.
-
-The MVP does not support publishing.
+- Standard, traced, and dependency-ordered publishing to Experience Edge.
 
 ## Item task plug-ins
 
@@ -33,7 +32,23 @@ Existing local PowerShell execution remains supported and receives context and r
 
 Stdout and stderr stream to a dedicated **XM Cloud Tasks** output channel. Exit code zero is success unless a declared result reports error; non-zero is failure. A result supplies `status` and a user-facing `message`. JavaScript and local PowerShell tasks support process cancellation; SPE tasks are not exposed as cancellable because terminating the local client cannot guarantee that Sitecore stops the remote script. Completion produces an OK or error notification, and temporary files are deleted afterward. Task runs remain separate from the Transfers FIFO.
 
-Experience Edge comparison is a possible later diagnostic feature for inspecting published content. It is not part of the authoring diff or sync engine because Edge contains a published, flattened representation rather than the complete authoring item representation.
+Experience Edge tracing remains separate from the authoring diff and sync engine because Edge contains a published, flattened representation rather than the complete authoring item representation.
+
+## Publishing and propagation tracing
+
+Right-click an available item on either comparison side and open **Publish** to choose:
+
+- **Standard publish…** triggers an ordinary Sitecore Smart or Full publish for the exact selected language, with optional descendants and related items. It monitors the returned operation ID to completion, reports through a progress notification, and writes technical details to **XM Cloud Publish** output.
+- **Traced publish…** captures the selected authoring snapshot, performs the same Sitecore publish, then checks raw Experience Edge content, optional `layout.rendered` route data, and an optional public application response.
+- **Power publish…** builds an **Observed Reference Graph** from known reference-capable fields, lets the user review the discovered items, publishes dependencies first in separately monitored operations, and publishes the selected root item last before running the same trace.
+
+Publish mutations are never retried automatically because a lost mutation response could otherwise start a duplicate operation. Status, Edge, and application reads use the shared retry and endpoint-cooldown behavior. In-progress records retain operation IDs in workspace state and resume monitoring after an extension restart. Completed records are kept as recent trace history and written as redacted JSON journals beneath extension storage.
+
+Traced publishing stores the Experience Edge token in VS Code Secret Storage. Non-secret endpoint and site metadata are stored separately. A route is optional; without one, raw Edge item verification still runs and rendered-layout verification is marked skipped. Application-response verification is also optional and uses a normal public HTTPS request. It records HTTP and cache headers, including Vercel headers when returned, without requiring a Vercel account, project ID, or token.
+
+Traced and Power operations reuse one document-style **Publish Trace** tab. It displays one progressive vertical stage list and a concise conclusion. Evidence and the Observed Reference Graph remain collapsed until requested; there are no internal tabs or permanent diagnostic panes. Standard publish opens the trace only on failure.
+
+The Observed Reference Graph is explicitly evidence, not a claim that every server-side Sitecore dependency has been discovered. Initial discovery follows GUIDs from Droplink, Droptree, Multilist, Treelist, General Link, Image, and layout fields, bounded to 50 items and eight reference levels.
 
 ## Connections
 
@@ -287,9 +302,10 @@ Secrets, bearer tokens, client secrets, and authorization headers must never be 
 
 ## Deferred options
 
-- Experience Edge published-content diagnostics.
 - `Clear Connection Cache` command.
 - ID-first/path-fallback identity mode.
 - Reference ID remapping between independently created environments.
-- Publishing after synchronization.
+- Automatic publishing after synchronization.
+- Authenticated Vercel project APIs, protected-deployment bypass, cache invalidation, and deployment logs.
+- Browser DOM and interactive-component verification.
 - Automatic undo or compensating rollback.

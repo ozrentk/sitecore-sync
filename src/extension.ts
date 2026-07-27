@@ -19,6 +19,9 @@ import { ItemTaskRunner } from "./tasks/itemTaskRunner";
 import { TransferProcessor } from "./transfers/transferProcessor";
 import { TransferQueueStore } from "./transfers/transferQueueStore";
 import { TransfersTreeProvider, TransferTreeItem } from "./transfers/transfersTreeProvider";
+import { PublishingClient } from "./sitecore/publishingClient";
+import { ExperienceEdgeClient } from "./sitecore/experienceEdgeClient";
+import { PublishingManager } from "./publishing/publishingManager";
 
 export function activate(context: vscode.ExtensionContext): void {
   const log = vscode.window.createOutputChannel("XM Cloud Sync", { log: true });
@@ -27,6 +30,21 @@ export function activate(context: vscode.ExtensionContext): void {
   const authoringClient = new AuthoringContentClient(log);
   const deploymentClient = new DeploymentClient(log);
   const taskOutput = vscode.window.createOutputChannel("XM Cloud Tasks");
+  const publishOutput = vscode.window.createOutputChannel("XM Cloud Publish");
+  const publishingClient = new PublishingClient(log);
+  const experienceEdgeClient = new ExperienceEdgeClient(log);
+  const publishingManager = new PublishingManager(
+    context.extensionUri,
+    context.workspaceState,
+    context.globalState,
+    context.secrets,
+    context.globalStorageUri,
+    connectionStore,
+    authoringClient,
+    publishingClient,
+    experienceEdgeClient,
+    publishOutput,
+  );
   const itemTaskRunner = new ItemTaskRunner(
     context.globalStorageUri,
     context.extensionUri,
@@ -54,6 +72,7 @@ export function activate(context: vscode.ExtensionContext): void {
     authoringClient,
     transferQueue,
     itemTaskRunner,
+    publishingManager,
     log,
   );
   const connectionsView = vscode.window.createTreeView("xmCloudSync.connections", {
@@ -96,9 +115,13 @@ export function activate(context: vscode.ExtensionContext): void {
     transferProcessor,
     transfersProvider,
     itemTaskRunner,
+    publishOutput,
+    publishingManager,
     { dispose: () => {
       authoringClient.clear();
       deploymentClient.clear();
+      publishingClient.clear();
+      experienceEdgeClient.clear();
     } },
     comparisonPanelManager,
     connectionsView,
@@ -172,6 +195,15 @@ export function activate(context: vscode.ExtensionContext): void {
       }
     }),
     vscode.commands.registerCommand("xmCloudSync.showLogs", () => log.show(true)),
+    vscode.commands.registerCommand("xmCloudSync.showPublishOutput", () => publishOutput.show(true)),
+    vscode.commands.registerCommand("xmCloudSync.showLatestPublishTrace", () => {
+      publishingManager.showLatestTrace();
+    }),
+    vscode.commands.registerCommand("xmCloudSync.configurePublishing", async (argument) => {
+      await publishingManager.configureConnection(
+        argument instanceof ConnectionTreeItem ? argument.connection.id : undefined,
+      );
+    }),
     vscode.commands.registerCommand("xmCloudSync.startTransfers", async () => {
       await transferProcessor.start();
     }),
@@ -269,6 +301,7 @@ export function activate(context: vscode.ExtensionContext): void {
   );
   void updateConnectionRemovalContext();
   void transferProcessor.resumeIfRunning();
+  void publishingManager.resumePending();
 }
 
 export function deactivate(): void {
