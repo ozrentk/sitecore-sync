@@ -25,6 +25,21 @@ interface EdgeLayoutResponse {
   readonly errors?: readonly EdgeGraphQlError[];
 }
 
+interface EdgeSitesResponse {
+  readonly data?: {
+    readonly site?: {
+      readonly allSiteInfo?: {
+        readonly results?: readonly {
+          readonly name?: unknown;
+          readonly hostname?: unknown;
+          readonly rootPath?: unknown;
+        }[];
+      } | null;
+    } | null;
+  };
+  readonly errors?: readonly EdgeGraphQlError[];
+}
+
 export interface EdgeItem {
   readonly id: string;
   readonly name: string;
@@ -41,6 +56,12 @@ export interface ApplicationProbe {
 export interface EdgeRenderedLayout {
   readonly itemId?: string;
   readonly rendered: string;
+}
+
+export interface EdgeSiteInfo {
+  readonly name: string;
+  readonly hostname?: string;
+  readonly rootPath?: string;
 }
 
 export class ExperienceEdgeClient {
@@ -128,6 +149,40 @@ export class ExperienceEdgeClient {
     return serialized
       ? { itemId: typeof item?.id === "string" ? item.id : undefined, rendered: serialized }
       : undefined;
+  }
+
+  async listSites(
+    endpoint: string,
+    token: string,
+    signal: AbortSignal,
+  ): Promise<readonly EdgeSiteInfo[]> {
+    const payload = await this.query<EdgeSitesResponse>(
+      endpoint,
+      token,
+      "query Experience Edge sites",
+      `query XmCloudSyncEdgeSites {
+        site {
+          allSiteInfo {
+            results {
+              name
+              hostname
+              rootPath
+            }
+          }
+        }
+      }`,
+      {},
+      signal,
+    );
+    return (payload.data?.site?.allSiteInfo?.results ?? []).flatMap(
+      (site): readonly EdgeSiteInfo[] => typeof site.name === "string"
+        ? [{
+            name: site.name,
+            hostname: typeof site.hostname === "string" ? site.hostname : undefined,
+            rootPath: typeof site.rootPath === "string" ? site.rootPath : undefined,
+          }]
+        : [],
+    );
   }
 
   async probeApplication(url: string, signal: AbortSignal): Promise<ApplicationProbe> {

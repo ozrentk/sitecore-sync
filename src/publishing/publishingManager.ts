@@ -252,6 +252,7 @@ export class PublishingManager implements vscode.Disposable {
     if (!resolvedConnectionId || !this.connections.get(resolvedConnectionId)) {
       return;
     }
+    const controller = new AbortController();
     const existing = this.listProfiles().find((profile) =>
       profile.connectionId === resolvedConnectionId
     );
@@ -279,10 +280,23 @@ export class PublishingManager implements vscode.Disposable {
     if (token === undefined) {
       return;
     }
+    const effectiveToken = token || existingToken;
+    if (!effectiveToken) {
+      return;
+    }
+    const tokenApproved = await this.confirmEdgeTokenScope(
+      resolvedConnectionId,
+      endpoint.trim(),
+      effectiveToken,
+      controller.signal,
+    );
+    if (!tokenApproved) {
+      return;
+    }
     const siteSelection = await this.selectSiteName(
       resolvedConnectionId,
       existing?.siteName,
-      new AbortController().signal,
+      controller.signal,
     );
     if (!siteSelection) {
       return;
@@ -293,7 +307,7 @@ export class PublishingManager implements vscode.Disposable {
         edgeEndpoint: endpoint.trim(),
         siteName: siteSelection.siteName,
       },
-      token || existingToken as string,
+      effectiveToken,
     );
     await vscode.window.showInformationMessage("Traced publishing settings saved.");
   }
@@ -885,6 +899,15 @@ export class PublishingManager implements vscode.Disposable {
       if (!edgeToken) {
         return undefined;
       }
+      const tokenApproved = await this.confirmEdgeTokenScope(
+        connectionId,
+        endpoint.trim(),
+        edgeToken,
+        signal,
+      );
+      if (!tokenApproved) {
+        return undefined;
+      }
       profile = {
         connectionId,
         edgeEndpoint: endpoint.trim(),
@@ -999,6 +1022,92 @@ export class PublishingManager implements vscode.Disposable {
       ignoreFocusOut: true,
     });
     return manual === undefined ? undefined : { siteName: manual.trim() || undefined };
+  }
+
+  private async confirmEdgeTokenScope(
+    connectionId: string,
+    endpoint: string,
+    token: string,
+    signal: AbortSignal,
+  ): Promise<boolean> {
+    const connection = this.connections.get(connectionId);
+    if (!connection) {
+      return false;
+    }
+    let edgeSites;
+    try {
+      edgeSites = await vscode.window.withProgress(
+        {
+          location: vscode.ProgressLocation.Notification,
+          title: `Validating Experience Edge token for ${connection.name}`,
+          cancellable: false,
+        },
+        async () => this.edge.listSites(endpoint, token, signal),
+      );
+    } catch (error: unknown) {
+      if (isAbort(error)) {
+        throw error;
+      }
+      await vscode.window.showErrorMessage(
+        `Experience Edge token validation failed: ${errorMessage(error)}`,
+      );
+      return false;
+    }
+
+    const verifiedSites = this.connections.listVerifiedSites(connectionId);
+    const verifiedMatches = verifiedSites.filter((verifiedSite) =>
+      edgeSites.some((edgeSite) =>
+        verifiedSite.name.localeCompare(edgeSite.name, undefined, { sensitivity: "base" }) === 0 &&
+        (
+          !edgeSite.rootPath ||
+          verifiedSite.rootPath.localeCompare(
+            edgeSite.rootPath,
+            undefined,
+            { sensitivity: "base" },
+          ) === 0
+        )
+      )
+    );
+    const hasCatalog = this.connections.hasVerifiedSiteCatalog(connectionId);
+    const scopeMatches = !hasCatalog || (
+      verifiedSites.length > 0 &&
+      verifiedMatches.length === verifiedSites.length
+    );
+    const siteLines = edgeSites.slice(0, 20).map((site) =>
+      [
+        `• ${site.name}`,
+        site.hostname ? `hostname: ${site.hostname}` : undefined,
+        site.rootPath ? `root: ${site.rootPath}` : undefined,
+      ].filter((value): value is string => Boolean(value)).join(" — ")
+    );
+    if (edgeSites.length > 20) {
+      siteLines.push(`• …and ${edgeSites.length - 20} more site(s)`);
+    }
+    const detail = [
+      `Connection: ${connection.name}`,
+      `CM host: ${new URL(connection.serverUrl).hostname}`,
+      `Edge endpoint: ${endpoint}`,
+      "",
+      `Accessible Edge sites (${edgeSites.length}):`,
+      ...(siteLines.length ? siteLines : ["• No sites returned"]),
+      "",
+      hasCatalog
+        ? `Matches verified connection sites: ${verifiedMatches.length}/${verifiedSites.length}`
+        : "No verified Authoring site catalog is available for comparison.",
+    ].join("\n");
+    const action = scopeMatches ? "Use Token" : "Use Anyway";
+    const selection = scopeMatches
+      ? await vscode.window.showInformationMessage(
+          "Experience Edge token is valid. Confirm the accessible sites before storing it.",
+          { modal: true, detail },
+          action,
+        )
+      : await vscode.window.showWarningMessage(
+          "The token is valid, but its Edge sites do not match the sites verified for this connection.",
+          { modal: true, detail },
+          action,
+        );
+    return selection === action;
   }
 
   private async confirm(
