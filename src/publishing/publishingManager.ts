@@ -376,7 +376,7 @@ export class PublishingManager implements vscode.Disposable {
     }
     const firstFailedStage = diagnosticStageIds.find((id) => {
       const status = original.stages.find((stage) => stage.id === id)?.status;
-      return status === "diverged" || status === "failed";
+      return status === "diverged" || status === "failed" || status === "inconclusive";
     });
     if (!firstFailedStage) {
       await vscode.window.showInformationMessage(
@@ -993,6 +993,7 @@ export class PublishingManager implements vscode.Disposable {
     try {
       const result = await this.edge.probeApplication(initialRun.applicationUrl, signal);
       const evidence = [
+        `URL: ${initialRun.applicationUrl}`,
         `HTTP ${result.status}`,
         ...Object.entries(result.headers).map(([name, value]) => `${name}: ${value}`),
       ];
@@ -1010,19 +1011,25 @@ export class PublishingManager implements vscode.Disposable {
         (explicitFieldSelection
           ? matchedValues.length === candidateValues.length
           : matchedValues.length > 0);
-      const healthy = healthyStatus && contentMatched;
+      const stageStatus: TraceStageStatus = !healthyStatus
+        ? "diverged"
+        : contentMatched
+          ? "matched"
+          : "inconclusive";
       run = await this.setStage(
         run,
         "application",
-        healthy ? "matched" : "diverged",
-        healthy
+        stageStatus,
+        stageStatus === "matched"
           ? matchedValues.length
             ? explicitFieldSelection
               ? `The public application response contains all ${matchedValues.length} selected textual value(s).`
               : `The public application response contains ${matchedValues.length} expected value(s).`
             : "The public application response was successful; no textual assertions were available."
-          : healthyStatus
-            ? "The response was successful but contained none of the expected textual values."
+          : stageStatus === "inconclusive"
+            ? matchedValues.length
+              ? `The response was successful but exposed only ${matchedValues.length}/${candidateValues.length} selected textual value(s). Browser-rendered DOM was not evaluated.`
+              : "The response was successful but did not expose the expected text in its server response. Browser-rendered DOM was not evaluated."
             : `The application returned HTTP ${result.status}.`,
         [
           ...evidence,
@@ -2278,6 +2285,9 @@ function classify(run: PublishRun): string {
   if (stage("application")?.status === "diverged") {
     return "Likely boundary: rendered Experience Edge layout → application or CDN response.";
   }
+  if (stage("application")?.status === "inconclusive") {
+    return "Rendered layout matched, but the server response did not prove what the browser rendered.";
+  }
   if (run.stages.some((candidate) => candidate.status === "failed")) {
     return "Publishing completed, but an optional diagnostic stage could not be evaluated.";
   }
@@ -2335,7 +2345,7 @@ function traceHtml(run: PublishRun, cspSource: string): string {
       h1{font-size:20px;margin:0 0 4px}.meta{color:var(--vscode-descriptionForeground);margin-bottom:24px}
       aside{padding:12px 14px;margin:0 0 18px;border-left:3px solid var(--vscode-focusBorder);background:var(--vscode-textBlockQuote-background)}
       aside p,.stage p{margin:5px 0 0}.stage{display:grid;grid-template-columns:28px 1fr;gap:6px;padding:11px 4px;border-bottom:1px solid var(--vscode-panel-border)}
-      .symbol{font-size:16px}.matched .symbol{color:var(--vscode-testing-iconPassed)}.diverged .symbol,.failed .symbol{color:var(--vscode-testing-iconFailed)}
+      .symbol{font-size:16px}.matched .symbol{color:var(--vscode-testing-iconPassed)}.inconclusive .symbol{color:var(--vscode-editorWarning-foreground)}.diverged .symbol,.failed .symbol{color:var(--vscode-testing-iconFailed)}
       .running .symbol{color:var(--vscode-progressBar-background)}.skipped{color:var(--vscode-descriptionForeground)}
       details{margin-top:8px}summary{color:var(--vscode-textLink-foreground);cursor:pointer}.graph{margin-top:18px}
       .actions{margin-top:12px}.button{display:inline-block;padding:5px 10px;color:var(--vscode-button-foreground);background:var(--vscode-button-background);text-decoration:none;border-radius:2px}
@@ -2367,12 +2377,21 @@ function traceAction(
   ) {
     return { command: republishTraceCommand, label: "Publish again…" };
   }
-  const diagnosticFailed = run.stages.some((stage) =>
+  const retryableDiagnostic = run.stages.find((stage) =>
     diagnosticStageIds.includes(stage.id as typeof diagnosticStageIds[number]) &&
-    (stage.status === "failed" || stage.status === "diverged")
+    (
+      stage.status === "failed" ||
+      stage.status === "diverged" ||
+      stage.status === "inconclusive"
+    )
   );
-  return diagnosticFailed
-    ? { command: retryVerificationCommand, label: "Retry failed verification" }
+  return retryableDiagnostic
+    ? {
+        command: retryVerificationCommand,
+        label: retryableDiagnostic.status === "inconclusive"
+          ? "Retry application response"
+          : "Retry failed verification",
+      }
     : undefined;
 }
 
@@ -2396,6 +2415,7 @@ function isAbandonedRun(run: PublishRun): boolean {
 function stageSymbol(status: TraceStageStatus): string {
   switch (status) {
     case "matched": return "✓";
+    case "inconclusive": return "?";
     case "diverged":
     case "failed": return "✗";
     case "running": return "◌";

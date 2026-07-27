@@ -8,6 +8,7 @@
 - Derived the route of an item below a conventional page-local `Data` subtree from its owning page path instead of suggesting the datasource item's structural path.
 - Added contextual Publish Trace recovery actions: retry failed diagnostics without republishing, start a newly confirmed publish after publishing failure, or re-check saved operation IDs after local tracking was abandoned.
 - Preserved up to ten previous trace attempts with their conclusions and stage evidence, and never started a missing publishing batch during a status-only re-check.
+- Reported successful application responses that omit expected text as **inconclusive** instead of failed, because a plain HTTP probe cannot observe text added later by browser-side rendering or hydration.
 
 ## 0.9.5
 

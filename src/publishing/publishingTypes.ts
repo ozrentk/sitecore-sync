@@ -4,6 +4,7 @@ export type TraceStageStatus =
   | "pending"
   | "running"
   | "matched"
+  | "inconclusive"
   | "diverged"
   | "failed"
   | "skipped";
