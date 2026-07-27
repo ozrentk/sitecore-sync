@@ -26,6 +26,11 @@ export interface PublishSnapshot {
   readonly references: readonly string[];
 }
 
+export interface PublishFieldSelection {
+  readonly itemId: string;
+  readonly fieldName: string;
+}
+
 export interface ReferenceEdge {
   readonly sourceItemId: string;
   readonly targetItemId: string;
@@ -62,6 +67,7 @@ export interface PublishRun {
   readonly createdAt: string;
   readonly completedAt?: string;
   readonly snapshots: readonly PublishSnapshot[];
+  readonly fieldSelections?: readonly PublishFieldSelection[];
   readonly referenceEdges: readonly ReferenceEdge[];
   readonly batches: readonly PublishBatch[];
   readonly stages: readonly TraceStage[];

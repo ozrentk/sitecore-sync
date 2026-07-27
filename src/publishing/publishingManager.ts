@@ -10,6 +10,7 @@ import { ExperienceEdgeClient } from "../sitecore/experienceEdgeClient";
 import { PublishingClient, type PublishingStatus } from "../sitecore/publishingClient";
 import type {
   PublishKind,
+  PublishFieldSelection,
   PublishMode,
   PublishRun,
   PublishSnapshot,
@@ -24,6 +25,7 @@ const runsKey = "sitecoreXmCloudSync.publishRuns.v1";
 const profilesKey = "sitecoreXmCloudSync.publishingProfiles.v1";
 const maximumReferenceItems = 50;
 const maximumReferenceDepth = 8;
+const maximumTracedFieldItems = 200;
 
 interface PublishOptions {
   readonly mode: PublishMode;
@@ -43,6 +45,11 @@ interface ProfileRunSettings {
   readonly route?: string;
   readonly routeItemId?: string;
   readonly applicationUrl?: string;
+}
+
+interface TracedFieldSelectionResult {
+  readonly snapshots: readonly PublishSnapshot[];
+  readonly fields: readonly PublishFieldSelection[];
 }
 
 export class PublishingManager implements vscode.Disposable {
@@ -163,6 +170,18 @@ export class PublishingManager implements vscode.Disposable {
           );
         }
       }
+      const tracedFields = kind === "traced" && profileSettings?.route
+        ? await this.selectTracedFields(
+            connection,
+            clientSecret,
+            rootDetails,
+            options.publishSubItems,
+            controller.signal,
+          )
+        : { snapshots: [snapshotFromDetails(rootDetails)], fields: [] };
+      if (!tracedFields) {
+        return;
+      }
       const confirmed = await this.confirm(
         kind,
         connection.name,
@@ -171,6 +190,7 @@ export class PublishingManager implements vscode.Disposable {
         target.language,
         options,
         selectedIds.length,
+        tracedFields.fields.length,
       );
       if (!confirmed) {
         return;
@@ -195,15 +215,18 @@ export class PublishingManager implements vscode.Disposable {
         publishSubItems: kind === "power" ? false : options.publishSubItems,
         publishRelatedItems: kind === "power" ? false : options.publishRelatedItems,
         createdAt: new Date().toISOString(),
-        snapshots: graph.snapshots.filter((snapshot) =>
-          selectedIds.some((itemId) => normalizeId(itemId) === normalizeId(snapshot.itemId))
-        ),
+        snapshots: kind === "traced"
+          ? tracedFields.snapshots
+          : graph.snapshots.filter((snapshot) =>
+              selectedIds.some((itemId) => normalizeId(itemId) === normalizeId(snapshot.itemId))
+            ),
+        fieldSelections: tracedFields.fields.length ? tracedFields.fields : undefined,
         referenceEdges: graph.edges.filter((edge) =>
           selectedIds.some((itemId) => normalizeId(itemId) === normalizeId(edge.sourceItemId)) &&
           selectedIds.some((itemId) => normalizeId(itemId) === normalizeId(edge.targetItemId))
         ),
         batches,
-        stages: initialStages(kind, profileSettings),
+        stages: initialStages(kind, profileSettings, tracedFields),
         route: profileSettings?.route,
         routeItemId: profileSettings?.routeItemId,
         siteName: profileSettings?.profile.siteName,
@@ -574,9 +597,15 @@ export class PublishingManager implements vscode.Disposable {
     let run = await this.setStage(initialRun, "edgeItem", "running", "Waiting for Experience Edge.");
     const deadline = Date.now() + 5 * 60_000;
     let missing: string[] = [];
+    let matches: string[] = [];
     do {
       missing = [];
+      matches = [];
       for (const snapshot of run.snapshots) {
+        const expectedFields = expectedFieldsForSnapshot(run, snapshot);
+        if (run.fieldSelections?.length && expectedFields.length === 0) {
+          continue;
+        }
         const item = await this.edge.item(
           settings.profile.edgeEndpoint,
           settings.edgeToken,
@@ -588,12 +617,19 @@ export class PublishingManager implements vscode.Disposable {
           missing.push(`${snapshot.path}: item not found`);
           continue;
         }
-        const mismatches = Object.entries(snapshot.fields)
-          .filter(([, expected]) => expected.length > 0)
-          .filter(([name, expected]) => item.fields[name] !== expected)
-          .map(([name]) => name);
-        if (mismatches.length > 0) {
-          missing.push(`${snapshot.path}: field mismatch (${mismatches.join(", ")})`);
+        for (const [name, expected] of expectedFields) {
+          const actual = item.fields[name];
+          if (actual !== expected) {
+            missing.push(
+              `${snapshot.path} › ${name}: expected ${formatFieldValue(expected)}, Edge returned ${
+                actual === undefined ? "missing" : formatFieldValue(actual)
+              }`,
+            );
+          } else if (run.fieldSelections?.length) {
+            matches.push(
+              `${snapshot.path} › ${name}: ${formatFieldValue(expected)} matched`,
+            );
+          }
         }
       }
       if (missing.length === 0) {
@@ -601,7 +637,10 @@ export class PublishingManager implements vscode.Disposable {
           run,
           "edgeItem",
           "matched",
-          `${run.snapshots.length} expected item snapshot(s) reached Experience Edge.`,
+          run.fieldSelections?.length
+            ? `${run.fieldSelections.length} selected field value(s) reached Experience Edge.`
+            : `${run.snapshots.length} expected item snapshot(s) reached Experience Edge.`,
+          matches,
         );
       }
       if (Date.now() < deadline) {
@@ -653,8 +692,18 @@ export class PublishingManager implements vscode.Disposable {
         "Experience Edge did not resolve a rendered layout for the route.",
       );
     }
-    const layoutEvidence = run.snapshots.map((snapshot) => {
+    const selectedFieldCount = run.fieldSelections?.length ?? 0;
+    const snapshotsToInspect = selectedFieldCount
+      ? run.snapshots.filter((snapshot) =>
+          expectedFieldsForSnapshot(run, snapshot).length > 0
+        )
+      : run.snapshots;
+    const layoutEvidence = snapshotsToInspect.map((snapshot) => {
+      const selectedFieldNames = selectedFieldCount
+        ? expectedFieldsForSnapshot(run, snapshot).map(([name]) => name)
+        : undefined;
       if (
+        !selectedFieldNames &&
         normalizeId(snapshot.itemId) === normalizeId(run.rootItemId) &&
         layout.itemId &&
         normalizeId(layout.itemId) === normalizeId(snapshot.itemId)
@@ -664,14 +713,16 @@ export class PublishingManager implements vscode.Disposable {
           itemId: snapshot.itemId,
           found: true,
           fieldMismatches: [] as readonly string[],
+          fieldMatches: [] as readonly string[],
         };
       }
-      return inspectRenderedSnapshot(layout.rendered, snapshot);
+      return inspectRenderedSnapshot(layout.rendered, snapshot, selectedFieldNames);
     });
     const missingIds = layoutEvidence
       .filter((evidence) => !evidence.found)
       .map((evidence) => `${evidence.path}: item ${evidence.itemId} was not exposed in rendered data`);
     const fieldMismatches = layoutEvidence.flatMap((evidence) => evidence.fieldMismatches);
+    const fieldMatches = layoutEvidence.flatMap((evidence) => evidence.fieldMatches);
     const rootMismatch = !layout.itemId
       ? ["Rendered layout did not identify its route item."]
       : settings.routeItemId && normalizeId(layout.itemId) !== normalizeId(settings.routeItemId)
@@ -683,15 +734,24 @@ export class PublishingManager implements vscode.Disposable {
         ? [`${shortId(edge.sourceItemId)} did not reference ${shortId(edge.targetItemId)} through ${edge.fieldName}`]
         : [];
     });
-    const divergences = [...rootMismatch, ...fieldMismatches, ...referenceMismatches];
+    const divergences = [
+      ...rootMismatch,
+      ...fieldMismatches,
+      ...referenceMismatches,
+      ...(selectedFieldCount ? missingIds : []),
+    ];
     run = await this.setStage(
       run,
       "edgeLayout",
       divergences.length ? "diverged" : "matched",
       divergences.length
-        ? "The rendered layout did not match every observed item and scoped field value."
-        : "The rendered route identity and observable reference chains matched.",
-      [...divergences, ...missingIds],
+        ? selectedFieldCount
+          ? "The rendered layout did not expose every selected field value."
+          : "The rendered layout did not match every observed item and scoped field value."
+        : selectedFieldCount
+          ? `${selectedFieldCount} selected field value(s) matched in the rendered layout.`
+          : "The rendered route identity and observable reference chains matched.",
+      [...divergences, ...fieldMatches, ...(selectedFieldCount ? [] : missingIds)],
     );
     return run;
   }
@@ -720,8 +780,9 @@ export class PublishingManager implements vscode.Disposable {
         `HTTP ${result.status}`,
         ...Object.entries(result.headers).map(([name, value]) => `${name}: ${value}`),
       ];
+      const explicitFieldSelection = Boolean(run.fieldSelections?.length);
       const candidateValues = run.snapshots.flatMap((snapshot) =>
-        Object.entries(snapshot.fields)
+        expectedFieldsForSnapshot(run, snapshot)
           .filter(([, value]) => value.trim().length >= 3)
           .map(([name, value]) => ({ path: snapshot.path, name, value }))
       );
@@ -729,7 +790,10 @@ export class PublishingManager implements vscode.Disposable {
         result.body.includes(candidate.value)
       );
       const healthyStatus = result.status >= 200 && result.status < 400;
-      const contentMatched = candidateValues.length === 0 || matchedValues.length > 0;
+      const contentMatched = candidateValues.length === 0 ||
+        (explicitFieldSelection
+          ? matchedValues.length === candidateValues.length
+          : matchedValues.length > 0);
       const healthy = healthyStatus && contentMatched;
       run = await this.setStage(
         run,
@@ -737,7 +801,9 @@ export class PublishingManager implements vscode.Disposable {
         healthy ? "matched" : "diverged",
         healthy
           ? matchedValues.length
-            ? `The public application response contains ${matchedValues.length} expected value(s).`
+            ? explicitFieldSelection
+              ? `The public application response contains all ${matchedValues.length} selected textual value(s).`
+              : `The public application response contains ${matchedValues.length} expected value(s).`
             : "The public application response was successful; no textual assertions were available."
           : healthyStatus
             ? "The response was successful but contained none of the expected textual values."
@@ -747,6 +813,14 @@ export class PublishingManager implements vscode.Disposable {
           ...matchedValues.slice(0, 20).map((candidate) =>
             `Matched ${candidate.path}: ${candidate.name}`
           ),
+          ...(explicitFieldSelection
+            ? candidateValues
+                .filter((candidate) => !matchedValues.includes(candidate))
+                .slice(0, 20)
+                .map((candidate) =>
+                  `Missing ${candidate.path} › ${candidate.name}: ${formatFieldValue(candidate.value)}`
+                )
+            : []),
         ],
       );
     } catch (error: unknown) {
@@ -786,6 +860,152 @@ export class PublishingManager implements vscode.Disposable {
       await delay(Date.now() - startedAt < 60_000 ? 2_000 : 5_000, signal);
     }
     throw new Error(`Publishing operation ${operationId} did not finish within 30 minutes.`);
+  }
+
+  private async selectTracedFields(
+    connection: NonNullable<ReturnType<ConnectionStore["get"]>>,
+    clientSecret: string,
+    root: AuthoringItemDetails,
+    includeDescendants: boolean,
+    signal: AbortSignal,
+  ): Promise<TracedFieldSelectionResult | undefined> {
+    const discovery = includeDescendants
+      ? await this.loadStructuralDescendants(
+          connection,
+          clientSecret,
+          root,
+          signal,
+        )
+      : { details: [root], truncated: false };
+    const choices = discovery.details.flatMap((details) =>
+      details.fields
+        .filter((field) => !field.isStandardTemplate)
+        .map((field) => ({
+          label: `${details.displayName} › ${field.name}`,
+          description: summarizeFieldValue(field.value),
+          detail: details.path,
+          itemId: details.itemId,
+          fieldName: field.name,
+        }))
+    );
+    if (choices.length === 0) {
+      await vscode.window.showInformationMessage(
+        "No non-standard fields are available in the selected publish tree.",
+      );
+      return { snapshots: [snapshotFromDetails(root)], fields: [] };
+    }
+    if (discovery.truncated) {
+      this.output.appendLine(
+        `Traced field discovery stopped after ${maximumTracedFieldItems} structural items.`,
+      );
+    }
+    const selected = await vscode.window.showQuickPick(
+      choices,
+      {
+        title: discovery.truncated
+          ? `Traced publish: fields to verify (first ${maximumTracedFieldItems} items)`
+          : "Traced publish: fields to verify",
+        placeHolder:
+          "Select fields from the selected item and structural descendants, or press Enter to skip",
+        canPickMany: true,
+        matchOnDescription: true,
+        matchOnDetail: true,
+      },
+    );
+    if (!selected) {
+      return undefined;
+    }
+    const fields = selected.map((choice) => ({
+      itemId: choice.itemId,
+      fieldName: choice.fieldName,
+    }));
+    const ownerIds = new Set(fields.map((field) => normalizeId(field.itemId)));
+    const snapshots = [
+      root,
+      ...discovery.details.filter((details) =>
+        normalizeId(details.itemId) !== normalizeId(root.itemId) &&
+        ownerIds.has(normalizeId(details.itemId))
+      ),
+    ].map(snapshotFromDetails);
+    return { snapshots, fields };
+  }
+
+  private async loadStructuralDescendants(
+    connection: NonNullable<ReturnType<ConnectionStore["get"]>>,
+    clientSecret: string,
+    root: AuthoringItemDetails,
+    signal: AbortSignal,
+  ): Promise<{
+    readonly details: readonly AuthoringItemDetails[];
+    readonly truncated: boolean;
+  }> {
+    return vscode.window.withProgress(
+      {
+        location: vscode.ProgressLocation.Notification,
+        title: "Discovering fields in the selected publish tree",
+        cancellable: true,
+      },
+      async (progress, token) => {
+        const discoveryController = new AbortController();
+        const forwardAbort = (): void => discoveryController.abort(signal.reason);
+        signal.addEventListener("abort", forwardAbort, { once: true });
+        const subscription = token.onCancellationRequested(() =>
+          discoveryController.abort(new DOMException("Field discovery cancelled.", "AbortError"))
+        );
+        const details: AuthoringItemDetails[] = [root];
+        const queue: AuthoringItemDetails[] = root.hasChildren ? [root] : [];
+        let truncated = false;
+        try {
+          while (queue.length > 0) {
+            const parent = queue.shift();
+            if (!parent) {
+              break;
+            }
+            progress.report({
+              message: `${details.length}/${maximumTracedFieldItems}: ${parent.path}`,
+            });
+            const level = await this.authoring.loadTreeLevel(
+              connection,
+              clientSecret,
+              { itemId: parent.itemId },
+              root.language,
+              discoveryController.signal,
+            );
+            for (const child of level.children) {
+              if (details.length >= maximumTracedFieldItems) {
+                truncated = true;
+                queue.length = 0;
+                break;
+              }
+              try {
+                const childDetails = await this.authoring.loadItemDetails(
+                  connection,
+                  clientSecret,
+                  child.itemId,
+                  root.language,
+                  discoveryController.signal,
+                );
+                details.push(childDetails);
+                if (childDetails.hasChildren) {
+                  queue.push(childDetails);
+                }
+              } catch (error: unknown) {
+                if (discoveryController.signal.aborted) {
+                  throw discoveryController.signal.reason;
+                }
+                this.output.appendLine(
+                  `Structural field candidate ${child.path} could not be loaded: ${errorMessage(error)}`,
+                );
+              }
+            }
+          }
+          return { details, truncated };
+        } finally {
+          subscription.dispose();
+          signal.removeEventListener("abort", forwardAbort);
+        }
+      },
+    );
   }
 
   private async buildObservedGraph(
@@ -1206,6 +1426,7 @@ export class PublishingManager implements vscode.Disposable {
     language: string,
     options: PublishOptions,
     itemCount: number,
+    fieldCount: number,
   ): Promise<boolean> {
     const scope = [
       options.publishSubItems ? "descendants" : undefined,
@@ -1217,7 +1438,10 @@ export class PublishingManager implements vscode.Disposable {
         `${root.path} — ${root.itemId}`,
         `Language: ${language}; mode: ${options.mode}; ${itemCount} explicit item(s)`,
         `Additional scope: ${scope.join(", ") || "none"}`,
-      ].join("\n"),
+        kind === "traced"
+          ? `Rendered field assertions: ${fieldCount || "none"}`
+          : undefined,
+      ].filter((value): value is string => Boolean(value)).join("\n"),
       { modal: true },
       "Publish",
     );
@@ -1371,6 +1595,32 @@ function snapshotFromDetails(details: AuthoringItemDetails): PublishSnapshot {
   };
 }
 
+function expectedFieldsForSnapshot(
+  run: PublishRun,
+  snapshot: PublishSnapshot,
+): readonly (readonly [string, string])[] {
+  if (!run.fieldSelections?.length) {
+    return Object.entries(snapshot.fields).filter(([, expected]) => expected.length > 0);
+  }
+  return run.fieldSelections
+    .filter((field) => normalizeId(field.itemId) === normalizeId(snapshot.itemId))
+    .map((field) => [field.fieldName, snapshot.fields[field.fieldName] ?? ""] as const);
+}
+
+function summarizeFieldValue(value: string): string {
+  const singleLine = value.replace(/\s+/gu, " ").trim();
+  if (!singleLine) {
+    return "(empty)";
+  }
+  return singleLine.length > 100 ? `${singleLine.slice(0, 97)}…` : singleLine;
+}
+
+function formatFieldValue(value: string): string {
+  return JSON.stringify(
+    value.length > 160 ? `${value.slice(0, 157)}…` : value,
+  );
+}
+
 function isReferenceField(field: AuthoringItemField): boolean {
   const type = `${field.type} ${field.typeKey}`.toLowerCase();
   return ["droplink", "droptree", "multilist", "treelist", "general link", "image", "layout", "tree list"]
@@ -1427,11 +1677,13 @@ function dependencyOrder(
 function inspectRenderedSnapshot(
   rendered: string,
   snapshot: PublishSnapshot,
+  selectedFieldNames?: readonly string[],
 ): {
   readonly path: string;
   readonly itemId: string;
   readonly found: boolean;
   readonly fieldMismatches: readonly string[];
+  readonly fieldMatches: readonly string[];
 } {
   let root: unknown;
   try {
@@ -1442,7 +1694,10 @@ function inspectRenderedSnapshot(
       path: snapshot.path,
       itemId: snapshot.itemId,
       found,
-      fieldMismatches: [],
+      fieldMismatches: selectedFieldNames?.map((name) =>
+        `${snapshot.path} › ${name}: rendered layout data could not be inspected`
+      ) ?? [],
+      fieldMatches: [],
     };
   }
   const candidates: unknown[] = [];
@@ -1454,19 +1709,46 @@ function inspectRenderedSnapshot(
       candidates.push(value);
     }
   });
+  if (candidates.length === 0) {
+    return {
+      path: snapshot.path,
+      itemId: snapshot.itemId,
+      found: false,
+      fieldMismatches: [],
+      fieldMatches: [],
+    };
+  }
   const actualFields = new Map<string, string>();
   for (const candidate of candidates) {
     collectNamedFieldValues(candidate, actualFields);
   }
-  const fieldMismatches = Object.entries(snapshot.fields)
-    .filter(([name]) => actualFields.has(name))
-    .filter(([name, expected]) => actualFields.get(name) !== expected)
-    .map(([name]) => `${snapshot.path}: rendered field ${name} differs from raw Edge`);
+  const expectedFields = selectedFieldNames
+    ? selectedFieldNames.map((name) => [name, snapshot.fields[name]] as const)
+    : Object.entries(snapshot.fields).filter(([name]) => actualFields.has(name));
+  const fieldMismatches: string[] = [];
+  const fieldMatches: string[] = [];
+  for (const [name, expected] of expectedFields) {
+    const actual = actualFields.get(name);
+    if (actual === undefined) {
+      fieldMismatches.push(
+        `${snapshot.path} › ${name}: not observable in rendered layout; expected ${formatFieldValue(expected ?? "")}`,
+      );
+    } else if (actual !== expected) {
+      fieldMismatches.push(
+        `${snapshot.path} › ${name}: expected ${formatFieldValue(expected ?? "")}, rendered layout returned ${formatFieldValue(actual)}`,
+      );
+    } else if (selectedFieldNames) {
+      fieldMatches.push(
+        `${snapshot.path} › ${name}: ${formatFieldValue(expected ?? "")} matched`,
+      );
+    }
+  }
   return {
     path: snapshot.path,
     itemId: snapshot.itemId,
     found: candidates.length > 0,
     fieldMismatches,
+    fieldMatches,
   };
 }
 
@@ -1544,9 +1826,27 @@ function collectNamedFieldValues(value: unknown, target: Map<string, string>): v
 function initialStages(
   kind: PublishKind,
   profile: ProfileRunSettings | undefined,
+  tracedFields: TracedFieldSelectionResult,
 ): readonly TraceStage[] {
+  const authoringEvidence = tracedFields.fields.flatMap((selection) => {
+    const snapshot = tracedFields.snapshots.find((candidate) =>
+      normalizeId(candidate.itemId) === normalizeId(selection.itemId)
+    );
+    const expected = snapshot?.fields[selection.fieldName];
+    return snapshot && expected !== undefined
+      ? [`${snapshot.path} › ${selection.fieldName}: expected ${formatFieldValue(expected)}`]
+      : [];
+  });
   return [
-    { id: "authoring", label: "Authoring snapshot", status: "matched", summary: "Snapshot captured." },
+    {
+      id: "authoring",
+      label: "Authoring snapshot",
+      status: "matched",
+      summary: tracedFields.fields.length
+        ? `Snapshot captured with ${tracedFields.fields.length} selected field assertion(s).`
+        : "Snapshot captured.",
+      evidence: authoringEvidence,
+    },
     { id: "publishing", label: "Sitecore publishing", status: "pending" },
     {
       id: "edgeItem",
@@ -1687,6 +1987,12 @@ function suggestRoute(itemPath: string, siteRootPath?: string): string {
   }
   if (homeIndex >= 0) {
     routeSegments = routeSegments.slice(homeIndex + 1);
+  }
+  const localDataIndex = routeSegments.findIndex((segment) =>
+    segment.localeCompare("data", undefined, { sensitivity: "base" }) === 0
+  );
+  if (localDataIndex > 0) {
+    routeSegments = routeSegments.slice(0, localDataIndex);
   }
   const slugSegments = routeSegments.map(slugSegment).filter(Boolean);
   return slugSegments.length ? `/${slugSegments.join("/")}` : "/";
