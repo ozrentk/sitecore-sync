@@ -5,6 +5,7 @@
 src/**
 scripts/**
 node_modules/**
+!node_modules/playwright-core/**
 dist/**
 tsconfig.json
 package-lock.json

@@ -8,6 +8,10 @@ import type {
 } from "../sitecore/authoringClient";
 import { ExperienceEdgeClient } from "../sitecore/experienceEdgeClient";
 import { PublishingClient, type PublishingStatus } from "../sitecore/publishingClient";
+import {
+  verifyBrowserDom,
+  type BrowserDomAssertion,
+} from "./browserDomVerifier";
 import type {
   PublishKind,
   PublishFieldSelection,
@@ -30,7 +34,7 @@ const maximumTracedFieldItems = 200;
 const retryVerificationCommand = "xmCloudSync.retryPublishTraceVerification";
 const republishTraceCommand = "xmCloudSync.republishTrace";
 const recheckStatusCommand = "xmCloudSync.recheckPublishTraceStatus";
-const diagnosticStageIds = ["edgeItem", "edgeLayout", "application"] as const;
+const diagnosticStageIds = ["edgeItem", "edgeLayout", "application", "browserDom"] as const;
 
 interface PublishOptions {
   readonly mode: PublishMode;
@@ -181,6 +185,7 @@ export class PublishingManager implements vscode.Disposable {
             clientSecret,
             rootDetails,
             options.publishSubItems,
+            profileSettings.applicationUrl,
             controller.signal,
           )
         : { snapshots: [snapshotFromDetails(rootDetails)], fields: [] };
@@ -196,6 +201,7 @@ export class PublishingManager implements vscode.Disposable {
         options,
         selectedIds.length,
         tracedFields.fields.length,
+        tracedFields.fields.filter((field) => field.browserSelector).length,
       );
       if (!confirmed) {
         return;
@@ -376,8 +382,10 @@ export class PublishingManager implements vscode.Disposable {
     }
     const firstFailedStage = diagnosticStageIds.find((id) => {
       const status = original.stages.find((stage) => stage.id === id)?.status;
-      return status === "diverged" || status === "failed" || status === "inconclusive";
-    });
+      return status === "diverged" || status === "failed";
+    }) ?? diagnosticStageIds.find((id) =>
+      original.stages.find((stage) => stage.id === id)?.status === "inconclusive"
+    );
     if (!firstFailedStage) {
       await vscode.window.showInformationMessage(
         "This trace has no failed diagnostic stage to retry.",
@@ -412,6 +420,9 @@ export class PublishingManager implements vscode.Disposable {
             }
             if (firstIndex <= diagnosticStageIds.indexOf("application")) {
               run = await this.verifyApplication(run, controller.signal);
+            }
+            if (firstIndex <= diagnosticStageIds.indexOf("browserDom")) {
+              run = await this.verifyBrowserDom(run, controller.signal);
             }
           } finally {
             subscription.dispose();
@@ -554,6 +565,7 @@ export class PublishingManager implements vscode.Disposable {
       run = await this.verifyEdgeItems(run, settings, controller.signal);
       run = await this.verifyLayout(run, settings, controller.signal);
       run = await this.verifyApplication(run, controller.signal);
+      run = await this.verifyBrowserDom(run, controller.signal);
       await this.complete(run, classify(run));
     } catch (error: unknown) {
       if (isAbort(error)) {
@@ -731,6 +743,7 @@ export class PublishingManager implements vscode.Disposable {
     run = await this.verifyEdgeItems(run, profileSettings, signal);
     run = await this.verifyLayout(run, profileSettings, signal);
     run = await this.verifyApplication(run, signal);
+    run = await this.verifyBrowserDom(run, signal);
     const conclusion = classify(run);
     await this.complete(run, conclusion);
   }
@@ -802,6 +815,7 @@ export class PublishingManager implements vscode.Disposable {
     run = await this.verifyEdgeItems(run, settings, signal);
     run = await this.verifyLayout(run, settings, signal);
     run = await this.verifyApplication(run, signal);
+    run = await this.verifyBrowserDom(run, signal);
     await this.complete(run, classify(run));
   }
 
@@ -1057,6 +1071,96 @@ export class PublishingManager implements vscode.Disposable {
     return run;
   }
 
+  private async verifyBrowserDom(
+    initialRun: PublishRun,
+    signal: AbortSignal,
+  ): Promise<PublishRun> {
+    const assertions = (initialRun.fieldSelections ?? []).flatMap(
+      (selection): readonly BrowserDomAssertion[] => {
+        if (!selection.browserSelector) {
+          return [];
+        }
+        const snapshot = initialRun.snapshots.find((candidate) =>
+          normalizeId(candidate.itemId) === normalizeId(selection.itemId)
+        );
+        const expected = snapshot?.fields[selection.fieldName];
+        return snapshot && expected !== undefined
+          ? [{
+              itemPath: snapshot.path,
+              fieldName: selection.fieldName,
+              selector: selection.browserSelector,
+              expected,
+            }]
+          : [];
+      },
+    );
+    if (!initialRun.applicationUrl || assertions.length === 0) {
+      return this.setStage(
+        initialRun,
+        "browserDom",
+        "skipped",
+        "No Browser DOM selectors were configured.",
+      );
+    }
+    let run = await this.setStage(
+      initialRun,
+      "browserDom",
+      "running",
+      `Opening ${initialRun.applicationUrl} in an isolated headless browser.`,
+    );
+    try {
+      const result = await verifyBrowserDom(
+        initialRun.applicationUrl,
+        assertions,
+        signal,
+      );
+      const different = result.assertions.filter((assertion) =>
+        assertion.status === "different"
+      );
+      const uncertain = result.assertions.filter((assertion) =>
+        assertion.status === "missing" || assertion.status === "invalid"
+      );
+      const status: TraceStageStatus = different.length
+        ? "diverged"
+        : uncertain.length
+          ? "inconclusive"
+          : "matched";
+      const evidence = [
+        `Browser: ${result.browserChannel}`,
+        `Requested URL: ${result.requestedUrl}`,
+        `Final URL: ${result.finalUrl}`,
+        ...result.assertions.map((assertion) => {
+          const observed = assertion.observedTexts.length
+            ? assertion.observedTexts.map(formatFieldValue).join(", ")
+            : "none";
+          return `${assertion.itemPath} › ${assertion.fieldName}: ${assertion.status}; selector ${JSON.stringify(assertion.selector)}; matches=${assertion.matchCount}; expected=${formatFieldValue(assertion.expected)}; observed=${observed}`;
+        }),
+      ];
+      run = await this.setStage(
+        run,
+        "browserDom",
+        status,
+        status === "matched"
+          ? `${assertions.length} selected field value(s) matched in the browser-rendered DOM.`
+          : status === "diverged"
+            ? `${different.length} selector assertion(s) found elements with different rendered text.`
+            : `${uncertain.length} selector assertion(s) could not identify a browser-rendered value conclusively.`,
+        evidence,
+      );
+    } catch (error: unknown) {
+      if (isAbort(error)) {
+        throw error;
+      }
+      run = await this.setStage(
+        run,
+        "browserDom",
+        "failed",
+        `Optional Browser DOM verification failed: ${errorMessage(error)}`,
+      );
+    }
+    return run;
+  }
+
   private async pollPublishing(
     connection: NonNullable<ReturnType<ConnectionStore["get"]>>,
     clientSecret: string,
@@ -1090,6 +1194,7 @@ export class PublishingManager implements vscode.Disposable {
     clientSecret: string,
     root: AuthoringItemDetails,
     includeDescendants: boolean,
+    applicationUrl: string | undefined,
     signal: AbortSignal,
   ): Promise<TracedFieldSelectionResult | undefined> {
     const discovery = includeDescendants
@@ -1138,9 +1243,48 @@ export class PublishingManager implements vscode.Disposable {
     if (!selected) {
       return undefined;
     }
+    const browserFields = applicationUrl && selected.length
+      ? await vscode.window.showQuickPick(
+          selected,
+          {
+            title: "Traced publish: optional Browser DOM fields",
+            placeHolder:
+              "Select fields to check using CSS selectors, or press Enter to skip Browser DOM verification",
+            canPickMany: true,
+            matchOnDescription: true,
+            matchOnDetail: true,
+          },
+        )
+      : [];
+    if (browserFields === undefined) {
+      return undefined;
+    }
+    const browserSelectors = new Map<string, string>();
+    for (let index = 0; index < browserFields.length; index += 1) {
+      const choice = browserFields[index];
+      const selector = await vscode.window.showInputBox({
+        title: `Browser DOM selector (${index + 1}/${browserFields.length})`,
+        prompt:
+          `Paste a CSS selector for “${choice.label}”. Browser-generated selectors can be brittle; leave empty to skip this field.`,
+        placeHolder: "[data-testid=\"product-heading\"]",
+        ignoreFocusOut: true,
+      });
+      if (selector === undefined) {
+        return undefined;
+      }
+      if (selector.trim()) {
+        browserSelectors.set(
+          `${normalizeId(choice.itemId)}:${choice.fieldName}`,
+          selector.trim(),
+        );
+      }
+    }
     const fields = selected.map((choice) => ({
       itemId: choice.itemId,
       fieldName: choice.fieldName,
+      browserSelector: browserSelectors.get(
+        `${normalizeId(choice.itemId)}:${choice.fieldName}`,
+      ),
     }));
     const ownerIds = new Set(fields.map((field) => normalizeId(field.itemId)));
     const snapshots = [
@@ -1675,6 +1819,7 @@ export class PublishingManager implements vscode.Disposable {
     options: PublishOptions,
     itemCount: number,
     fieldCount: number,
+    browserSelectorCount: number,
   ): Promise<boolean> {
     const scope = [
       options.publishSubItems ? "descendants" : undefined,
@@ -1688,6 +1833,9 @@ export class PublishingManager implements vscode.Disposable {
         `Additional scope: ${scope.join(", ") || "none"}`,
         kind === "traced"
           ? `Rendered field assertions: ${fieldCount || "none"}`
+          : undefined,
+        kind === "traced"
+          ? `Browser DOM selectors: ${browserSelectorCount || "none"}`
           : undefined,
       ].filter((value): value is string => Boolean(value)).join("\n"),
       { modal: true },
@@ -1889,6 +2037,18 @@ function prepareDiagnosticRetry(
           updatedAt: attemptedAt,
         };
       }
+      if (
+        stage.id === "browserDom" &&
+        (!run.applicationUrl || !hasBrowserDomAssertions(run))
+      ) {
+        return {
+          ...stage,
+          status: "skipped",
+          summary: "No Browser DOM selectors were configured.",
+          evidence: undefined,
+          updatedAt: attemptedAt,
+        };
+      }
       return {
         ...stage,
         status: "pending",
@@ -1945,6 +2105,18 @@ function prepareStatusRecheck(run: PublishRun): PublishRun {
             updatedAt: attemptedAt,
           };
         }
+        if (
+          stage.id === "browserDom" &&
+          (!run.applicationUrl || !hasBrowserDomAssertions(run))
+        ) {
+          return {
+            ...stage,
+            status: "skipped",
+            summary: "No Browser DOM selectors were configured.",
+            evidence: undefined,
+            updatedAt: attemptedAt,
+          };
+        }
         return {
           ...stage,
           status: "pending",
@@ -1989,6 +2161,10 @@ function finishRetryWithFailure(
       ? { ...stage, status: "failed", summary: message, updatedAt: completedAt }
       : stage),
   };
+}
+
+function hasBrowserDomAssertions(run: PublishRun): boolean {
+  return run.fieldSelections?.some((field) => Boolean(field.browserSelector)) === true;
 }
 
 function expectedFieldsForSnapshot(
@@ -2224,6 +2400,9 @@ function initialStages(
   profile: ProfileRunSettings | undefined,
   tracedFields: TracedFieldSelectionResult,
 ): readonly TraceStage[] {
+  const browserSelectorCount = tracedFields.fields.filter((field) =>
+    field.browserSelector
+  ).length;
   const authoringEvidence = tracedFields.fields.flatMap((selection) => {
     const snapshot = tracedFields.snapshots.find((candidate) =>
       normalizeId(candidate.itemId) === normalizeId(selection.itemId)
@@ -2270,6 +2449,20 @@ function initialStages(
           ? "Optional verification was not configured."
           : undefined,
     },
+    {
+      id: "browserDom",
+      label: "Browser DOM",
+      status: kind === "standard" || !profile?.applicationUrl || browserSelectorCount === 0
+        ? "skipped"
+        : "pending",
+      summary: kind === "standard"
+        ? "Not requested for Standard publish."
+        : !profile?.applicationUrl
+          ? "Application URL was not configured."
+          : browserSelectorCount === 0
+            ? "No Browser DOM selectors were configured."
+            : undefined,
+    },
   ];
 }
 
@@ -2282,11 +2475,19 @@ function classify(run: PublishRun): string {
   if (stage("edgeLayout")?.status === "diverged") {
     return "Likely boundary: raw Experience Edge item → rendered route layout.";
   }
+  if (stage("browserDom")?.status === "diverged") {
+    return "The browser found the configured element, but its rendered text differed from the selected field value.";
+  }
+  if (stage("browserDom")?.status === "inconclusive") {
+    return "Browser DOM verification could not identify every configured selector conclusively.";
+  }
   if (stage("application")?.status === "diverged") {
     return "Likely boundary: rendered Experience Edge layout → application or CDN response.";
   }
   if (stage("application")?.status === "inconclusive") {
-    return "Rendered layout matched, but the server response did not prove what the browser rendered.";
+    return stage("browserDom")?.status === "matched"
+      ? "Selected values matched in the browser DOM; the server response alone was inconclusive."
+      : "Rendered layout matched, but the server response did not prove what the browser rendered.";
   }
   if (run.stages.some((candidate) => candidate.status === "failed")) {
     return "Publishing completed, but an optional diagnostic stage could not be evaluated.";
@@ -2377,20 +2578,22 @@ function traceAction(
   ) {
     return { command: republishTraceCommand, label: "Publish again…" };
   }
-  const retryableDiagnostic = run.stages.find((stage) =>
-    diagnosticStageIds.includes(stage.id as typeof diagnosticStageIds[number]) &&
-    (
-      stage.status === "failed" ||
-      stage.status === "diverged" ||
-      stage.status === "inconclusive"
-    )
+  const diagnosticStages = run.stages.filter((stage) =>
+    diagnosticStageIds.includes(stage.id as typeof diagnosticStageIds[number])
+  );
+  const retryableDiagnostic = diagnosticStages.find((stage) =>
+    stage.status === "failed" || stage.status === "diverged"
+  ) ?? diagnosticStages.find((stage) =>
+    stage.status === "inconclusive"
   );
   return retryableDiagnostic
     ? {
         command: retryVerificationCommand,
-        label: retryableDiagnostic.status === "inconclusive"
-          ? "Retry application response"
-          : "Retry failed verification",
+        label: retryableDiagnostic.id === "browserDom"
+          ? "Retry Browser DOM"
+          : retryableDiagnostic.status === "inconclusive"
+            ? "Retry application response"
+            : "Retry failed verification",
       }
     : undefined;
 }
