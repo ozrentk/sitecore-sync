@@ -212,6 +212,11 @@ export class PublishingManager implements vscode.Disposable {
         async () =>
           this.execute(run as PublishRun, connection, clientSecret, profileSettings, controller.signal),
       );
+      if (kind === "standard") {
+        await vscode.window.showInformationMessage(
+          `${connection.name}: published ${rootDetails.path} (${target.language}).`,
+        );
+      }
     } catch (error: unknown) {
       if (isAbort(error)) {
         this.output.appendLine("Publish preparation or execution was cancelled.");
@@ -387,10 +392,7 @@ export class PublishingManager implements vscode.Disposable {
     );
 
     if (run.kind === "standard") {
-      run = await this.complete(run, "Sitecore completed the publishing operation.");
-      await vscode.window.showInformationMessage(
-        `${run.connectionName}: published ${run.rootPath} (${run.language}).`,
-      );
+      await this.complete(run, "Sitecore completed the publishing operation.");
       return;
     }
     if (!profileSettings) {
