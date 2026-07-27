@@ -7,6 +7,7 @@ const connectionsKey = "sitecoreXmCloudSync.connections.v1";
 const secretPrefix = "sitecoreXmCloudSync.connectionSecret.v1";
 const deploymentSecretPrefix = "sitecoreXmCloudSync.deploymentSecret.v1";
 const speCredentialSecretPrefix = "sitecoreXmCloudSync.speCredential.v1";
+const edgeTokenSecretPrefix = "sitecoreXmCloudSync.edgeToken.v1";
 const favoritePathsKey = "sitecoreXmCloudSync.favoritePaths.v1";
 const verifiedSitesKey = "sitecoreXmCloudSync.verifiedSites.v1";
 
@@ -30,6 +31,10 @@ function deploymentSecretKey(connectionId: string): string {
 
 function speCredentialSecretKey(connectionId: string): string {
   return `${speCredentialSecretPrefix}.${connectionId}`;
+}
+
+function edgeTokenSecretKey(connectionId: string): string {
+  return `${edgeTokenSecretPrefix}.${connectionId}`;
 }
 
 export interface SpeCredential {
@@ -204,6 +209,21 @@ export class ConnectionStore implements vscode.Disposable {
     return this.secrets.get(deploymentSecretKey(connectionId));
   }
 
+  async getEdgeToken(connectionId: string): Promise<string | undefined> {
+    return this.secrets.get(edgeTokenSecretKey(connectionId));
+  }
+
+  async storeEdgeToken(connectionId: string, token: string): Promise<void> {
+    if (!this.get(connectionId)) {
+      throw new Error("The XM Cloud connection no longer exists.");
+    }
+    await this.secrets.store(edgeTokenSecretKey(connectionId), token);
+  }
+
+  async deleteEdgeToken(connectionId: string): Promise<void> {
+    await this.secrets.delete(edgeTokenSecretKey(connectionId));
+  }
+
   async getSpeCredential(connectionId: string): Promise<SpeCredential | undefined> {
     const stored = await this.secrets.get(speCredentialSecretKey(connectionId));
     if (!stored) {
@@ -252,6 +272,7 @@ export class ConnectionStore implements vscode.Disposable {
     await this.secrets.delete(secretKey(connectionId));
     await this.secrets.delete(deploymentSecretKey(connectionId));
     await this.secrets.delete(speCredentialSecretKey(connectionId));
+    await this.secrets.delete(edgeTokenSecretKey(connectionId));
     this.changeEmitter.fire();
   }
 
