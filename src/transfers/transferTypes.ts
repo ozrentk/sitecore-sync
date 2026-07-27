@@ -23,7 +23,8 @@ export type TransferRecordStatus =
   | "executing"
   | "waitingForSitecore"
   | "verifying"
-  | "failed";
+  | "failed"
+  | "completed";
 
 export interface TransferRefreshPlanEntry {
   readonly itemId: string;
@@ -52,6 +53,7 @@ interface TransferRecordBase {
   readonly startedAt?: string;
   readonly error?: string;
   readonly journalPath?: string;
+  readonly completedAt?: string;
 }
 
 export interface FieldTransferEndpoint {
@@ -100,6 +102,40 @@ export interface SubtreeTransferRecord extends TransferRecordBase {
 }
 
 export type TransferRecord = FieldValueTransferRecord | SubtreeTransferRecord;
+
+export interface PublishingOperationRecord {
+  readonly kind: "publishing";
+  readonly id: string;
+  readonly sequence: number;
+  readonly duplicateKey: string;
+  readonly status: TransferRecordStatus;
+  readonly enqueuedAt: string;
+  readonly startedAt?: string;
+  readonly completedAt?: string;
+  readonly error?: string;
+  readonly publishRunId: string;
+  readonly publishKind: "standard" | "traced" | "power";
+  readonly connectionId: string;
+  readonly connectionName: string;
+  readonly itemId: string;
+  readonly itemPath: string;
+  readonly language: string;
+  readonly progressSummary?: string;
+}
+
+export type OperationRecord = TransferRecord | PublishingOperationRecord;
+
+export interface PublishingOperationDraft {
+  readonly kind: "publishing";
+  readonly duplicateKey: string;
+  readonly publishRunId: string;
+  readonly publishKind: PublishingOperationRecord["publishKind"];
+  readonly connectionId: string;
+  readonly connectionName: string;
+  readonly itemId: string;
+  readonly itemPath: string;
+  readonly language: string;
+}
 
 export type FieldValueTransferDraft = Omit<
   FieldValueTransferRecord,
@@ -181,6 +217,36 @@ export function isTransferRecord(value: unknown): value is TransferRecord {
       "waitingForSitecore",
       "verifying",
       "failed",
+      "completed",
+    ].includes(String(candidate.status))
+  );
+}
+
+export function isOperationRecord(value: unknown): value is OperationRecord {
+  if (!value || typeof value !== "object") {
+    return false;
+  }
+  const candidate = value as Partial<OperationRecord>;
+  if (candidate.kind !== "publishing") {
+    return isTransferRecord(value);
+  }
+  return (
+    typeof candidate.id === "string" &&
+    typeof candidate.sequence === "number" &&
+    typeof candidate.duplicateKey === "string" &&
+    typeof candidate.enqueuedAt === "string" &&
+    typeof candidate.publishRunId === "string" &&
+    typeof candidate.connectionId === "string" &&
+    typeof candidate.itemPath === "string" &&
+    ["standard", "traced", "power"].includes(String(candidate.publishKind)) &&
+    [
+      "queued",
+      "preflighting",
+      "executing",
+      "waitingForSitecore",
+      "verifying",
+      "failed",
+      "completed",
     ].includes(String(candidate.status))
   );
 }

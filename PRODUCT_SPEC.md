@@ -257,7 +257,7 @@ Deployment monitoring is an optional subtree safeguard. The processor first atte
 
 Field-value execution re-reads both items and checks scope-aware field fingerprints captured at enqueue time. A stale source or target fails before mutation. Otherwise it issues one Authoring `updateItem` mutation and re-reads the target to verify the literal value. Identical pending requests are deduplicated.
 
-## Planned v0.9.7 Operations
+## v0.9.7 Operations
 
 The **Transfers** view becomes **Operations**. Subtree transfers, field-value transfers, and Standard, Traced, and Power publishing records share one durable workspace-scoped FIFO and one processor. The processor executes exactly one operation at a time. Publishing therefore does not bypass a long transfer, and transfers do not bypass publishing. New work can still be enqueued while another operation is active.
 

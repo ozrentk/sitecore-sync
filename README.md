@@ -2,7 +2,7 @@
 
 XM Cloud Sync is an early-stage VS Code extension for comparing and synchronizing Sitecore XM Cloud authoring content.
 
-The current build supports multiple saved XM Cloud connections, automation-client authentication, authenticated connection testing, a document-style comparison workspace, and a durable asynchronous transfer queue.
+The current build supports multiple saved XM Cloud connections, automation-client authentication, authenticated connection testing, a document-style comparison workspace, and a durable asynchronous Operations queue for transfers and publishing.
 
 ## Add and test a connection
 
@@ -53,7 +53,7 @@ Right-click an item and choose **Add Subtree Transfer Left → Right…** or **A
 
 Before confirmation, a cancellable structural preflight enumerates both subtrees and reports source and target counts plus how many items will be added, overwritten, or removed. Exact mirror uses a short **Replace target tree?** warning that states the target subtree will be deleted and recreated, then reports matching, source-only, and target-only item counts. There is no separate production-target checkbox. After confirmation, the extension adds the subtree and its transfer type to the workspace's FIFO queue. Field Diff arrows add field-value transfers to the same queue. Duplicate pending requests are not added twice.
 
-Open **Transfers** in the activity view and select Play to process records one at a time in insertion order. Pause stops before the next transfer or between remote polling windows; an already-issued request is allowed to reach a safe boundary. Queue contents, order, processing state, and remote checkpoints survive VS Code restarts. Completed records disappear after a secret-free journal is written. A failure remains at the queue head, pauses processing, and can be retried or removed.
+Open **Operations** in the activity view and select Play to process transfer and publishing records one at a time in insertion order. Pause stops before the next operation or at an operation-specific safe boundary; an already-issued request is allowed to reach that boundary. Queue contents, order, processing state, publishing runs, and remote checkpoints survive VS Code restarts. Completed records move to **Recent Operations** after their secret-free journal is written; the newest 30 are retained and the newest 10 are shown initially. A failure remains at the queue head, pauses processing, and can be retried or removed.
 
 Subtree rows show six phases: queued, freshness checking, content export, chunk copying, Sitecore import, and verification. Chunk copying uses the actual Content Transfer count, for example `copying chunks (4/6, chunk 7/23)`. The Sitecore phase reports completed transfer blobs and elapsed phase time, for example `Sitecore (5/6, blob 0/1 imported, 8m 15s)`. Item Transfer polling starts near two-second intervals, backs off to 5, 10, and finally 15 seconds for long-running imports, and applies small jitter. Field-value rows show four phases from queued through verification. Detailed subtree progress is persisted with the queue record and remains visible on failure.
 
