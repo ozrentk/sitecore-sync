@@ -33,6 +33,7 @@ export function activate(context: vscode.ExtensionContext): void {
   const publishOutput = vscode.window.createOutputChannel("XM Cloud Publish");
   const publishingClient = new PublishingClient(log);
   const experienceEdgeClient = new ExperienceEdgeClient(log);
+  const transferQueue = new TransferQueueStore(context.workspaceState);
   const publishingManager = new PublishingManager(
     context.extensionUri,
     context.workspaceState,
@@ -43,6 +44,7 @@ export function activate(context: vscode.ExtensionContext): void {
     publishingClient,
     experienceEdgeClient,
     publishOutput,
+    transferQueue,
   );
   const itemTaskRunner = new ItemTaskRunner(
     context.globalStorageUri,
@@ -52,7 +54,6 @@ export function activate(context: vscode.ExtensionContext): void {
     taskOutput,
   );
   const extensionVersion = String(context.extension.packageJSON.version ?? "unknown");
-  const transferQueue = new TransferQueueStore(context.workspaceState);
   const transferProcessor = new TransferProcessor(
     transferQueue,
     connectionStore,
@@ -61,8 +62,10 @@ export function activate(context: vscode.ExtensionContext): void {
     context.globalStorageUri,
     extensionVersion,
     log,
+    (runId) => publishingManager.executeQueued(runId),
   );
   const transfersProvider = new TransfersTreeProvider(transferQueue, connectionStore);
+  let transferOperationPanel: vscode.WebviewPanel | undefined;
   const comparisonPanelManager = new ComparisonPanelManager(
     context.extensionUri,
     context.workspaceState,
@@ -81,8 +84,21 @@ export function activate(context: vscode.ExtensionContext): void {
     treeDataProvider: transfersProvider,
   });
   const updateTransfersBadge = (): void => {
-    const count = transferQueue.list().length;
-    transfersView.badge = count ? { value: count, tooltip: `${count} queued transfer(s)` } : undefined;
+    const records = transferQueue.list();
+    const queued = records.filter((record) => record.status === "queued").length;
+    const failed = records.filter((record) => record.status === "failed").length;
+    const running = records.length - queued - failed;
+    const parts = [
+      queued ? `${queued} queued` : undefined,
+      running ? `${running} running/waiting` : undefined,
+      failed ? `${failed} require attention` : undefined,
+    ].filter((part): part is string => Boolean(part));
+    transfersView.badge = records.length
+      ? {
+          value: records.length,
+          tooltip: `${records.length} active operation(s): ${parts.join(", ")}`,
+        }
+      : undefined;
   };
   updateTransfersBadge();
 
@@ -233,6 +249,9 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.commands.registerCommand("xmCloudSync.pauseTransfers", async () => {
       await transferProcessor.pause();
     }),
+    vscode.commands.registerCommand("xmCloudSync.toggleAllRecentOperations", () => {
+      transfersProvider.toggleAllRecent();
+    }),
     vscode.commands.registerCommand("xmCloudSync.retryTransfer", async (argument) => {
       if (argument instanceof TransferTreeItem) {
         await transferQueue.retry(argument.record.id);
@@ -250,7 +269,7 @@ export function activate(context: vscode.ExtensionContext): void {
       );
       if (!removable) {
         await vscode.window.showInformationMessage(
-          "This transfer has started. Pause processing before removing it at a safe boundary.",
+          "This operation has started. Pause processing before removing it at a safe boundary.",
         );
         return;
       }
@@ -258,18 +277,58 @@ export function activate(context: vscode.ExtensionContext): void {
         ? " The remote Sitecore operation may continue, but it will no longer be monitored."
         : "";
       const confirmed = await vscode.window.showWarningMessage(
-        `Remove this transfer from the queue?${checkpointWarning}`,
+        `Remove this operation from the queue?${checkpointWarning}`,
         { modal: true },
-        "Remove Transfer",
+        "Remove Operation",
       );
-      if (confirmed === "Remove Transfer") {
+      if (confirmed === "Remove Operation") {
+        if (current.kind === "publishing") {
+          await publishingManager.abandonQueuedRun(current.publishRunId);
+        }
         await transferQueue.remove(current.id);
       }
     }),
+    vscode.commands.registerCommand("xmCloudSync.moveOperationUp", async (argument) => {
+      if (argument instanceof TransferTreeItem) {
+        await transferQueue.move(argument.record.id, -1);
+      }
+    }),
+    vscode.commands.registerCommand("xmCloudSync.moveOperationDown", async (argument) => {
+      if (argument instanceof TransferTreeItem) {
+        await transferQueue.move(argument.record.id, 1);
+      }
+    }),
     vscode.commands.registerCommand("xmCloudSync.openTransferJournal", async (argument) => {
-      if (argument instanceof TransferTreeItem && argument.record.journalPath) {
+      if (
+        argument instanceof TransferTreeItem &&
+        argument.record.kind !== "publishing" &&
+        argument.record.journalPath
+      ) {
         const document = await vscode.workspace.openTextDocument(argument.record.journalPath);
         await vscode.window.showTextDocument(document, { preview: false });
+      }
+    }),
+    vscode.commands.registerCommand("xmCloudSync.openOperation", async (argument) => {
+      if (!(argument instanceof TransferTreeItem)) {
+        return;
+      }
+      if (argument.record.kind === "publishing") {
+        publishingManager.showTrace(argument.record.publishRunId);
+      } else {
+        if (!transferOperationPanel) {
+          transferOperationPanel = vscode.window.createWebviewPanel(
+            "xmCloudSync.operationDetails",
+            "Operation Details",
+            vscode.ViewColumn.Active,
+            { enableScripts: false, retainContextWhenHidden: true },
+          );
+          transferOperationPanel.onDidDispose(() => {
+            transferOperationPanel = undefined;
+          });
+        } else {
+          transferOperationPanel.reveal(vscode.ViewColumn.Active);
+        }
+        transferOperationPanel.webview.html = transferOperationHtml(argument.record);
       }
     }),
     vscode.commands.registerCommand("xmCloudSync.compareWithConnection", async (argument) => {
@@ -323,10 +382,46 @@ export function activate(context: vscode.ExtensionContext): void {
     }),
   );
   void updateConnectionRemovalContext();
-  void transferProcessor.resumeIfRunning();
-  void publishingManager.resumePending();
+  void publishingManager.enqueuePendingRuns().then(() =>
+    transferProcessor.resumeIfRunning()
+  );
 }
 
 export function deactivate(): void {
   // VS Code disposes subscriptions registered on the extension context.
+}
+
+function transferOperationHtml(
+  record: Exclude<TransferTreeItem["record"], { readonly kind: "publishing" }>,
+): string {
+  const title = record.kind === "fieldValue" ? "Field-value Transfer" : "Subtree Transfer";
+  const source = record.kind === "fieldValue"
+    ? `${record.source.connectionName}: ${record.source.itemPath}`
+    : `${record.sourceConnectionName}: ${record.sourcePath}`;
+  const target = record.kind === "fieldValue"
+    ? `${record.target.connectionName}: ${record.target.itemPath}`
+    : record.targetConnectionName;
+  return `<!doctype html>
+<html><head><meta charset="utf-8"><style>
+body{font-family:var(--vscode-font-family);padding:24px;color:var(--vscode-foreground)}
+.summary{border-left:3px solid var(--vscode-focusBorder);padding:12px;background:var(--vscode-editor-inactiveSelectionBackground)}
+dt{font-weight:600;margin-top:10px}dd{margin-left:0}pre{padding:12px;overflow:auto;background:var(--vscode-textCodeBlock-background)}
+</style></head><body>
+<h1>${escapeHtml(title)}</h1>
+<div class="summary"><strong>${escapeHtml(record.status)}</strong>${record.error ? ` — ${escapeHtml(record.error)}` : ""}</div>
+<dl><dt>Source</dt><dd>${escapeHtml(source)}</dd><dt>Destination</dt><dd>${escapeHtml(target)}</dd>
+<dt>Queued</dt><dd>${escapeHtml(record.enqueuedAt)}</dd>${record.startedAt ? `<dt>Started</dt><dd>${escapeHtml(record.startedAt)}</dd>` : ""}
+${record.completedAt ? `<dt>Completed</dt><dd>${escapeHtml(record.completedAt)}</dd>` : ""}</dl>
+<h2>Evidence</h2><pre>${escapeHtml(JSON.stringify(record, null, 2))}</pre>
+</body></html>`;
+}
+
+function escapeHtml(value: string): string {
+  return value.replace(/[&<>"']/gu, (character) => ({
+    "&": "&amp;",
+    "<": "&lt;",
+    ">": "&gt;",
+    "\"": "&quot;",
+    "'": "&#39;",
+  })[character] ?? character);
 }

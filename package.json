@@ -2,7 +2,7 @@
   "name": "sitecore-xm-cloud-sync",
   "displayName": "XM Cloud Sync",
   "description": "Compare and synchronize Sitecore XM Cloud authoring content from VS Code.",
-  "version": "0.9.6",
+  "version": "0.9.7",
   "publisher": "OzrenTK",
   "license": "MIT",
   "engines": {
@@ -122,28 +122,47 @@
       },
       {
         "command": "xmCloudSync.startTransfers",
-        "title": "Start Transfer Processing",
+        "title": "Start Operation Processing",
         "icon": "$(play)"
       },
       {
         "command": "xmCloudSync.pauseTransfers",
-        "title": "Pause Transfer Processing",
+        "title": "Pause Operation Processing",
         "icon": "$(debug-pause)"
       },
       {
         "command": "xmCloudSync.retryTransfer",
-        "title": "Retry Transfer",
+        "title": "Retry Operation",
         "icon": "$(debug-rerun)"
       },
       {
+        "command": "xmCloudSync.moveOperationUp",
+        "title": "Move Operation Up",
+        "icon": "$(arrow-up)"
+      },
+      {
+        "command": "xmCloudSync.moveOperationDown",
+        "title": "Move Operation Down",
+        "icon": "$(arrow-down)"
+      },
+      {
         "command": "xmCloudSync.removeTransfer",
-        "title": "Remove Transfer",
+        "title": "Remove Operation",
         "icon": "$(trash)"
       },
       {
         "command": "xmCloudSync.openTransferJournal",
         "title": "Open Transfer Journal",
         "icon": "$(output)"
+      },
+      {
+        "command": "xmCloudSync.openOperation",
+        "title": "Open Operation"
+      },
+      {
+        "command": "xmCloudSync.toggleAllRecentOperations",
+        "title": "Show More/Fewer Recent Operations",
+        "icon": "$(list-selection)"
       }
     ],
     "viewsContainers": {
@@ -170,7 +189,7 @@
         },
         {
           "id": "xmCloudSync.operations",
-          "name": "Transfers",
+          "name": "Operations",
           "collapsed": true
         }
       ],
@@ -189,17 +208,17 @@
       },
       {
         "view": "xmCloudSync.operations",
-        "contents": "Transfers added from the comparison or Field Diff will appear here. Processing is paused.",
+        "contents": "Transfers and publishing operations appear here. Processing is paused.",
         "when": "xmCloudSync.transferProcessorState == paused"
       },
       {
         "view": "xmCloudSync.operations",
-        "contents": "Transfer processing is running and waiting for work.",
+        "contents": "Operation processing is running and waiting for work.",
         "when": "xmCloudSync.transferProcessorState == running"
       },
       {
         "view": "xmCloudSync.operations",
-        "contents": "Transfer processing is pausing at the next safe boundary.",
+        "contents": "Operation processing is pausing at the next safe boundary.",
         "when": "xmCloudSync.transferProcessorState == pausing"
       }
     ],
@@ -229,6 +248,11 @@
           "command": "xmCloudSync.pauseTransfers",
           "when": "view == xmCloudSync.operations && xmCloudSync.transferProcessorState == running",
           "group": "navigation@1"
+        },
+        {
+          "command": "xmCloudSync.toggleAllRecentOperations",
+          "when": "view == xmCloudSync.operations",
+          "group": "navigation@2"
         }
       ],
       "view/item/context": [
@@ -274,18 +298,28 @@
         },
         {
           "command": "xmCloudSync.retryTransfer",
-          "when": "view == xmCloudSync.operations && viewItem == xmCloudTransfer.failed",
+          "when": "view == xmCloudSync.operations && (viewItem == xmCloudOperation.fieldValue.failed || viewItem == xmCloudOperation.subtree.failed || viewItem == xmCloudOperation.publishing.failed)",
           "group": "inline"
         },
         {
           "command": "xmCloudSync.openTransferJournal",
-          "when": "view == xmCloudSync.operations && viewItem == xmCloudTransfer.failed",
+          "when": "view == xmCloudSync.operations && (viewItem == xmCloudOperation.fieldValue.failed || viewItem == xmCloudOperation.subtree.failed)",
           "group": "1_manage"
         },
         {
           "command": "xmCloudSync.removeTransfer",
-          "when": "view == xmCloudSync.operations && (viewItem == xmCloudTransfer.queued || viewItem == xmCloudTransfer.failed || (viewItem == xmCloudTransfer.waitingForSitecore && xmCloudSync.transferProcessorState == paused))",
+          "when": "view == xmCloudSync.operations && (viewItem =~ /xmCloudOperation\\.(fieldValue|subtree|publishing)\\.(queued|failed)/ || (viewItem == xmCloudOperation.subtree.waitingForSitecore && xmCloudSync.transferProcessorState == paused))",
           "group": "2_manage"
+        },
+        {
+          "command": "xmCloudSync.moveOperationUp",
+          "when": "view == xmCloudSync.operations && viewItem =~ /xmCloudOperation\\.(fieldValue|subtree|publishing)\\.queued/",
+          "group": "1_order"
+        },
+        {
+          "command": "xmCloudSync.moveOperationDown",
+          "when": "view == xmCloudSync.operations && viewItem =~ /xmCloudOperation\\.(fieldValue|subtree|publishing)\\.queued/",
+          "group": "1_order"
         }
       ],
       "commandPalette": [
@@ -315,6 +349,18 @@
         },
         {
           "command": "xmCloudSync.openTransferJournal",
+          "when": "false"
+        },
+        {
+          "command": "xmCloudSync.openOperation",
+          "when": "false"
+        },
+        {
+          "command": "xmCloudSync.moveOperationUp",
+          "when": "false"
+        },
+        {
+          "command": "xmCloudSync.moveOperationDown",
           "when": "false"
         }
       ]

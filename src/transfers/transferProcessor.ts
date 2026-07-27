@@ -16,6 +16,7 @@ import {
   normalizeTransferId,
   subtreeTransferMode,
   type FieldValueTransferRecord,
+  type OperationRecord,
   type SubtreeTransferRecord,
   type TransferRecord,
 } from "./transferTypes";
@@ -39,6 +40,7 @@ export class TransferProcessor implements vscode.Disposable {
     private readonly journalStorageUri: vscode.Uri,
     private readonly extensionVersion: string,
     private readonly log: vscode.LogOutputChannel,
+    private readonly executePublishing?: (publishRunId: string) => Promise<void>,
   ) {
     this.disposables.push(store.onDidChange(() => {
       if (store.processorState === "running") {
@@ -84,8 +86,7 @@ export class TransferProcessor implements vscode.Disposable {
     while (this.store.processorState === "running") {
       const record = this.store.head();
       if (!record) {
-        await this.store.setProcessorState("paused");
-        this.log.info("Transfer queue is empty; processing paused.");
+        this.log.info("Operation queue is empty; processor remains ready for work.");
         return;
       }
       if (record.status === "failed") {
@@ -102,7 +103,7 @@ export class TransferProcessor implements vscode.Disposable {
     }
   }
 
-  private async processRecord(original: TransferRecord): Promise<boolean> {
+  private async processRecord(original: OperationRecord): Promise<boolean> {
     const startedAt = original.startedAt ?? new Date().toISOString();
     const active = await this.store.update(original.id, (record) => ({
       ...record,
@@ -115,29 +116,35 @@ export class TransferProcessor implements vscode.Disposable {
     if (!active) {
       return true;
     }
-    this.startEmitter.fire(active);
-    this.log.info(`Processing transfer ${active.id} (${active.kind}).`);
+    if (active.kind !== "publishing") {
+      this.startEmitter.fire(active);
+    }
+    this.log.info(`Processing operation ${active.id} (${active.kind}).`);
     try {
-      const completed = active.kind === "fieldValue"
-        ? await this.executeFieldTransfer(active)
-        : await this.executeSubtreeTransfer(active);
+      const completed = active.kind === "publishing"
+        ? await this.executePublishingOperation(active)
+        : active.kind === "fieldValue"
+          ? await this.executeFieldTransfer(active)
+          : await this.executeSubtreeTransfer(active);
       if (!completed) {
         return false;
       }
       const latest = this.store.get(active.id) ?? active;
-      await this.writeJournal(latest, "succeeded");
-      await this.store.remove(active.id);
-      this.completeEmitter.fire(latest);
-      this.log.info(`Completed transfer ${active.id}.`);
+      if (latest.kind !== "publishing") {
+        const journalPath = await this.writeJournal(latest, "succeeded");
+        await this.store.update(latest.id, (record) => ({ ...record, journalPath }));
+        this.completeEmitter.fire(latest);
+      }
+      await this.store.complete(active.id);
+      this.log.info(`Completed operation ${active.id}.`);
       return true;
     } catch (error: unknown) {
       const message = errorMessage(error);
-      this.log.error(`Transfer ${active.id} failed.`, error);
-      const journalPath = await this.writeJournal(
-        this.store.get(active.id) ?? active,
-        "failed",
-        message,
-      );
+      this.log.error(`Operation ${active.id} failed.`, error);
+      const current = this.store.get(active.id) ?? active;
+      const journalPath = current.kind === "publishing"
+        ? undefined
+        : await this.writeJournal(current, "failed", message);
       const failed = await this.store.update(active.id, (record) => ({
         ...record,
         status: "failed",
@@ -148,14 +155,28 @@ export class TransferProcessor implements vscode.Disposable {
           : {}),
       }));
       await this.store.setProcessorState("paused");
-      if (failed) {
+      if (failed && failed.kind !== "publishing") {
         this.failureEmitter.fire(failed);
       }
       await vscode.window.showErrorMessage(
-        `Transfer failed and the queue was paused: ${message}`,
+        `Operation failed and the queue was paused: ${message}`,
       );
       return false;
     }
+  }
+
+  private async executePublishingOperation(
+    record: Extract<OperationRecord, { readonly kind: "publishing" }>,
+  ): Promise<boolean> {
+    if (!this.executePublishing) {
+      throw new Error("Publishing execution is not available.");
+    }
+    await this.store.update(record.id, (current) => ({
+      ...current,
+      status: "executing",
+    }));
+    await this.executePublishing(record.publishRunId);
+    return true;
   }
 
   private async executeFieldTransfer(record: FieldValueTransferRecord): Promise<boolean> {

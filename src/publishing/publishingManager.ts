@@ -9,6 +9,7 @@ import type {
 } from "../sitecore/authoringClient";
 import { ExperienceEdgeClient } from "../sitecore/experienceEdgeClient";
 import { PublishingClient, type PublishingStatus } from "../sitecore/publishingClient";
+import type { TransferQueueStore } from "../transfers/transferQueueStore";
 import {
   verifyBrowserDom,
   type BrowserDomAssertion,
@@ -88,6 +89,7 @@ export class PublishingManager implements vscode.Disposable {
     private readonly publishing: PublishingClient,
     private readonly edge: ExperienceEdgeClient,
     private readonly output: vscode.OutputChannel,
+    private readonly operations: TransferQueueStore,
   ) {
     this.connectionSubscription = connections.onDidChange(() => {
       void this.removeOrphanedProfiles();
@@ -95,21 +97,6 @@ export class PublishingManager implements vscode.Disposable {
   }
 
   async start(kind: PublishKind, target: PublishTarget): Promise<void> {
-    if (this.controllers.size > 0) {
-      const action = "Abandon and Continue";
-      const selection = await vscode.window.showWarningMessage(
-        "Wait for the current publish operation to finish before starting another.",
-        {
-          modal: true,
-          detail:
-            "If local tracking is stale, you can abandon it and continue. This stops monitoring and clears the extension lock, but it does not cancel a publish that may still be running in XM Cloud.",
-        },
-        action,
-      );
-      if (selection !== action || !await this.abandonCurrentPublish(true)) {
-        return;
-      }
-    }
     const connection = this.connections.get(target.connectionId);
     const clientSecret = await this.connections.getClientSecret(target.connectionId);
     if (!connection || !clientSecret) {
@@ -266,25 +253,22 @@ export class PublishingManager implements vscode.Disposable {
       };
       await this.saveRun(run);
       this.controllers.delete(preparationId);
-      this.controllers.set(run.id, controller);
-      if (kind !== "standard") {
-        this.openTrace(run);
-      }
-      await vscode.window.withProgress(
-        {
-          location: vscode.ProgressLocation.Notification,
-          title: `${publishKindLabel(kind)}: ${rootDetails.path}`,
-          cancellable: false,
-        },
-        async () =>
-          this.execute(run as PublishRun, connection, clientSecret, profileSettings, controller.signal),
+      const queued = await this.operations.enqueuePublishing({
+        kind: "publishing",
+        duplicateKey: `publishing:${run.id}`,
+        publishRunId: run.id,
+        publishKind: kind,
+        connectionId: connection.id,
+        connectionName: connection.name,
+        itemId: rootDetails.itemId,
+        itemPath: rootDetails.path,
+        language: target.language,
+      });
+      await vscode.window.showInformationMessage(
+        `${publishKindLabel(kind)} added to Operations${
+          queued.added ? "." : " (already queued)."
+        }`,
       );
-      this.controllers.delete(run.id);
-      if (kind === "standard") {
-        await vscode.window.showInformationMessage(
-          `${connection.name}: published ${rootDetails.path} (${target.language}).`,
-        );
-      }
     } catch (error: unknown) {
       if (isAbort(error)) {
         this.output.appendLine("Publish preparation or execution was cancelled.");
@@ -304,6 +288,90 @@ export class PublishingManager implements vscode.Disposable {
         this.controllers.delete(run.id);
       }
     }
+  }
+
+  async executeQueued(runId: string): Promise<void> {
+    const run = this.listRuns().find((candidate) => candidate.id === runId);
+    if (!run) {
+      throw new Error("The saved publishing run could not be found.");
+    }
+    if (run.completedAt) {
+      return;
+    }
+    const connection = this.connections.get(run.connectionId);
+    const clientSecret = await this.connections.getClientSecret(run.connectionId);
+    if (!connection || !clientSecret) {
+      throw new Error("The publishing connection or its secret is unavailable.");
+    }
+    const controller = new AbortController();
+    this.controllers.set(run.id, controller);
+    if (run.kind !== "standard") {
+      this.openTrace(run);
+    }
+    try {
+      if (run.batches.some((batch) => batch.operationId)) {
+        await this.resumeBatches(run, connection, clientSecret, controller.signal);
+      } else {
+        const settings = run.kind === "standard"
+          ? undefined
+          : await this.loadRetrySettings(run);
+        if (run.kind !== "standard" && !settings) {
+          throw new Error("Saved Experience Edge settings are unavailable.");
+        }
+        await this.execute(run, connection, clientSecret, settings, controller.signal);
+      }
+    } catch (error: unknown) {
+      const latest = this.listRuns().find((candidate) => candidate.id === run.id) ?? run;
+      const failed = this.finishWithFailure(latest, errorMessage(error));
+      await this.saveRun(failed);
+      this.openTrace(failed);
+      throw error;
+    } finally {
+      this.controllers.delete(run.id);
+    }
+  }
+
+  showTrace(runId: string): void {
+    const run = this.listRuns().find((candidate) => candidate.id === runId);
+    if (run) {
+      this.openTrace(run);
+    }
+  }
+
+  async enqueuePendingRuns(): Promise<void> {
+    const queuedRunIds = new Set(
+      this.operations.list()
+        .filter((record) => record.kind === "publishing")
+        .map((record) => record.publishRunId),
+    );
+    for (const run of this.listRuns().filter((candidate) => !candidate.completedAt)) {
+      if (queuedRunIds.has(run.id)) {
+        continue;
+      }
+      await this.operations.enqueuePublishing({
+        kind: "publishing",
+        duplicateKey: `publishing:${run.id}`,
+        publishRunId: run.id,
+        publishKind: run.kind,
+        connectionId: run.connectionId,
+        connectionName: run.connectionName,
+        itemId: run.rootItemId,
+        itemPath: run.rootPath,
+        language: run.language,
+      });
+    }
+  }
+
+  async abandonQueuedRun(runId: string): Promise<void> {
+    const run = this.listRuns().find((candidate) => candidate.id === runId);
+    if (!run || run.completedAt) {
+      return;
+    }
+    await this.saveRun({
+      ...run,
+      completedAt: new Date().toISOString(),
+      conclusion: "Removed from the Operations queue before execution.",
+    });
   }
 
   async configureConnection(connectionId?: string): Promise<void> {
@@ -1923,6 +1991,14 @@ export class PublishingManager implements vscode.Disposable {
   private async saveRun(run: PublishRun): Promise<void> {
     const runs = [run, ...this.listRuns().filter((candidate) => candidate.id !== run.id)].slice(0, 30);
     await this.workspaceState.update(runsKey, runs);
+    if (!run.completedAt) {
+      const runningStage = run.stages.find((stage) => stage.status === "running");
+      await this.operations.updatePublishingProgress(
+        run.id,
+        runningStage && runningStage.id !== "publishing" ? "verifying" : "executing",
+        runningStage?.summary,
+      );
+    }
   }
 
   private listRuns(): readonly PublishRun[] {
@@ -1984,7 +2060,7 @@ export class PublishingManager implements vscode.Disposable {
     if (!this.panel) {
       this.panel = vscode.window.createWebviewPanel(
         "xmCloudSync.publishTrace",
-        "Publish Trace",
+        "Operation Details",
         vscode.ViewColumn.Active,
         {
           enableScripts: false,

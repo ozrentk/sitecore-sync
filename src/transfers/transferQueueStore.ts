@@ -1,7 +1,9 @@
 import { randomUUID } from "node:crypto";
 import * as vscode from "vscode";
 import {
-  isTransferRecord,
+  isOperationRecord,
+  type OperationRecord,
+  type PublishingOperationDraft,
   type TransferDraft,
   type TransferProcessorState,
   type TransferRecord,
@@ -12,11 +14,12 @@ const queueStateKey = "sitecoreXmCloudSync.transferQueue.v1";
 interface StoredQueueState {
   readonly processorState: TransferProcessorState;
   readonly nextSequence: number;
-  readonly records: readonly TransferRecord[];
+  readonly records: readonly OperationRecord[];
+  readonly history: readonly OperationRecord[];
 }
 
 function initialState(): StoredQueueState {
-  return { processorState: "paused", nextSequence: 1, records: [] };
+  return { processorState: "paused", nextSequence: 1, records: [], history: [] };
 }
 
 export class TransferQueueStore implements vscode.Disposable {
@@ -34,29 +37,72 @@ export class TransferQueueStore implements vscode.Disposable {
     return this.state.processorState;
   }
 
-  list(): readonly TransferRecord[] {
+  list(): readonly OperationRecord[] {
     return [...this.state.records].sort((left, right) => left.sequence - right.sequence);
   }
 
-  head(): TransferRecord | undefined {
+  listRecent(): readonly OperationRecord[] {
+    return [...this.state.history].sort((left, right) =>
+      Date.parse(right.completedAt ?? right.enqueuedAt) -
+      Date.parse(left.completedAt ?? left.enqueuedAt)
+    );
+  }
+
+  head(): OperationRecord | undefined {
     return this.list()[0];
   }
 
-  get(recordId: string): TransferRecord | undefined {
-    return this.state.records.find((record) => record.id === recordId);
+  get(recordId: string): OperationRecord | undefined {
+    return this.state.records.find((record) => record.id === recordId) ??
+      this.state.history.find((record) => record.id === recordId);
   }
 
   referencesConnection(connectionId: string): boolean {
-    return this.state.records.some((record) => record.kind === "fieldValue"
+    return this.state.records.some((record) => record.kind === "publishing"
+      ? record.connectionId === connectionId
+      : record.kind === "fieldValue"
       ? record.source.connectionId === connectionId || record.target.connectionId === connectionId
       : record.sourceConnectionId === connectionId || record.targetConnectionId === connectionId);
+  }
+
+  async enqueuePublishing(
+    draft: PublishingOperationDraft,
+  ): Promise<{ readonly record: OperationRecord; readonly added: boolean }> {
+    let result: { readonly record: OperationRecord; readonly added: boolean } | undefined;
+    await this.commit(() => {
+      const duplicate = this.state.records.find(
+        (record) => record.duplicateKey === draft.duplicateKey,
+      );
+      if (duplicate) {
+        result = { record: duplicate, added: false };
+        return;
+      }
+      const record: OperationRecord = {
+        ...draft,
+        id: randomUUID(),
+        sequence: this.state.nextSequence,
+        status: "queued",
+        enqueuedAt: new Date().toISOString(),
+      };
+      this.state = {
+        ...this.state,
+        nextSequence: this.state.nextSequence + 1,
+        records: [...this.state.records, record],
+      };
+      result = { record, added: true };
+    });
+    if (!result) {
+      throw new Error("Unable to add the publishing operation to the queue.");
+    }
+    return result;
   }
 
   async enqueue(draft: TransferDraft): Promise<{ readonly record: TransferRecord; readonly added: boolean }> {
     let result: { readonly record: TransferRecord; readonly added: boolean } | undefined;
     await this.commit(() => {
       const duplicate = this.state.records.find(
-        (record) => record.duplicateKey === draft.duplicateKey,
+        (record): record is TransferRecord =>
+          record.kind !== "publishing" && record.duplicateKey === draft.duplicateKey,
       );
       if (duplicate) {
         result = { record: duplicate, added: false };
@@ -86,9 +132,9 @@ export class TransferQueueStore implements vscode.Disposable {
 
   async update(
     recordId: string,
-    updater: (record: TransferRecord) => TransferRecord,
-  ): Promise<TransferRecord | undefined> {
-    let updated: TransferRecord | undefined;
+    updater: (record: OperationRecord) => OperationRecord,
+  ): Promise<OperationRecord | undefined> {
+    let updated: OperationRecord | undefined;
     await this.commit(() => {
       this.state = {
         ...this.state,
@@ -102,6 +148,44 @@ export class TransferQueueStore implements vscode.Disposable {
       };
     });
     return updated;
+  }
+
+  async complete(recordId: string): Promise<OperationRecord | undefined> {
+    let completed: OperationRecord | undefined;
+    await this.commit(() => {
+      const record = this.state.records.find((candidate) => candidate.id === recordId);
+      if (!record) {
+        return;
+      }
+      completed = {
+        ...record,
+        status: "completed",
+        completedAt: new Date().toISOString(),
+        error: undefined,
+      };
+      this.state = {
+        ...this.state,
+        records: this.state.records.filter((candidate) => candidate.id !== recordId),
+        history: [completed, ...this.state.history].slice(0, 30),
+      };
+    });
+    return completed;
+  }
+
+  async updatePublishingProgress(
+    publishRunId: string,
+    status: "executing" | "verifying",
+    progressSummary?: string,
+  ): Promise<void> {
+    const record = this.state.records.find((candidate) =>
+      candidate.kind === "publishing" && candidate.publishRunId === publishRunId
+    );
+    if (!record) {
+      return;
+    }
+    await this.update(record.id, (current) => current.kind === "publishing"
+      ? { ...current, status, progressSummary }
+      : current);
   }
 
   async remove(recordId: string): Promise<boolean> {
@@ -136,7 +220,33 @@ export class TransferQueueStore implements vscode.Disposable {
           : "queued",
         error: undefined,
         journalPath: undefined,
-        failureKind: undefined,
+        ...(record.kind === "subtree" ? { failureKind: undefined } : {}),
+      };
+    });
+  }
+
+  async move(recordId: string, direction: -1 | 1): Promise<void> {
+    await this.commit(() => {
+      const records = [...this.state.records].sort(
+        (left, right) => left.sequence - right.sequence,
+      );
+      const index = records.findIndex((record) => record.id === recordId);
+      const current = records[index];
+      const other = records[index + direction];
+      if (!current || !other || current.status !== "queued" || other.status !== "queued") {
+        return;
+      }
+      this.state = {
+        ...this.state,
+        records: this.state.records.map((record) => {
+          if (record.id === current.id) {
+            return { ...record, sequence: other.sequence };
+          }
+          if (record.id === other.id) {
+            return { ...record, sequence: current.sequence };
+          }
+          return record;
+        }),
       };
     });
   }
@@ -154,7 +264,10 @@ export class TransferQueueStore implements vscode.Disposable {
     }
     const candidate = stored as Partial<StoredQueueState>;
     const records = Array.isArray(candidate.records)
-      ? candidate.records.filter(isTransferRecord).map(recoverInterruptedRecord)
+      ? candidate.records.filter(isOperationRecord).map(recoverInterruptedRecord)
+      : [];
+    const history = Array.isArray(candidate.history)
+      ? candidate.history.filter(isOperationRecord).slice(0, 30)
       : [];
     const maxSequence = records.reduce((maximum, record) => Math.max(maximum, record.sequence), 0);
     return {
@@ -163,6 +276,7 @@ export class TransferQueueStore implements vscode.Disposable {
         ? Math.max(candidate.nextSequence, maxSequence + 1)
         : maxSequence + 1,
       records,
+      history,
     };
   }
 
@@ -181,7 +295,13 @@ export class TransferQueueStore implements vscode.Disposable {
   }
 }
 
-function recoverInterruptedRecord(record: TransferRecord): TransferRecord {
+function recoverInterruptedRecord(record: OperationRecord): OperationRecord {
+  if (record.kind === "publishing") {
+    return record.status === "failed" || record.status === "queued"
+      ? record
+      : { ...record, status: "queued" };
+  }
+
   const recoveredProgress = recoverLegacySitecoreProgress(record);
   const recoveredRecord = recoveredProgress && record.kind === "subtree"
     ? { ...record, progress: recoveredProgress }

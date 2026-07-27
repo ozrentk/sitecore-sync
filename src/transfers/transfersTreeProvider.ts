@@ -4,24 +4,47 @@ import type { TransferQueueStore } from "./transferQueueStore";
 import {
   subtreeTransferMode,
   subtreeTransferModeLabel,
-  type TransferRecord,
+  type OperationRecord,
 } from "./transferTypes";
 
 export class TransferTreeItem extends vscode.TreeItem {
-  constructor(readonly record: TransferRecord, description: string) {
-    super(transferLabel(record), vscode.TreeItemCollapsibleState.None);
+  constructor(readonly record: OperationRecord, description: string) {
+    super(operationLabel(record), vscode.TreeItemCollapsibleState.None);
     this.description = description;
-    this.contextValue = `xmCloudTransfer.${record.status}`;
-    this.iconPath = transferIcon(record);
-    this.tooltip = transferTooltip(record);
+    this.contextValue = `xmCloudOperation.${record.kind}.${record.status}`;
+    this.iconPath = operationIcon(record);
+    this.tooltip = operationTooltip(record);
+    this.command = {
+      command: "xmCloudSync.openOperation",
+      title: "Open Operation",
+      arguments: [this],
+    };
   }
 }
 
+class OperationGroupItem extends vscode.TreeItem {
+  constructor(
+    readonly group: "queue" | "recent",
+    count: number,
+  ) {
+    super(
+      group === "queue" ? "Queue" : "Recent Operations",
+      vscode.TreeItemCollapsibleState.Expanded,
+    );
+    this.description = String(count);
+    this.contextValue = `xmCloudOperationGroup.${group}`;
+    this.iconPath = new vscode.ThemeIcon(group === "queue" ? "list-ordered" : "history");
+  }
+}
+
+type OperationTreeElement = TransferTreeItem | OperationGroupItem;
+
 export class TransfersTreeProvider
-implements vscode.TreeDataProvider<TransferTreeItem>, vscode.Disposable {
-  private readonly changeEmitter = new vscode.EventEmitter<TransferTreeItem | undefined>();
+implements vscode.TreeDataProvider<OperationTreeElement>, vscode.Disposable {
+  private readonly changeEmitter = new vscode.EventEmitter<OperationTreeElement | undefined>();
   private readonly storeSubscription: vscode.Disposable;
   private readonly durationRefresh: ReturnType<typeof setInterval>;
+  private showAllRecent = false;
 
   readonly onDidChangeTreeData = this.changeEmitter.event;
 
@@ -41,18 +64,46 @@ implements vscode.TreeDataProvider<TransferTreeItem>, vscode.Disposable {
     }, 5_000);
   }
 
-  getTreeItem(element: TransferTreeItem): vscode.TreeItem {
+  getTreeItem(element: OperationTreeElement): vscode.TreeItem {
     return element;
   }
 
-  getChildren(): TransferTreeItem[] {
-    return this.store.list().map((record) => new TransferTreeItem(
+  getChildren(element?: OperationTreeElement): OperationTreeElement[] {
+    if (!element) {
+      const queue = this.store.list();
+      const recent = this.store.listRecent();
+      return [
+        new OperationGroupItem("queue", queue.length),
+        new OperationGroupItem("recent", recent.length),
+      ];
+    }
+    if (element instanceof TransferTreeItem) {
+      return [];
+    }
+    const records = element.group === "queue"
+      ? this.store.list()
+      : this.showAllRecent
+        ? this.store.listRecent()
+        : this.store.listRecent().slice(0, 10);
+    return records.map((record) => new TransferTreeItem(
       record,
       this.description(record),
     ));
   }
 
-  private description(record: TransferRecord): string {
+  toggleAllRecent(): void {
+    this.showAllRecent = !this.showAllRecent;
+    this.changeEmitter.fire(undefined);
+  }
+
+  private description(record: OperationRecord): string {
+    if (record.kind === "publishing") {
+      const connection = this.connections.get(record.connectionId)?.name ??
+        record.connectionName;
+      return `${connection} · ${record.language} · ${
+        record.progressSummary ?? statusLabel(record)
+      }`;
+    }
     const sourceId = record.kind === "fieldValue"
       ? record.source.connectionId
       : record.sourceConnectionId;
@@ -77,7 +128,10 @@ implements vscode.TreeDataProvider<TransferTreeItem>, vscode.Disposable {
   }
 }
 
-function transferLabel(record: TransferRecord): string {
+function operationLabel(record: OperationRecord): string {
+  if (record.kind === "publishing") {
+    return `${publishKindLabel(record.publishKind)} · ${itemName(record.itemPath)}`;
+  }
   return record.kind === "fieldValue"
     ? `Field ${fieldName(record)} · ${itemName(record.source.itemPath)}`
     : `Subtree · ${itemName(record.sourcePath)} · ${
@@ -89,7 +143,15 @@ function itemName(path: string): string {
   return path.split("/").filter(Boolean).at(-1) ?? path;
 }
 
-function fieldName(record: Extract<TransferRecord, { readonly kind: "fieldValue" }>): string {
+function publishKindLabel(kind: Extract<OperationRecord, { readonly kind: "publishing" }>["publishKind"]): string {
+  switch (kind) {
+    case "standard": return "Standard publish";
+    case "traced": return "Traced publish";
+    case "power": return "Power publish";
+  }
+}
+
+function fieldName(record: Extract<OperationRecord, { readonly kind: "fieldValue" }>): string {
   return record.source.fieldName === record.target.fieldName
     ? record.source.fieldName
     : `${record.source.fieldName} → ${record.target.fieldName}`;
@@ -99,7 +161,18 @@ function fieldPath(itemPath: string, name: string): string {
   return `${itemPath.replace(/\/$/u, "")}/${name}`;
 }
 
-function statusLabel(record: TransferRecord): string {
+function statusLabel(record: OperationRecord): string {
+  if (record.kind === "publishing") {
+    switch (record.status) {
+      case "queued": return "queued";
+      case "preflighting": return "preparing";
+      case "executing": return "publishing";
+      case "waitingForSitecore": return "waiting for Sitecore";
+      case "verifying": return "verifying";
+      case "failed": return "failed";
+      case "completed": return "completed";
+    }
+  }
   if (record.kind === "fieldValue") {
     switch (record.status) {
       case "queued": return "queued (1/4)";
@@ -108,6 +181,7 @@ function statusLabel(record: TransferRecord): string {
       case "verifying": return "verifying (4/4)";
       case "waitingForSitecore": return "waiting for Sitecore";
       case "failed": return "failed";
+      case "completed": return "completed";
     }
   }
   switch (record.status) {
@@ -120,11 +194,12 @@ function statusLabel(record: TransferRecord): string {
       const phase = subtreeProgressLabel(record);
       return phase ? `failed · ${phase}` : "failed";
     }
+    case "completed": return "completed";
   }
 }
 
 function subtreeProgressLabel(
-  record: Extract<TransferRecord, { readonly kind: "subtree" }>,
+  record: Extract<OperationRecord, { readonly kind: "subtree" }>,
 ): string | undefined {
   switch (record.progress?.stage) {
     case "exportingContent": return "exporting content (3/6)";
@@ -141,7 +216,7 @@ function subtreeProgressLabel(
   }
 }
 
-function transferIcon(record: TransferRecord): vscode.ThemeIcon {
+function operationIcon(record: OperationRecord): vscode.ThemeIcon {
   switch (record.status) {
     case "queued": return new vscode.ThemeIcon("clock");
     case "preflighting": return new vscode.ThemeIcon("search");
@@ -149,11 +224,27 @@ function transferIcon(record: TransferRecord): vscode.ThemeIcon {
     case "waitingForSitecore": return new vscode.ThemeIcon("sync~spin");
     case "verifying": return new vscode.ThemeIcon("pass-pending");
     case "failed": return new vscode.ThemeIcon("error", new vscode.ThemeColor("errorForeground"));
+    case "completed": return new vscode.ThemeIcon("pass", new vscode.ThemeColor("testing.iconPassed"));
   }
 }
 
-function transferTooltip(record: TransferRecord): vscode.MarkdownString {
+function operationTooltip(record: OperationRecord): vscode.MarkdownString {
   const tooltip = new vscode.MarkdownString(undefined, true);
+  if (record.kind === "publishing") {
+    tooltip.appendMarkdown(`**${publishKindLabel(record.publishKind)}**\n\n`);
+    tooltip.appendMarkdown(`Status: ${statusLabel(record)}  \n`);
+    tooltip.appendMarkdown(`Connection: ${escapeMarkdown(record.connectionName)}  \n`);
+    tooltip.appendMarkdown(`Item: ${escapeMarkdown(record.itemPath)}  \n`);
+    tooltip.appendMarkdown(`Language: ${escapeMarkdown(record.language)}  \n`);
+    tooltip.appendMarkdown(`Queued: ${record.enqueuedAt}  \n`);
+    if (record.completedAt) {
+      tooltip.appendMarkdown(`Completed: ${record.completedAt}  \n`);
+    }
+    if (record.error) {
+      tooltip.appendMarkdown(`\n**Error:** ${escapeMarkdown(record.error)}`);
+    }
+    return tooltip;
+  }
   tooltip.appendMarkdown(`**${record.kind === "fieldValue" ? "Field value" : "Subtree"} transfer**\n\n`);
   tooltip.appendMarkdown(`Status: ${statusLabel(record)}  \n`);
   tooltip.appendMarkdown(`Queued: ${record.enqueuedAt}  \n`);
@@ -201,7 +292,7 @@ function transferTooltip(record: TransferRecord): vscode.MarkdownString {
 }
 
 function deploymentBaselineLabel(
-  baseline: NonNullable<Extract<TransferRecord, { readonly kind: "subtree" }>["deploymentBaselines"]>["source"],
+  baseline: NonNullable<Extract<OperationRecord, { readonly kind: "subtree" }>["deploymentBaselines"]>["source"],
 ): string {
   const timestamp = baseline.createdAt ?? baseline.startedAt ?? baseline.deploymentStartedAt;
   if (!baseline.deploymentId) {
