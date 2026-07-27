@@ -10,6 +10,7 @@
 - Stored Experience Edge tokens in VS Code Secret Storage and made the generic application-response probe optional, public-URL based, and independent of Vercel credentials.
 - Added per-connection traced-publishing configuration for replacing the Edge endpoint, token, or default Sitecore site.
 - Persisted the latest 30 publish runs and wrote redacted JSON publish journals beneath VS Code extension storage.
+- Closed the Standard publish progress notification before showing its separate completion message.
 
 ## 0.9.4
 
