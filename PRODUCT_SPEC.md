@@ -316,6 +316,8 @@ Secrets, bearer tokens, client secrets, and authorization headers must never be 
 
 ## Deferred options
 
+- TODO (v0.9.7 follow-up): Define the **Operations** view badge semantics before enabling a combined count. Decide whether the badge represents queued work, currently running work, failures requiring attention, or a combination; completed history should not inflate it.
+- TODO (after v0.9.7): Redesign **Power publish** on top of the unified operation queue and shared Operation Details view, including dependency-plan editing and participation in recorded/replayed workflows.
 - `Clear Connection Cache` command.
 - ID-first/path-fallback identity mode.
 - Reference ID remapping between independently created environments.
