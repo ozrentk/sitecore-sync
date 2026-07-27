@@ -17,6 +17,7 @@
 - Validated new and replacement Edge tokens before storage by listing their accessible Edge site names, hostnames, and root paths; compared that scope with the connection's verified Authoring sites and required explicit approval or mismatch override.
 - Added guarded recovery for stale publish tracking: the blocking warning can abandon local tracking and continue, and a dedicated command can release the lock while preserving an explicit server-status-unknown trace.
 - Prefilled route verification with an editable slug derived from the selected item's path relative to the verified site root, omitting a conventional leading `Home` item.
+- Corrected route suggestions for XM Cloud site roots above the actual route start item by removing the full prefix through a conventional `Home` segment (for example, `Global/Home/Station Wagon` now suggests `/station-wagon`).
 
 ## 0.9.4
 

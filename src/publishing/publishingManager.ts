@@ -1678,8 +1678,15 @@ function suggestRoute(itemPath: string, siteRootPath?: string): string {
   let routeSegments = belongsToSite
     ? itemSegments.slice(rootSegments.length)
     : itemSegments.slice(-1);
-  if (routeSegments[0]?.localeCompare("home", undefined, { sensitivity: "base" }) === 0) {
-    routeSegments = routeSegments.slice(1);
+  let homeIndex = -1;
+  for (let index = routeSegments.length - 1; index >= 0; index -= 1) {
+    if (routeSegments[index].localeCompare("home", undefined, { sensitivity: "base" }) === 0) {
+      homeIndex = index;
+      break;
+    }
+  }
+  if (homeIndex >= 0) {
+    routeSegments = routeSegments.slice(homeIndex + 1);
   }
   const slugSegments = routeSegments.map(slugSegment).filter(Boolean);
   return slugSegments.length ? `/${slugSegments.join("/")}` : "/";
