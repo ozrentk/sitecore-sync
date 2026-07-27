@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.9.6
+
+- Added optional, searchable field assertions to Traced publish for the selected item and, when enabled, its structural descendants.
+- Kept **Related items** independent from field verification: it can affect Sitecore publishing scope but never adds referenced-item fields to the assertion picker.
+- Reported selected values explicitly across the Authoring snapshot, raw Experience Edge, rendered route layout, and optional public application response, treating a selected field that is missing from rendered data as a divergence.
+- Derived the route of an item below a conventional page-local `Data` subtree from its owning page path instead of suggesting the datasource item's structural path.
+
 ## 0.9.5
 
 - Added **Publish → Standard publish…**, **Traced publish…**, and **Power publish…** to each available comparison-side item.

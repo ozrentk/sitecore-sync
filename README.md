@@ -73,7 +73,11 @@ Traced publishing asks for the Experience Edge GraphQL endpoint and API token on
 
 For route verification, the extension prefills an editable Sitecore route from the selected item's path relative to the chosen site's verified root path. The prefix through a conventional `Home` route-start item is omitted and remaining item-name segments are converted to URL slugs, so both `Home/Station Wagon` and `Global/Home/Station Wagon` become `/station-wagon`. This is a suggestion only: it can be changed for custom URL rules or cleared to skip route verification.
 
+When the selected item is beneath a conventional page-local `Data` subtree, the suggested route stops at the owning page. For example, `Station Wagon/Data/…/See More` suggests `/station-wagon`.
+
 The application URL is always optional. When supplied, the extension makes a normal public HTTPS request and records status plus cache headers such as `Age`, `Cache-Control`, `x-vercel-cache`, and `x-vercel-id`. This requires no Vercel credentials. If the URL is omitted or inaccessible, only that stage is skipped or marked unavailable; Sitecore and Experience Edge tracing still run.
+
+When a route is configured, Traced publish offers an optional searchable field picker. It includes the selected item's non-standard fields and, only when **Descendants** is selected, fields from structural descendants in the same publish tree. **Related items** can still be sent to Sitecore as ordinary publishing scope, but referenced-item fields are intentionally excluded from Traced verification. Selected values are shown explicitly in the Authoring, raw Edge, rendered-layout, and optional application-response evidence. A selected field that is absent from rendered layout data is reported as not observable and makes that stage diverge.
 
 If saved monitoring state becomes stale, run **XM Cloud Sync: Abandon Current Publish Tracking**. The same recovery is offered as **Abandon and Continue** when a new publish is blocked. It aborts local monitoring, marks incomplete traces as locally abandoned with unknown server status, and releases the extension lock. It cannot cancel a publishing operation that is still running in XM Cloud.
 
