@@ -128,7 +128,7 @@ export class PublishingManager implements vscode.Disposable {
 
       let profileSettings = kind === "standard"
         ? undefined
-        : await this.collectProfileSettings(target.connectionId);
+        : await this.collectProfileSettings(target.connectionId, controller.signal);
       if (kind !== "standard" && !profileSettings) {
         return;
       }
@@ -281,20 +281,19 @@ export class PublishingManager implements vscode.Disposable {
     if (token === undefined) {
       return;
     }
-    const siteName = await vscode.window.showInputBox({
-      title: "Configure traced publishing (3/3)",
-      prompt: "Enter the default Sitecore site name, or leave empty.",
-      value: existing?.siteName,
-      ignoreFocusOut: true,
-    });
-    if (siteName === undefined) {
+    const siteSelection = await this.selectSiteName(
+      resolvedConnectionId,
+      existing?.siteName,
+      new AbortController().signal,
+    );
+    if (!siteSelection) {
       return;
     }
     await this.saveProfile(
       {
         connectionId: resolvedConnectionId,
         edgeEndpoint: endpoint.trim(),
-        siteName: siteName.trim() || undefined,
+        siteName: siteSelection.siteName,
       },
       token || existingToken as string,
     );
@@ -856,6 +855,7 @@ export class PublishingManager implements vscode.Disposable {
 
   private async collectProfileSettings(
     connectionId: string,
+    signal: AbortSignal,
   ): Promise<ProfileRunSettings | undefined> {
     let profile = this.listProfiles().find((candidate) => candidate.connectionId === connectionId);
     let edgeToken = await this.secrets.get(edgeTokenKey(connectionId));
@@ -888,25 +888,24 @@ export class PublishingManager implements vscode.Disposable {
       };
       await this.saveProfile(profile, edgeToken);
     }
-    const siteName = await vscode.window.showInputBox({
-      title: "Traced publish: Sitecore site",
-      prompt: "Enter the Sitecore site name for route-layout checks, or leave empty.",
-      value: profile.siteName,
-      ignoreFocusOut: true,
-    });
-    if (siteName === undefined) {
+    const siteSelection = await this.selectSiteName(connectionId, profile.siteName, signal);
+    if (!siteSelection) {
       return undefined;
     }
-    profile = { ...profile, siteName: siteName.trim() || undefined };
+    profile = { ...profile, siteName: siteSelection.siteName };
     await this.saveProfile(profile, edgeToken);
-    const route = await vscode.window.showInputBox({
-      title: "Traced publish: route verification",
-      prompt: "Enter the route for rendered-layout verification, or leave empty.",
-      placeHolder: "/station-wagon",
-      ignoreFocusOut: true,
-    });
-    if (route === undefined) {
-      return undefined;
+    let route = "";
+    if (profile.siteName) {
+      const selectedRoute = await vscode.window.showInputBox({
+        title: "Traced publish: route verification",
+        prompt: `Enter a route for Sitecore site “${profile.siteName}”, or leave empty.`,
+        placeHolder: "/station-wagon",
+        ignoreFocusOut: true,
+      });
+      if (selectedRoute === undefined) {
+        return undefined;
+      }
+      route = selectedRoute;
     }
     const defaultApplicationUrl = profile.applicationBaseUrl && route.trim()
       ? new URL(route.trim().replace(/^\//u, ""), ensureTrailingSlash(profile.applicationBaseUrl)).toString()
@@ -928,6 +927,73 @@ export class PublishingManager implements vscode.Disposable {
       routeItemId: undefined,
       applicationUrl: applicationUrl.trim() || undefined,
     };
+  }
+
+  private async selectSiteName(
+    connectionId: string,
+    currentSiteName: string | undefined,
+    signal: AbortSignal,
+  ): Promise<{ readonly siteName?: string } | undefined> {
+    let sites = this.connections.listVerifiedSites(connectionId);
+    if (!this.connections.hasVerifiedSiteCatalog(connectionId)) {
+      const connection = this.connections.get(connectionId);
+      const clientSecret = await this.connections.getClientSecret(connectionId);
+      if (connection && clientSecret) {
+        try {
+          const result = await vscode.window.withProgress(
+            {
+              location: vscode.ProgressLocation.Notification,
+              title: `Discovering configured sites for ${connection.name}`,
+              cancellable: false,
+            },
+            async () => this.authoring.testConnection(connection, clientSecret, signal),
+          );
+          sites = result.sites;
+          await this.connections.storeVerifiedSites(connectionId, sites);
+        } catch (error: unknown) {
+          if (isAbort(error)) {
+            throw error;
+          }
+          this.output.appendLine(
+            `Configured-site discovery failed; allowing manual site entry: ${errorMessage(error)}`,
+          );
+        }
+      }
+    }
+    if (sites.length === 1) {
+      return { siteName: sites[0].name };
+    }
+    if (sites.length > 1) {
+      const ordered = [...sites].sort((left, right) => {
+        const leftCurrent = left.name === currentSiteName ? 0 : 1;
+        const rightCurrent = right.name === currentSiteName ? 0 : 1;
+        return leftCurrent - rightCurrent ||
+          left.name.localeCompare(right.name, undefined, { sensitivity: "base" });
+      });
+      const selected = await vscode.window.showQuickPick(
+        ordered.map((site) => ({
+          label: site.name,
+          description: site.rootPath,
+          detail: site.rootItemId ? `Root item ID: ${site.rootItemId}` : undefined,
+          siteName: site.name,
+        })),
+        {
+          title: "Traced publish: Sitecore site",
+          placeHolder: "Select the site used by the route",
+          matchOnDescription: true,
+          matchOnDetail: true,
+        },
+      );
+      return selected ? { siteName: selected.siteName } : undefined;
+    }
+    const manual = await vscode.window.showInputBox({
+      title: "Traced publish: Sitecore site",
+      prompt: "No configured sites were discovered. Enter the Experience Edge site name, or leave empty.",
+      placeHolder: "grenadier",
+      value: currentSiteName,
+      ignoreFocusOut: true,
+    });
+    return manual === undefined ? undefined : { siteName: manual.trim() || undefined };
   }
 
   private async confirm(
