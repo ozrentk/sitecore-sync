@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src {{cspSource}}; script-src {{cspSource}};">
+  <link rel="stylesheet" href="{{styleUri}}">
+  <title>Configure Traced Publish</title>
+</head>
+<body>
+  <main>
+    <header>
+      <h1>Configure Traced Publish</h1>
+      <p id="context" class="muted"></p>
+    </header>
+
+    <section class="settings-grid" aria-label="Publish settings">
+      <fieldset>
+        <legend>Publishing</legend>
+        <label for="mode">Mode</label>
+        <select id="mode">
+          <option value="SMART">Smart publish</option>
+          <option value="FULL">Full publish</option>
+        </select>
+        <label class="check"><input id="descendants" type="checkbox"> Include structural descendants</label>
+        <label class="check"><input id="related" type="checkbox"> Include related items</label>
+      </fieldset>
+
+      <fieldset>
+        <legend>Route verification</legend>
+        <label for="site">Sitecore site</label>
+        <select id="site"></select>
+        <input id="manual-site" type="text" placeholder="grenadier" hidden>
+        <label for="route">Sitecore route</label>
+        <input id="route" type="text" placeholder="/station-wagon">
+      </fieldset>
+
+      <fieldset>
+        <legend>Application verification <span class="optional">optional</span></legend>
+        <label for="application-url">Exact public URL</label>
+        <input id="application-url" type="url" placeholder="https://staging.example.com/en/gb/station-wagon">
+        <p class="hint">Used by the HTTP response and Browser DOM checks. Verify the environment carefully.</p>
+      </fieldset>
+    </section>
+
+    <section class="assertions">
+      <div class="assertion-heading">
+        <div>
+          <h2>Field assertions <span class="optional">optional</span></h2>
+          <p class="hint">Select fields expected in Edge/layout. Add a CSS selector only when Browser DOM verification is also required.</p>
+        </div>
+        <input id="search" type="search" placeholder="Search item, path, field, or value" aria-label="Search field assertions">
+      </div>
+      <div id="field-status" class="status muted"></div>
+      <div id="fields" class="field-list"></div>
+    </section>
+
+    <div id="error" class="error" role="alert" hidden></div>
+    <footer>
+      <div id="summary" class="summary"></div>
+      <div class="actions">
+        <button id="cancel" type="button" class="secondary">Cancel</button>
+        <button id="publish" type="button">Publish</button>
+      </div>
+    </footer>
+  </main>
+  <script src="{{scriptUri}}"></script>
+</body>
+</html>

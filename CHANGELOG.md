@@ -10,7 +10,8 @@
 - Preserved up to ten previous trace attempts with their conclusions and stage evidence, and never started a missing publishing batch during a status-only re-check.
 - Reported successful application responses that omit expected text as **inconclusive** instead of failed, because a plain HTTP probe cannot observe text added later by browser-side rendering or hydration.
 - Added optional Browser DOM assertions for selected Traced-publish fields. Users can associate CSS selectors with assertions, then verify hydrated `textContent` in an isolated installed Chrome or Edge browser without changing the ordinary HTTP-response check.
-- Made Browser DOM text comparison case-insensitive and exposed the exact verification URL in selector prompts and the final publish confirmation to prevent silent environment mismatches.
+- Made Browser DOM text comparison case-insensitive and exposed the exact verification URL beside selectors to prevent silent environment mismatches.
+- Replaced the Traced-publish prompt chain with one compact configuration page for mode, scope, site, route, application URL, searchable field assertions, and optional CSS selectors; descendant fields load only when requested.
 
 ## 0.9.5
 
