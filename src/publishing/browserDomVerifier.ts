@@ -83,10 +83,14 @@ export async function verifyBrowserDom(
           normalizeDomText(await locator.nth(index).textContent() ?? "")
         ),
       );
-      const expected = normalizeDomText(assertion.expected);
+      const comparableExpected = normalizeDomTextForComparison(assertion.expected);
       results.push({
         ...assertion,
-        status: observedTexts.some((text) => expected ? text.includes(expected) : text === "")
+        status: observedTexts.some((text) =>
+          comparableExpected
+            ? normalizeDomTextForComparison(text).includes(comparableExpected)
+            : text === ""
+        )
           ? "matched"
           : "different",
         matchCount,
@@ -132,6 +136,10 @@ async function launchInstalledBrowser(): Promise<{
 
 function normalizeDomText(value: string): string {
   return value.replace(/\s+/gu, " ").trim();
+}
+
+function normalizeDomTextForComparison(value: string): string {
+  return normalizeDomText(value).toLowerCase();
 }
 
 function isInvalidSelectorError(message: string): boolean {

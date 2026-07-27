@@ -202,6 +202,7 @@ export class PublishingManager implements vscode.Disposable {
         selectedIds.length,
         tracedFields.fields.length,
         tracedFields.fields.filter((field) => field.browserSelector).length,
+        profileSettings?.applicationUrl,
       );
       if (!confirmed) {
         return;
@@ -1249,7 +1250,7 @@ export class PublishingManager implements vscode.Disposable {
           {
             title: "Traced publish: optional Browser DOM fields",
             placeHolder:
-              "Select fields to check using CSS selectors, or press Enter to skip Browser DOM verification",
+              `Select fields to check at ${applicationUrl}, or press Enter to skip Browser DOM verification`,
             canPickMany: true,
             matchOnDescription: true,
             matchOnDetail: true,
@@ -1265,7 +1266,7 @@ export class PublishingManager implements vscode.Disposable {
       const selector = await vscode.window.showInputBox({
         title: `Browser DOM selector (${index + 1}/${browserFields.length})`,
         prompt:
-          `Paste a CSS selector for “${choice.label}”. Browser-generated selectors can be brittle; leave empty to skip this field.`,
+          `Paste a CSS selector for “${choice.label}” at ${applicationUrl}. Browser-generated selectors can be brittle; leave empty to skip this field.`,
         placeHolder: "[data-testid=\"product-heading\"]",
         ignoreFocusOut: true,
       });
@@ -1820,6 +1821,7 @@ export class PublishingManager implements vscode.Disposable {
     itemCount: number,
     fieldCount: number,
     browserSelectorCount: number,
+    applicationUrl: string | undefined,
   ): Promise<boolean> {
     const scope = [
       options.publishSubItems ? "descendants" : undefined,
@@ -1836,6 +1838,9 @@ export class PublishingManager implements vscode.Disposable {
           : undefined,
         kind === "traced"
           ? `Browser DOM selectors: ${browserSelectorCount || "none"}`
+          : undefined,
+        kind === "traced" && applicationUrl
+          ? `Application verification URL: ${applicationUrl}`
           : undefined,
       ].filter((value): value is string => Boolean(value)).join("\n"),
       { modal: true },
