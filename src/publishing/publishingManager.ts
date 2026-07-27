@@ -135,7 +135,11 @@ export class PublishingManager implements vscode.Disposable {
 
       let profileSettings = kind === "standard"
         ? undefined
-        : await this.collectProfileSettings(target.connectionId, controller.signal);
+        : await this.collectProfileSettings(
+            target.connectionId,
+            rootDetails.path,
+            controller.signal,
+          );
       if (kind !== "standard" && !profileSettings) {
         return;
       }
@@ -942,6 +946,7 @@ export class PublishingManager implements vscode.Disposable {
 
   private async collectProfileSettings(
     connectionId: string,
+    itemPath: string,
     signal: AbortSignal,
   ): Promise<ProfileRunSettings | undefined> {
     let profile = this.listProfiles().find((candidate) => candidate.connectionId === connectionId);
@@ -999,10 +1004,18 @@ export class PublishingManager implements vscode.Disposable {
     await this.saveProfile(profile, edgeToken);
     let route = "";
     if (profile.siteName) {
+      const selectedSite = this.connections.listVerifiedSites(connectionId).find((site) =>
+        site.name.localeCompare(profile.siteName as string, undefined, {
+          sensitivity: "base",
+        }) === 0
+      );
+      const suggestedRoute = suggestRoute(itemPath, selectedSite?.rootPath);
       const selectedRoute = await vscode.window.showInputBox({
         title: "Traced publish: route verification",
-        prompt: `Enter a route for Sitecore site “${profile.siteName}”, or leave empty.`,
+        prompt:
+          `Confirm the suggested Sitecore route for “${profile.siteName}”, change it if needed, or leave it empty to skip route verification.`,
         placeHolder: "/station-wagon",
+        value: suggestedRoute,
         ignoreFocusOut: true,
       });
       if (selectedRoute === undefined) {
@@ -1652,6 +1665,37 @@ function normalizeId(value: string): string {
 function normalizeRoute(value: string): string {
   const route = value.trim().replace(/\\/gu, "/").replace(/\/{2,}/gu, "/");
   return route.startsWith("/") ? route : `/${route}`;
+}
+
+function suggestRoute(itemPath: string, siteRootPath?: string): string {
+  const itemSegments = pathSegments(itemPath);
+  const rootSegments = siteRootPath ? pathSegments(siteRootPath) : [];
+  const belongsToSite = rootSegments.length > 0 &&
+    itemSegments.length >= rootSegments.length &&
+    rootSegments.every((segment, index) =>
+      segment.localeCompare(itemSegments[index], undefined, { sensitivity: "base" }) === 0
+    );
+  let routeSegments = belongsToSite
+    ? itemSegments.slice(rootSegments.length)
+    : itemSegments.slice(-1);
+  if (routeSegments[0]?.localeCompare("home", undefined, { sensitivity: "base" }) === 0) {
+    routeSegments = routeSegments.slice(1);
+  }
+  const slugSegments = routeSegments.map(slugSegment).filter(Boolean);
+  return slugSegments.length ? `/${slugSegments.join("/")}` : "/";
+}
+
+function pathSegments(value: string): readonly string[] {
+  return value.trim().replace(/\\/gu, "/").split("/").filter(Boolean);
+}
+
+function slugSegment(value: string): string {
+  return value
+    .normalize("NFKD")
+    .replace(/\p{Mark}+/gu, "")
+    .toLocaleLowerCase()
+    .replace(/[^\p{Letter}\p{Number}]+/gu, "-")
+    .replace(/^-+|-+$/gu, "");
 }
 
 function ensureTrailingSlash(value: string): string {
