@@ -198,6 +198,9 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.commands.registerCommand("xmCloudSync.showLatestPublishTrace", () => {
       publishingManager.showLatestTrace();
     }),
+    vscode.commands.registerCommand("xmCloudSync.abandonCurrentPublish", async () => {
+      await publishingManager.abandonCurrentPublish();
+    }),
     vscode.commands.registerCommand("xmCloudSync.configurePublishing", async (argument) => {
       await publishingManager.configureConnection(
         argument instanceof ConnectionTreeItem ? argument.connection.id : undefined,

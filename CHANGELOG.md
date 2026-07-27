@@ -15,6 +15,7 @@
 - Persisted the configured sites returned by **Test Connection** and reused them for route-layout tracing: one site is selected automatically, multiple sites use a name/root-path picker, and manual entry remains only as a no-results fallback.
 - Moved Experience Edge token ownership into the saved connection's Secret Storage lifecycle and allowed an empty replacement prompt to retain the token already stored for that connection.
 - Validated new and replacement Edge tokens before storage by listing their accessible Edge site names, hostnames, and root paths; compared that scope with the connection's verified Authoring sites and required explicit approval or mismatch override.
+- Added guarded recovery for stale publish tracking: the blocking warning can abandon local tracking and continue, and a dedicated command can release the lock while preserving an explicit server-status-unknown trace.
 
 ## 0.9.4
 
