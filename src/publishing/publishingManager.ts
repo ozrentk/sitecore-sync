@@ -69,10 +69,19 @@ export class PublishingManager implements vscode.Disposable {
 
   async start(kind: PublishKind, target: PublishTarget): Promise<void> {
     if (this.controllers.size > 0) {
-      await vscode.window.showInformationMessage(
+      const action = "Abandon and Continue";
+      const selection = await vscode.window.showWarningMessage(
         "Wait for the current publish operation to finish before starting another.",
+        {
+          modal: true,
+          detail:
+            "If local tracking is stale, you can abandon it and continue. This stops monitoring and clears the extension lock, but it does not cancel a publish that may still be running in XM Cloud.",
+        },
+        action,
       );
-      return;
+      if (selection !== action || !await this.abandonCurrentPublish(true)) {
+        return;
+      }
     }
     const connection = this.connections.get(target.connectionId);
     const clientSecret = await this.connections.getClientSecret(target.connectionId);
@@ -319,6 +328,72 @@ export class PublishingManager implements vscode.Disposable {
     } else {
       void vscode.window.showInformationMessage("No publish traces have been recorded yet.");
     }
+  }
+
+  async abandonCurrentPublish(skipConfirmation = false): Promise<boolean> {
+    const incompleteRuns = this.listRuns().filter((run) => !run.completedAt);
+    if (this.controllers.size === 0 && incompleteRuns.length === 0) {
+      await vscode.window.showInformationMessage(
+        "There is no active or incomplete local publish operation to abandon.",
+      );
+      return false;
+    }
+    if (!skipConfirmation) {
+      const action = "Abandon Local Tracking";
+      const selection = await vscode.window.showWarningMessage(
+        "Abandon the current local publish operation?",
+        {
+          modal: true,
+          detail:
+            "This stops monitoring, marks incomplete publish traces as locally abandoned, and releases the extension lock. It does not cancel publishing in XM Cloud, so a server-side operation may still be running.",
+        },
+        action,
+      );
+      if (selection !== action) {
+        return false;
+      }
+    }
+
+    for (const controller of this.controllers.values()) {
+      controller.abort();
+    }
+    this.controllers.clear();
+    const completedAt = new Date().toISOString();
+    for (const run of incompleteRuns) {
+      let abandoned: PublishRun = {
+        ...run,
+        completedAt,
+        conclusion:
+          "Local tracking was abandoned by the user. The XM Cloud publishing status is unknown.",
+        stages: run.stages.map((stage) =>
+          stage.status === "pending" || stage.status === "running"
+            ? {
+                ...stage,
+                status: "skipped",
+                summary: "Local tracking abandoned; server-side status is unknown.",
+                updatedAt: completedAt,
+              }
+            : stage
+        ),
+      };
+      const journalPath = await this.writeJournal(abandoned);
+      abandoned = { ...abandoned, journalPath };
+      await this.saveRun(abandoned);
+      this.renderIfDisplayed(abandoned);
+      const operationIds = abandoned.batches
+        .flatMap((batch) => batch.operationId ? [batch.operationId] : []);
+      this.output.appendLine(
+        `Abandoned local publish tracking ${abandoned.id}; server-side status unknown${
+          operationIds.length ? ` (${operationIds.join(", ")})` : ""
+        }.`,
+      );
+    }
+    if (!skipConfirmation) {
+      await vscode.window.showInformationMessage(
+        "Local publish tracking was abandoned. XM Cloud publishing was not cancelled.",
+      );
+    }
+    return true;
   }
 
   async resumePending(): Promise<void> {

@@ -73,6 +73,8 @@ Traced publishing asks for the Experience Edge GraphQL endpoint and API token on
 
 The application URL is always optional. When supplied, the extension makes a normal public HTTPS request and records status plus cache headers such as `Age`, `Cache-Control`, `x-vercel-cache`, and `x-vercel-id`. This requires no Vercel credentials. If the URL is omitted or inaccessible, only that stage is skipped or marked unavailable; Sitecore and Experience Edge tracing still run.
 
+If saved monitoring state becomes stale, run **XM Cloud Sync: Abandon Current Publish Tracking**. The same recovery is offered as **Abandon and Continue** when a new publish is blocked. It aborts local monitoring, marks incomplete traces as locally abandoned with unknown server status, and releases the extension lock. It cannot cancel a publishing operation that is still running in XM Cloud.
+
 Traced and Power operations use one progressive **Publish Trace** document. Evidence and the Observed Reference Graph stay collapsed until opened. Standard publish normally uses only progress notifications; the trace opens if it fails. Run **XM Cloud Sync: Show Latest Publish Trace** to reopen recent evidence or **XM Cloud Sync: Show Publish Output** for low-level polling details.
 
 Publish operations and their Sitecore operation IDs are persisted so monitoring can resume after VS Code restarts. Redacted JSON journals are written beneath VS Code extension storage. Publish mutations are not retried automatically.

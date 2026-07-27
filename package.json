@@ -39,6 +39,7 @@
     "onCommand:xmCloudSync.showLogs",
     "onCommand:xmCloudSync.showPublishOutput",
     "onCommand:xmCloudSync.showLatestPublishTrace",
+    "onCommand:xmCloudSync.abandonCurrentPublish",
     "onCommand:xmCloudSync.configurePublishing",
     "onCommand:xmCloudSync.compareWithConnection",
     "onCommand:xmCloudSync.refreshAll",
@@ -97,6 +98,10 @@
       {
         "command": "xmCloudSync.showLatestPublishTrace",
         "title": "XM Cloud Sync: Show Latest Publish Trace"
+      },
+      {
+        "command": "xmCloudSync.abandonCurrentPublish",
+        "title": "XM Cloud Sync: Abandon Current Publish Tracking"
       },
       {
         "command": "xmCloudSync.configurePublishing",
