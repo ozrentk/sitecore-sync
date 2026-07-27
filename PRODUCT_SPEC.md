@@ -257,6 +257,22 @@ Deployment monitoring is an optional subtree safeguard. The processor first atte
 
 Field-value execution re-reads both items and checks scope-aware field fingerprints captured at enqueue time. A stale source or target fails before mutation. Otherwise it issues one Authoring `updateItem` mutation and re-reads the target to verify the literal value. Identical pending requests are deduplicated.
 
+## Planned v0.9.7 Operations
+
+The **Transfers** view becomes **Operations**. Subtree transfers, field-value transfers, and Standard, Traced, and Power publishing records share one durable workspace-scoped FIFO and one processor. The processor executes exactly one operation at a time. Publishing therefore does not bypass a long transfer, and transfers do not bypass publishing. New work can still be enqueued while another operation is active.
+
+Publishing configuration appends a complete serializable plan and returns control to VS Code. It respects the existing Operations Play/Pause state: a queued publish does not start merely because it was added. Play starts or resumes the common processor, Pause takes effect at the next operation-specific safe boundary, and a failed head operation pauses the FIFO until it is retried or moved out of the active queue. Queued but inactive records can be reordered or removed; the active record cannot.
+
+An operation separates its reusable plan from execution state so future recorded workflows can replay intent without copying remote IDs, checkpoints, timestamps, or stale values. A queued Traced publish stores selected field identities and verification settings, but captures current Authoring values and the pre-publish route baseline only when it reaches the queue head. Remote mutation or publishing identifiers are persisted immediately after they are returned.
+
+The **Operations** tree presents the active FIFO in exact execution order, followed by **Recent Operations**. Selecting any row opens one shared **Operation Details** editor bound to the operation ID. Its header, status, timestamps, and actions are common; its content is type-specific. Publishing retains the current Publish Trace stages and evidence. Subtree transfers add source/destination, preflight, chunk copy, Sitecore import, deployment baseline, checkpoint, verification, failure, and journal evidence. Field-value transfers show source/target freshness, mutation, and verification evidence. Both the tree row and editor subscribe to the same persisted operation store.
+
+Terminal operations move from the active queue to Recent Operations only after their secret-free journal is written. The most recent 30 terminal records are retained; this is a record-count limit, not a time limit. Queued, active, waiting, and blocking-failed records are never pruned by history retention. When a 31st terminal record is added, the oldest terminal row is removed from workspace history while its journal remains on disk.
+
+The Operations view badge is included in v0.9.7. Its number equals the active FIFO length across all operation types, including queued, running, waiting, and blocking-failed records, while excluding Recent Operations. Its tooltip breaks the number down by state so a total such as `5` can explain that one operation is running, three are queued, and one requires attention.
+
+After restart, the common processor restores its Play/Pause state and queue order, resumes a saved remote checkpoint or publishing operation ID, and does not advance to the next record until recovery reaches a terminal state. An uncertain operation without a recoverable remote identifier is marked interrupted and never repeated automatically. Migration must also handle the legacy case where the older independent transfer and publishing managers both left active work.
+
 ### Preflight validation
 
 Validation is best-effort rather than a transaction guarantee.
@@ -316,7 +332,6 @@ Secrets, bearer tokens, client secrets, and authorization headers must never be 
 
 ## Deferred options
 
-- TODO (v0.9.7 follow-up): Define the **Operations** view badge semantics before enabling a combined count. Decide whether the badge represents queued work, currently running work, failures requiring attention, or a combination; completed history should not inflate it.
 - TODO (after v0.9.7): Redesign **Power publish** on top of the unified operation queue and shared Operation Details view, including dependency-plan editing and participation in recorded/replayed workflows.
 - `Clear Connection Cache` command.
 - ID-first/path-fallback identity mode.
