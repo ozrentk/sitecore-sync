@@ -164,12 +164,13 @@ function renderFields() {
     const selectorWrap = document.createElement("div");
     selectorWrap.className = "selector-wrap";
     const selectorLabel = document.createElement("label");
-    selectorLabel.textContent = "Browser DOM CSS selector";
+    selectorLabel.textContent = applicationAvailable
+      ? "Browser DOM CSS selector"
+      : "Browser DOM CSS selector · requires application URL";
     const selector = document.createElement("input");
     selector.type = "text";
     selector.placeholder = "[data-testid=\"heading\"]";
     selector.value = field.browserSelector;
-    selector.disabled = !applicationAvailable;
     selector.addEventListener("input", () => {
       field.browserSelector = selector.value;
       updateSummary();
@@ -346,6 +347,18 @@ publish.addEventListener("click", () => {
       showError("Enter a valid HTTPS application URL.");
       return;
     }
+  }
+  if (
+    !applicationUrl.value.trim() &&
+    state.fields.some((field) =>
+      field.selected &&
+      (!field.descendant || descendants.checked) &&
+      field.browserSelector.trim()
+    )
+  ) {
+    showError("Enter the exact application URL before publishing Browser DOM selectors.");
+    applicationUrl.focus();
+    return;
   }
   publish.disabled = true;
   vscode.postMessage({

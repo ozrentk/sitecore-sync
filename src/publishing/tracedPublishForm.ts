@@ -234,7 +234,7 @@ function validateSubmission(
     }
     const browserSelector = optionalString(candidate.browserSelector);
     if (browserSelector && !applicationUrl) {
-      return "Enter an application URL before adding Browser DOM selectors.";
+      return "Enter the exact application URL before publishing Browser DOM selectors.";
     }
     seen.add(candidate.key);
     selections.push({
