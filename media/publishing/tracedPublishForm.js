@@ -7,7 +7,7 @@ const state = {
   descendantsLoading: false,
   routeTouched: false,
 };
-const maximumRenderedFields = 500;
+const maximumFieldSuggestions = 250;
 
 const context = document.getElementById("context");
 const mode = document.getElementById("mode");
@@ -17,7 +17,9 @@ const site = document.getElementById("site");
 const manualSite = document.getElementById("manual-site");
 const route = document.getElementById("route");
 const applicationUrl = document.getElementById("application-url");
-const search = document.getElementById("search");
+const fieldPicker = document.getElementById("field-picker");
+const fieldOptions = document.getElementById("field-options");
+const addField = document.getElementById("add-field");
 const fieldStatus = document.getElementById("field-status");
 const fields = document.getElementById("fields");
 const error = document.getElementById("error");
@@ -113,44 +115,35 @@ function renderFields() {
   if (!state.initial) {
     return;
   }
-  const query = search.value.trim().toLocaleLowerCase();
   const routeAvailable = Boolean(selectedSiteName() && route.value.trim());
   const applicationAvailable = Boolean(applicationUrl.value.trim());
-  const matching = state.fields.filter((field) => {
-    if (field.descendant && !descendants.checked) {
-      return false;
-    }
-    if (!query) {
-      return true;
-    }
-    return [
-      field.itemName,
-      field.itemPath,
-      field.fieldName,
-      field.value,
-    ].some((value) => value.toLocaleLowerCase().includes(query));
-  });
-  const visible = matching.slice(0, maximumRenderedFields);
-  fieldStatus.textContent = fieldStatusText(visible.length, matching.length);
-  if (visible.length === 0) {
+  const available = availableFields();
+  const selectedFields = available.filter((field) => field.selected);
+  renderFieldOptions(routeAvailable);
+  fieldStatus.textContent = fieldStatusText(selectedFields.length, available.length);
+  if (selectedFields.length === 0) {
     const empty = document.createElement("div");
     empty.className = "empty";
-    empty.textContent = query ? "No fields match the current search." : "No fields are available.";
+    empty.textContent = available.length
+      ? "No field assertions selected. Choose a field above and select Add field."
+      : "No non-standard fields are available in the selected publish scope.";
     fields.append(empty);
     return;
   }
-  for (const field of visible) {
+  for (const field of selectedFields) {
     const row = document.createElement("div");
     row.className = "field-row";
 
-    const selected = document.createElement("input");
-    selected.type = "checkbox";
-    selected.checked = field.selected;
-    selected.disabled = !routeAvailable;
-    selected.ariaLabel = `Verify ${field.itemName}, ${field.fieldName}`;
-    selected.addEventListener("change", () => {
-      field.selected = selected.checked;
-      selector.disabled = !field.selected || !applicationAvailable;
+    const remove = document.createElement("button");
+    remove.type = "button";
+    remove.className = "remove-field";
+    remove.textContent = "×";
+    remove.title = `Remove ${field.itemName}, ${field.fieldName}`;
+    remove.ariaLabel = remove.title;
+    remove.addEventListener("click", () => {
+      field.selected = false;
+      field.browserSelector = "";
+      renderFields();
       updateSummary();
     });
 
@@ -176,33 +169,79 @@ function renderFields() {
     selector.type = "text";
     selector.placeholder = "[data-testid=\"heading\"]";
     selector.value = field.browserSelector;
-    selector.disabled = !field.selected || !applicationAvailable;
+    selector.disabled = !applicationAvailable;
     selector.addEventListener("input", () => {
       field.browserSelector = selector.value;
-      if (selector.value.trim() && !field.selected) {
-        field.selected = true;
-        selected.checked = true;
-      }
       updateSummary();
     });
     selectorWrap.append(selectorLabel, selector);
-    row.append(selected, name, value, selectorWrap);
+    row.append(remove, name, value, selectorWrap);
     fields.append(row);
   }
 }
 
-function fieldStatusText(visibleCount, matchingCount) {
-  const total = state.fields.filter((field) => !field.descendant || descendants.checked).length;
+function availableFields() {
+  return state.fields.filter((field) => !field.descendant || descendants.checked);
+}
+
+function fieldPickerValue(field) {
+  return `${field.itemName} › ${field.fieldName} — ${field.itemPath}`;
+}
+
+function fieldSearchText(field) {
+  return [
+    field.itemName,
+    field.itemPath,
+    field.fieldName,
+    field.value,
+  ].join(" ").toLocaleLowerCase();
+}
+
+function renderFieldOptions(routeAvailable) {
+  const query = fieldPicker.value.trim().toLocaleLowerCase();
+  const suggestions = availableFields()
+    .filter((field) => !field.selected)
+    .filter((field) => !query || fieldSearchText(field).includes(query))
+    .slice(0, maximumFieldSuggestions);
+  fieldOptions.replaceChildren();
+  for (const field of suggestions) {
+    const option = document.createElement("option");
+    option.value = fieldPickerValue(field);
+    option.label = field.value;
+    fieldOptions.append(option);
+  }
+  fieldPicker.disabled = !routeAvailable;
+  addField.disabled = !routeAvailable || !fieldForPickerValue(fieldPicker.value);
+}
+
+function fieldForPickerValue(value) {
+  const normalized = value.trim();
+  return availableFields().find((field) =>
+    !field.selected && fieldPickerValue(field) === normalized
+  );
+}
+
+function addSelectedField() {
+  const field = fieldForPickerValue(fieldPicker.value);
+  if (!field) {
+    return;
+  }
+  field.selected = true;
+  fieldPicker.value = "";
+  clearError();
+  renderFields();
+  updateSummary();
+  fieldPicker.focus();
+}
+
+function fieldStatusText(selectedCount, total) {
   if (state.descendantsLoading) {
     return "Loading structural descendant fields…";
   }
   if (descendants.checked && !state.descendantsLoaded) {
     return "Structural descendant fields have not been loaded.";
   }
-  if (matchingCount > visibleCount) {
-    return `Showing the first ${visibleCount} of ${matchingCount} matching field(s). Refine the search to see more.`;
-  }
-  return `${visibleCount} of ${total} available field(s) shown.`;
+  return `${selectedCount} selected from ${total} available field(s).`;
 }
 
 function selectedSiteName() {
@@ -270,7 +309,19 @@ route.addEventListener("input", () => {
   renderFields();
 });
 applicationUrl.addEventListener("input", renderFields);
-search.addEventListener("input", renderFields);
+fieldPicker.addEventListener("input", () => renderFieldOptions(
+  Boolean(selectedSiteName() && route.value.trim()),
+));
+fieldPicker.addEventListener("change", () => renderFieldOptions(
+  Boolean(selectedSiteName() && route.value.trim()),
+));
+fieldPicker.addEventListener("keydown", (event) => {
+  if (event.key === "Enter" && fieldForPickerValue(fieldPicker.value)) {
+    event.preventDefault();
+    addSelectedField();
+  }
+});
+addField.addEventListener("click", addSelectedField);
 mode.addEventListener("change", updateSummary);
 related.addEventListener("change", updateSummary);
 

@@ -45,11 +45,14 @@
 
     <section class="assertions">
       <div class="assertion-heading">
-        <div>
-          <h2>Field assertions <span class="optional">optional</span></h2>
-          <p class="hint">Select fields expected in Edge/layout. Add a CSS selector only when Browser DOM verification is also required.</p>
-        </div>
-        <input id="search" type="search" placeholder="Search item, path, field, or value" aria-label="Search field assertions">
+        <h2>Field assertions <span class="optional">optional</span></h2>
+        <p class="hint">Choose fields expected in Edge/layout. Add a CSS selector only when Browser DOM verification is also required.</p>
+      </div>
+      <div class="field-picker">
+        <label class="visually-hidden" for="field-picker">Find a field assertion</label>
+        <input id="field-picker" type="text" list="field-options" autocomplete="off" placeholder="Type to find an item, path, or field">
+        <datalist id="field-options"></datalist>
+        <button id="add-field" type="button">Add field</button>
       </div>
       <div id="field-status" class="status muted"></div>
       <div id="fields" class="field-list"></div>
