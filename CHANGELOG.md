@@ -10,6 +10,7 @@
 - Added a collapsed **Show evidence** disclosure to transfer Operation Details so the persisted operation record is available without dominating the summary.
 - Isolated comparison-side failures so a broken destination template no longer blocks favorite navigation or an Exact Mirror transfer from the valid source, and Field Diff still displays whichever side loaded successfully.
 - Moved **Run task…** to a separate final section of the comparison context menu so the primary diff, publish, transfer, expand, and refresh actions remain prominent.
+- Simplified comparison transfer labels to **Transfer Left → Right** or **Transfer Right → Left** and shows only the direction originating from the item cell that opened the context menu.
 - Added **Recent Operations**, retaining the newest 30 terminal records and showing the newest 10 by default with a show-more/fewer action.
 - Changed the Operations badge to count the complete active FIFO and explain its transfer/publishing breakdown.
 

@@ -1046,7 +1046,7 @@ function showContextMenu(event, pair, clickedSide, forceDisabled = false) {
   const syncLeftToRight = document.createElement("button");
   syncLeftToRight.className = "context-menu-item";
   syncLeftToRight.type = "button";
-  syncLeftToRight.textContent = "Add Subtree Transfer Left → Right…";
+  syncLeftToRight.textContent = "Transfer Left → Right";
   syncLeftToRight.disabled = disabled || sameEnvironment || !pair.left;
   syncLeftToRight.title = sameEnvironment
     ? "Subtree transfer requires two different XM Cloud environments."
@@ -1060,7 +1060,7 @@ function showContextMenu(event, pair, clickedSide, forceDisabled = false) {
   const syncRightToLeft = document.createElement("button");
   syncRightToLeft.className = "context-menu-item";
   syncRightToLeft.type = "button";
-  syncRightToLeft.textContent = "Add Subtree Transfer Right → Left…";
+  syncRightToLeft.textContent = "Transfer Right → Left";
   syncRightToLeft.disabled = disabled || sameEnvironment || !pair.right;
   syncRightToLeft.title = sameEnvironment
     ? "Subtree transfer requires two different XM Cloud environments."
@@ -1070,13 +1070,17 @@ function showContextMenu(event, pair, clickedSide, forceDisabled = false) {
         ? "The source item does not exist on the right."
         : "Transfer this item, its descendants, and all languages and versions from right to left.";
   syncRightToLeft.addEventListener("click", () => startSubtreeSync(pair, "rightToLeft"));
+  const transferActions = clickedSide === "left"
+    ? [syncLeftToRight]
+    : clickedSide === "right"
+      ? [syncRightToLeft]
+      : [syncLeftToRight, syncRightToLeft];
   menu.append(
     detailedDiff,
     publishMenu,
     addFavorite,
     createContextMenuSeparator(),
-    syncLeftToRight,
-    syncRightToLeft,
+    ...transferActions,
     createContextMenuSeparator(),
     itemAction,
     expandLoaded,
