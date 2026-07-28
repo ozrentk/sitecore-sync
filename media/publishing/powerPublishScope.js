@@ -60,14 +60,19 @@ function render() {
     renderNode(nodes.get(state.model.rootScopeId), nodes, new Set(), new Set()),
   );
   renderSummary(selectedNodes, nodes);
-  const blocking = selectedNodes.filter((node) =>
-    node.status !== "complete" ||
-    node.unresolvedReferences.length > 0
-  );
+  const blocking = selectedNodes.filter((node) => readinessReasons(node).length > 0);
   queue.disabled = blocking.length > 0;
-  footerSummary.textContent = blocking.length
-    ? `${blocking.length} selected scope(s) still require attention`
-    : `${selectedNodes.length} scope(s) ready to queue`;
+  if (blocking.length) {
+    const first = blocking[0];
+    const firstReason = readinessReasons(first)[0];
+    footerSummary.textContent = blocking.length === 1
+      ? `Cannot queue: ${first.name} — ${firstReason}`
+      : `Cannot queue: ${blocking.length} selected scopes require attention. Review the highlighted scopes above.`;
+    queue.title = `${blocking.length} selected scope(s) are not ready. Review the highlighted scope diagnostics.`;
+  } else {
+    footerSummary.textContent = `${selectedNodes.length} scope(s) ready to queue`;
+    queue.title = "Queue the selected Power Publish scopes";
+  }
 }
 
 function renderNode(node, nodes, ancestors, renderedNodes) {
@@ -79,8 +84,10 @@ function renderNode(node, nodes, ancestors, renderedNodes) {
   }
   const repeated = ancestors.has(node.id) || renderedNodes.has(node.id);
   if (!repeated) renderedNodes.add(node.id);
+  const selected = state.selected.has(node.id);
+  const blockers = selected ? readinessReasons(node) : [];
   const row = document.createElement("div");
-  row.className = `scope-row status-${node.status}`;
+  row.className = `scope-row status-${node.status}${blockers.length ? " is-blocking" : ""}`;
 
   const children = uniqueTargets(node)
     .map((id) => nodes.get(id))
@@ -109,7 +116,7 @@ function renderNode(node, nodes, ancestors, renderedNodes) {
 
   const selection = document.createElement("input");
   selection.type = "checkbox";
-  selection.checked = state.selected.has(node.id);
+  selection.checked = selected;
   selection.disabled = node.required || !isSelectable(node);
   selection.title = node.excludedReason || "Include this collapsed scope";
   selection.addEventListener("change", () => {
@@ -143,6 +150,9 @@ function renderNode(node, nodes, ancestors, renderedNodes) {
   detail.className = "detail";
   detail.textContent = statusText(node, repeated);
   content.append(heading, path, detail);
+  if (!repeated && blockers.length) {
+    content.append(renderReadinessBlockers(node, blockers));
+  }
 
   const action = document.createElement("button");
   action.type = "button";
@@ -198,6 +208,53 @@ function statusText(node, repeated) {
     ? ` · ${node.ignoredReferenceCount} configuration/unsupported target(s) ignored`
     : "";
   return `${node.inspectedItemCount} item(s) · ${node.internalReferenceCount} internal reference(s) · ${uniqueTargets(node).length} external scope(s)${ignored}.`;
+}
+
+function readinessReasons(node) {
+  const reasons = [];
+  if (node.status === "notScanned" || node.status === "scanning") {
+    reasons.push("scan has not finished");
+  } else if (node.status === "paused") {
+    reasons.push(node.pauseReason || "scan paused at a safety budget");
+  } else if (node.status === "failed") {
+    reasons.push(`scan failed: ${node.error || "unknown error"}`);
+  }
+  if (node.unresolvedReferences.length) {
+    reasons.push(
+      `${node.unresolvedReferences.length} unresolved reference(s) must be reviewed`,
+    );
+  }
+  return reasons;
+}
+
+function renderReadinessBlockers(node, blockers) {
+  const wrapper = document.createElement("div");
+  wrapper.className = "readiness-blockers";
+  wrapper.setAttribute("aria-label", "Queue blocker");
+
+  const message = document.createElement("div");
+  message.className = "readiness-message";
+  message.textContent = `Cannot queue this selected scope: ${blockers.join("; ")}.`;
+  wrapper.append(message);
+
+  if (node.unresolvedReferences.length) {
+    const details = document.createElement("details");
+    details.className = "unresolved-details";
+    details.open = true;
+    const summary = document.createElement("summary");
+    summary.textContent = `Unresolved references (${node.unresolvedReferences.length})`;
+    const list = document.createElement("ul");
+    for (const reference of node.unresolvedReferences) {
+      const item = document.createElement("li");
+      const evidence = document.createElement("code");
+      evidence.textContent = reference;
+      item.append(evidence);
+      list.append(item);
+    }
+    details.append(summary, list);
+    wrapper.append(details);
+  }
+  return wrapper;
 }
 
 function kindLabel(kind) {

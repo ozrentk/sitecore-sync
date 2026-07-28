@@ -45,6 +45,7 @@ h2 { margin: 24px 0 10px; font-size: 16px; }
 .scope-row.status-failed { border-left: 3px solid var(--vscode-errorForeground); }
 .scope-row.status-paused { border-left: 3px solid var(--vscode-editorWarning-foreground); }
 .scope-row.status-scanning { border-left: 3px solid var(--vscode-progressBar-background); }
+.scope-row.is-blocking { border-left: 3px solid var(--vscode-inputValidation-errorBorder); }
 .expander, .scan {
   min-width: 0;
   color: var(--vscode-button-foreground);
@@ -71,6 +72,32 @@ input[type="checkbox"] { width: 14px; height: 14px; margin: 0; }
 }
 .path { margin-top: 3px; font-family: var(--vscode-editor-font-family); font-size: 12px; }
 .detail { margin-top: 3px; font-size: 12px; }
+.readiness-blockers {
+  margin-top: 8px;
+  padding: 7px 9px;
+  color: var(--vscode-inputValidation-errorForeground);
+  background: var(--vscode-inputValidation-errorBackground);
+  border: 1px solid var(--vscode-inputValidation-errorBorder);
+}
+.readiness-message { font-weight: 600; }
+.unresolved-details { margin-top: 6px; }
+.unresolved-details summary {
+  color: var(--vscode-textLink-foreground);
+  cursor: pointer;
+}
+.unresolved-details ul {
+  max-height: 220px;
+  margin: 7px 0 0;
+  padding-left: 22px;
+  overflow: auto;
+}
+.unresolved-details li + li { margin-top: 5px; }
+.unresolved-details code {
+  color: var(--vscode-editor-foreground);
+  font-family: var(--vscode-editor-font-family);
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
 .badge {
   padding: 1px 5px;
   border: 1px solid var(--vscode-badge-background);

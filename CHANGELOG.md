@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.9.12
+
+- Added inline Power Publish readiness diagnostics to every selected scope that cannot be queued.
+- Exposed unresolved reference evidence—including its available source item, field, target, and resolution error context—directly in the collapsed scope graph.
+- Replaced the generic disabled-queue footer with the affected scope and blocking reason.
+
 ## 0.9.11
 
 - Removed template, layout, system, and unsupported reference targets from the interactive Power Publish scope graph.
