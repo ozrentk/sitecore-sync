@@ -15,6 +15,8 @@ const title = document.getElementById("title");
 const context = document.getElementById("context");
 const mode = document.getElementById("mode");
 const descendants = document.getElementById("descendants");
+const descendantsLabel = document.getElementById("descendants-label");
+const descendantsHint = document.getElementById("descendants-hint");
 const related = document.getElementById("related");
 const relatedOption = document.getElementById("related-option");
 const powerScopeHint = document.getElementById("power-scope-hint");
@@ -70,6 +72,10 @@ function initialize(initial) {
   related.checked = false;
   relatedOption.hidden = power;
   powerScopeHint.hidden = !power;
+  descendantsLabel.textContent = power
+    ? "Publish structural descendants through Sitecore"
+    : "Include structural descendants";
+  descendantsHint.hidden = !power;
   context.textContent =
     `${initial.connectionName} (${initial.targetHost}) · ${initial.language} · ${initial.rootPath}`;
   applicationUrl.value = initial.applicationUrl || "";
@@ -341,7 +347,11 @@ function updateSummary() {
   );
   const selectors = selected.filter((field) => field.browserSelector.trim()).length;
   const scopes = [
-    descendants.checked ? "descendants" : "",
+    descendants.checked
+      ? state.initial?.kind === "power"
+        ? "Sitecore descendants"
+        : "descendants"
+      : "",
     state.initial?.kind !== "power" && related.checked ? "related items" : "",
   ].filter(Boolean).join(", ") || "selected item only";
   summary.textContent =

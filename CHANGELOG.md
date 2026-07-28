@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.9.9
+
+- Replaced Power Publish's eager recursive GUID crawl with a user-directed **collapsed scope graph**. Each node represents one Sitecore structural scope and exposes only references that leave its boundary.
+- Added a dedicated **Review Power Publish Scope** view. Selecting an unscanned scope scans it immediately; expanding a scope can inspect it without selecting it, and discovered external scopes remain opt-in.
+- Added scope-level caching, item-ID deduplication, cycle-safe graph rendering, visible scan progress, and resumable 500-item/200-reference scan budgets.
+- Made layout discovery field-aware: only component datasource attributes are followed from layout fields instead of treating every presentation GUID as a content dependency.
+- Added field-aware discovery for item-link, General Link, Image, File, and media references, including relative `local:/` layout datasources, media-library classification, external-URL evidence, and default exclusion of template/layout/system references.
+- Renamed the Power Publish option to **Publish structural descendants through Sitecore** and documented that Sitecore controls the exact descendant set when enabled.
+- Added Power Publish planning evidence for selected content scopes, media items, layout datasources, item links, external URLs, deliberately excluded scopes, and unresolved references.
+
 ## 0.9.8
 
 - Corrected the Power Publish configurator so its intentionally omitted **Include related items** option is actually hidden even though checkbox labels use a flex layout; submissions already forced the value off.
