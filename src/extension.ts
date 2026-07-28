@@ -406,14 +406,18 @@ function transferOperationHtml(
 <html><head><meta charset="utf-8"><style>
 body{font-family:var(--vscode-font-family);padding:24px;color:var(--vscode-foreground)}
 .summary{border-left:3px solid var(--vscode-focusBorder);padding:12px;background:var(--vscode-editor-inactiveSelectionBackground)}
-dt{font-weight:600;margin-top:10px}dd{margin-left:0}pre{padding:12px;overflow:auto;background:var(--vscode-textCodeBlock-background)}
+dt{font-weight:600;margin-top:10px}dd{margin-left:0}
+details{margin-top:20px}summary{cursor:pointer;color:var(--vscode-textLink-foreground)}
+pre{padding:12px;overflow:auto;background:var(--vscode-textCodeBlock-background)}
 </style></head><body>
 <h1>${escapeHtml(title)}</h1>
 <div class="summary"><strong>${escapeHtml(record.status)}</strong>${record.error ? ` — ${escapeHtml(record.error)}` : ""}</div>
 <dl><dt>Source</dt><dd>${escapeHtml(source)}</dd><dt>Destination</dt><dd>${escapeHtml(target)}</dd>
 <dt>Queued</dt><dd>${escapeHtml(record.enqueuedAt)}</dd>${record.startedAt ? `<dt>Started</dt><dd>${escapeHtml(record.startedAt)}</dd>` : ""}
 ${record.completedAt ? `<dt>Completed</dt><dd>${escapeHtml(record.completedAt)}</dd>` : ""}</dl>
-<h2>Evidence</h2><pre>${escapeHtml(JSON.stringify(record, null, 2))}</pre>
+<details><summary>Show evidence</summary>
+<pre>${escapeHtml(JSON.stringify(record, null, 2))}</pre>
+</details>
 </body></html>`;
 }
 
