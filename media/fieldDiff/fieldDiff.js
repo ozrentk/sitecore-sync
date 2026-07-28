@@ -108,7 +108,8 @@ function itemTitle(details, fallbackName, connectionName) {
   return `${name} · ${connectionName || "Connection"} · ${details.language}`;
 }
 
-function metaLine(details) {
+function metaLine(details, error) {
+  if (error) return `Unavailable: ${error}`;
   if (!details) return "Item does not exist on this side.";
   return `${details.path} · ${details.template.name} · latest version ${details.version}`;
 }
@@ -127,7 +128,11 @@ function createSummary(snapshot) {
       snapshot[`${side}ConnectionName`],
     );
     const meta = document.createElement("span");
-    meta.textContent = metaLine(details);
+    const error = snapshot[`${side}Error`];
+    meta.textContent = metaLine(details, error);
+    if (error) {
+      meta.classList.add("error");
+    }
     const itemId = document.createElement("div");
     itemId.className = "item-id";
     if (details) {
