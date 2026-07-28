@@ -6,8 +6,10 @@ const state = {
   descendantsLoaded: false,
   descendantsLoading: false,
   routeTouched: false,
+  pickerOpen: false,
+  activeSuggestionKey: undefined,
 };
-const maximumFieldSuggestions = 250;
+const maximumFieldSuggestions = 50;
 
 const context = document.getElementById("context");
 const mode = document.getElementById("mode");
@@ -18,7 +20,7 @@ const manualSite = document.getElementById("manual-site");
 const route = document.getElementById("route");
 const applicationUrl = document.getElementById("application-url");
 const fieldPicker = document.getElementById("field-picker");
-const fieldOptions = document.getElementById("field-options");
+const fieldSuggestions = document.getElementById("field-suggestions");
 const addField = document.getElementById("add-field");
 const fieldStatus = document.getElementById("field-status");
 const fields = document.getElementById("fields");
@@ -198,41 +200,109 @@ function fieldSearchText(field) {
   ].join(" ").toLocaleLowerCase();
 }
 
-function renderFieldOptions(routeAvailable) {
-  const query = fieldPicker.value.trim().toLocaleLowerCase();
-  const suggestions = availableFields()
+function matchingFieldSuggestions() {
+  const tokens = fieldPicker.value
+    .trim()
+    .toLocaleLowerCase()
+    .split(/\s+/)
+    .filter(Boolean);
+  return availableFields()
     .filter((field) => !field.selected)
-    .filter((field) => !query || fieldSearchText(field).includes(query))
+    .filter((field) => {
+      const text = fieldSearchText(field);
+      return tokens.every((token) => text.includes(token));
+    })
+    .sort((left, right) =>
+      fieldSuggestionScore(right, tokens) - fieldSuggestionScore(left, tokens) ||
+      left.itemName.localeCompare(right.itemName, undefined, { sensitivity: "base" }) ||
+      left.fieldName.localeCompare(right.fieldName, undefined, { sensitivity: "base" })
+    )
     .slice(0, maximumFieldSuggestions);
-  fieldOptions.replaceChildren();
+}
+
+function fieldSuggestionScore(field, tokens) {
+  if (tokens.length === 0) {
+    return 0;
+  }
+  const query = tokens.join(" ");
+  const itemName = field.itemName.toLocaleLowerCase();
+  const fieldName = field.fieldName.toLocaleLowerCase();
+  if (itemName === query || fieldName === query) return 5;
+  if (itemName.startsWith(query) || fieldName.startsWith(query)) return 4;
+  if (itemName.includes(query) || fieldName.includes(query)) return 3;
+  if (field.itemPath.toLocaleLowerCase().includes(query)) return 2;
+  return 1;
+}
+
+function renderFieldOptions(routeAvailable) {
+  const suggestions = matchingFieldSuggestions();
+  if (!suggestions.some((field) => field.key === state.activeSuggestionKey)) {
+    state.activeSuggestionKey = suggestions[0]?.key;
+  }
+  fieldSuggestions.replaceChildren();
   for (const field of suggestions) {
-    const option = document.createElement("option");
-    option.value = fieldPickerValue(field);
-    option.label = field.value;
-    fieldOptions.append(option);
+    const option = document.createElement("button");
+    option.type = "button";
+    option.className = "field-suggestion";
+    option.setAttribute("role", "option");
+    option.setAttribute("aria-selected", String(field.key === state.activeSuggestionKey));
+    option.dataset.fieldKey = field.key;
+    const name = document.createElement("strong");
+    name.textContent = `${field.itemName} › ${field.fieldName}`;
+    const detail = document.createElement("span");
+    detail.textContent = `${field.itemPath} · ${field.value || "(empty)"}`;
+    option.append(name, detail);
+    option.addEventListener("pointerdown", (event) => event.preventDefault());
+    option.addEventListener("click", () => selectField(field));
+    fieldSuggestions.append(option);
   }
   fieldPicker.disabled = !routeAvailable;
-  addField.disabled = !routeAvailable || !fieldForPickerValue(fieldPicker.value);
+  const showSuggestions = routeAvailable && state.pickerOpen && suggestions.length > 0;
+  fieldSuggestions.hidden = !showSuggestions;
+  fieldPicker.setAttribute("aria-expanded", String(showSuggestions));
+  const active = suggestions.find((field) => field.key === state.activeSuggestionKey);
+  fieldPicker.setAttribute(
+    "aria-activedescendant",
+    active ? `field-suggestion-${active.key.replace(/[^a-z0-9_-]/giu, "-")}` : "",
+  );
+  for (const option of fieldSuggestions.children) {
+    const field = suggestions.find((candidate) => candidate.key === option.dataset.fieldKey);
+    if (field) {
+      option.id = `field-suggestion-${field.key.replace(/[^a-z0-9_-]/giu, "-")}`;
+    }
+  }
+  addField.disabled = !routeAvailable || !active || !fieldPicker.value.trim();
 }
 
 function fieldForPickerValue(value) {
   const normalized = value.trim();
-  return availableFields().find((field) =>
+  const exact = availableFields().find((field) =>
     !field.selected && fieldPickerValue(field) === normalized
+  );
+  if (exact) {
+    return exact;
+  }
+  return matchingFieldSuggestions().find((field) =>
+    field.key === state.activeSuggestionKey
   );
 }
 
-function addSelectedField() {
-  const field = fieldForPickerValue(fieldPicker.value);
+function selectField(field) {
   if (!field) {
     return;
   }
   field.selected = true;
   fieldPicker.value = "";
+  state.pickerOpen = false;
+  state.activeSuggestionKey = undefined;
   clearError();
   renderFields();
   updateSummary();
   fieldPicker.focus();
+}
+
+function addSelectedField() {
+  selectField(fieldForPickerValue(fieldPicker.value));
 }
 
 function fieldStatusText(selectedCount, total) {
@@ -242,7 +312,8 @@ function fieldStatusText(selectedCount, total) {
   if (descendants.checked && !state.descendantsLoaded) {
     return "Structural descendant fields have not been loaded.";
   }
-  return `${selectedCount} selected from ${total} available field(s).`;
+  const itemCount = new Set(availableFields().map((field) => field.itemId)).size;
+  return `${selectedCount} selected · ${total} non-empty field(s) across ${itemCount} item(s).`;
 }
 
 function selectedSiteName() {
@@ -310,16 +381,47 @@ route.addEventListener("input", () => {
   renderFields();
 });
 applicationUrl.addEventListener("input", renderFields);
-fieldPicker.addEventListener("input", () => renderFieldOptions(
-  Boolean(selectedSiteName() && route.value.trim()),
-));
-fieldPicker.addEventListener("change", () => renderFieldOptions(
-  Boolean(selectedSiteName() && route.value.trim()),
-));
+fieldPicker.addEventListener("input", () => {
+  state.pickerOpen = true;
+  renderFieldOptions(Boolean(selectedSiteName() && route.value.trim()));
+});
+fieldPicker.addEventListener("focus", () => {
+  state.pickerOpen = true;
+  renderFieldOptions(Boolean(selectedSiteName() && route.value.trim()));
+});
+fieldPicker.addEventListener("blur", () => {
+  state.pickerOpen = false;
+  renderFieldOptions(Boolean(selectedSiteName() && route.value.trim()));
+});
 fieldPicker.addEventListener("keydown", (event) => {
-  if (event.key === "Enter" && fieldForPickerValue(fieldPicker.value)) {
+  const suggestions = matchingFieldSuggestions();
+  const activeIndex = suggestions.findIndex(
+    (field) => field.key === state.activeSuggestionKey,
+  );
+  if (event.key === "ArrowDown" && suggestions.length) {
+    event.preventDefault();
+    state.pickerOpen = true;
+    state.activeSuggestionKey = suggestions[
+      activeIndex < 0 ? 0 : Math.min(activeIndex + 1, suggestions.length - 1)
+    ].key;
+    renderFieldOptions(Boolean(selectedSiteName() && route.value.trim()));
+  } else if (event.key === "ArrowUp" && suggestions.length) {
+    event.preventDefault();
+    state.pickerOpen = true;
+    state.activeSuggestionKey = suggestions[
+      activeIndex < 0 ? 0 : Math.max(activeIndex - 1, 0)
+    ].key;
+    renderFieldOptions(Boolean(selectedSiteName() && route.value.trim()));
+  } else if (
+    event.key === "Enter" &&
+    fieldPicker.value.trim() &&
+    fieldForPickerValue(fieldPicker.value)
+  ) {
     event.preventDefault();
     addSelectedField();
+  } else if (event.key === "Escape") {
+    state.pickerOpen = false;
+    renderFieldOptions(Boolean(selectedSiteName() && route.value.trim()));
   }
 });
 addField.addEventListener("click", addSelectedField);

@@ -2094,7 +2094,7 @@ function tracedFieldCandidates(
 ): readonly TracedPublishFieldCandidate[] {
   return details.flatMap((item) =>
     item.fields
-      .filter((field) => !field.isStandardTemplate)
+      .filter((field) => !field.isStandardTemplate && field.value.trim().length > 0)
       .map((field) => ({
         key: `${normalizeId(item.itemId)}:${field.name.toLocaleLowerCase()}`,
         itemId: item.itemId,

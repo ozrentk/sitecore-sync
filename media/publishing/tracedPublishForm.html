@@ -50,8 +50,13 @@
       </div>
       <div class="field-picker">
         <label class="visually-hidden" for="field-picker">Find a field assertion</label>
-        <input id="field-picker" type="text" list="field-options" autocomplete="off" placeholder="Type to find an item, path, or field">
-        <datalist id="field-options"></datalist>
+        <div class="field-combobox">
+          <input id="field-picker" type="text" autocomplete="off"
+            role="combobox" aria-autocomplete="list" aria-expanded="false"
+            aria-controls="field-suggestions"
+            placeholder="Type to find an item, path, field, or value">
+          <div id="field-suggestions" class="field-suggestions" role="listbox" hidden></div>
+        </div>
         <button id="add-field" type="button">Add field</button>
       </div>
       <div id="field-status" class="status muted"></div>

@@ -133,6 +133,55 @@ input:disabled {
   max-width: 780px;
 }
 
+.field-combobox {
+  position: relative;
+  min-width: 0;
+}
+
+.field-suggestions {
+  position: absolute;
+  z-index: 20;
+  top: calc(100% + 2px);
+  right: 0;
+  left: 0;
+  max-height: 280px;
+  overflow-y: auto;
+  border: 1px solid var(--vscode-dropdown-border, var(--vscode-panel-border));
+  background: var(--vscode-dropdown-background);
+  box-shadow: 0 5px 18px rgb(0 0 0 / 24%);
+}
+
+.field-suggestion {
+  display: block;
+  width: 100%;
+  min-width: 0;
+  padding: 7px 9px;
+  color: var(--vscode-dropdown-foreground);
+  background: transparent;
+  border: 0;
+  text-align: left;
+}
+
+.field-suggestion strong,
+.field-suggestion span {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.field-suggestion span {
+  margin-top: 2px;
+  color: var(--vscode-descriptionForeground);
+  font-size: 11px;
+}
+
+.field-suggestion:hover,
+.field-suggestion[aria-selected="true"] {
+  color: var(--vscode-list-activeSelectionForeground);
+  background: var(--vscode-list-activeSelectionBackground);
+}
+
 .field-picker button {
   min-width: 92px;
 }
