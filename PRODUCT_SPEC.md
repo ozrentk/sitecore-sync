@@ -62,7 +62,7 @@ The route prompt is prefilled from the selected item path relative to the select
 
 Traced and Power operations reuse one document-style **Publish Trace** tab. It displays one progressive vertical stage list and a concise conclusion. Evidence and selected-scope reference details remain collapsed until requested; there are no internal tabs or permanent diagnostic panes. Standard publish opens the trace only on failure.
 
-The Power Publish collapsed scope graph is explicitly limited to supported, observable item references rather than claiming knowledge of code-driven or search-driven dependencies. Layout fields contribute only component datasource attributes. Droplink, Droptree, Multilist, Treelist, General Link, Image, and File fields contribute field-type-specific targets. A selected scope exposes only references leaving its structural path boundary. External scopes are scanned lazily when selected or expanded, cached by item ID, and protected from cycles. A scan pauses in resumable 500-item or 200-reference chunks. Power Publish refuses to queue a selected scope that is incomplete or contains an unresolved datasource.
+The Power Publish collapsed scope graph is explicitly limited to supported, observable item references rather than claiming knowledge of code-driven or search-driven dependencies. Layout fields contribute only component datasource attributes. Droplink, Droptree, Multilist, Treelist, General Link, Image, and File fields contribute field-type-specific targets. A selected scope exposes only content and media references leaving its structural path boundary. Template, layout, system, unsupported, and external-URL targets are omitted from the graph and summarized as aggregate evidence. External scopes are scanned lazily when selected or expanded, cached by item ID, and protected from cycles. A scan pauses in resumable 500-item or 200-unique-external-scope chunks; internal and non-publishable references do not consume the external-scope budget. Power Publish refuses to queue a selected scope that is incomplete or contains an unresolved datasource.
 
 ## Connections
 
@@ -289,11 +289,15 @@ Selecting an unscanned child includes it and starts scanning immediately. Expand
 
 The configurator labels the execution option **Publish structural descendants through Sitecore**. When enabled, each selected collapsed scope root is sent to Sitecore with descendant publishing enabled. This is more efficient, but Sitecore controls the exact descendant set. When disabled, every inspected item in each selected scope is sent explicitly. Deliberately unselected external scopes are recorded as exclusions and do not block queueing; unresolved references and incomplete selected scopes do.
 
-The review summary separates content scopes, media items, layout datasources, item links, external URLs, exclusions, and unresolved references. Template, layout, and system targets are evidence-only by default. Scan work is cached and reports progress; reaching a 500-item or 200-reference chunk pauses the node and offers continuation rather than failing or silently truncating the plan.
+The review summary separates content scopes, media items, layout datasources, item links, external URLs, exclusions, and unresolved references. Template, layout, system, and unsupported targets are excluded from the tree and counted as aggregate evidence. Scan work is cached and reports progress; reaching a 500-item or 200-unique-external-scope chunk pauses the node and offers continuation rather than failing or silently truncating the plan.
 
 ## v0.9.10 Structural scope and execution separation
 
 A collapsed scope always traverses and absorbs its structural descendants. The **Publish structural descendants through Sitecore** checkbox no longer changes the collapsed boundary. It chooses only between delegated execution using selected scope roots and deterministic explicit execution using every inspected item in those scopes. Power Publish descendant field assertions likewise load independently of that execution choice.
+
+## v0.9.11 Publishable reference filtering
+
+Only unique external `/sitecore/content` and `/sitecore/media library` targets become collapsed-scope candidates and consume the external-scope safety budget. Resolved template, layout, system, and unsupported targets remain cached but are represented only by aggregate ignored-reference counts in review and final evidence.
 
 After restart, the common processor restores its Play/Pause state and queue order, resumes a saved remote checkpoint or publishing operation ID, and does not advance to the next record until recovery reaches a terminal state. An uncertain operation without a recoverable remote identifier is marked interrupted and never repeated automatically. Migration must also handle the legacy case where the older independent transfer and publishing managers both left active work.
 
