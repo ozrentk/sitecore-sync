@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import * as vscode from "vscode";
 import type { ConnectionStore } from "../connections/connectionStore";
+import type { OperationDetailsPanel } from "../operations/operationDetailsPanel";
 import type {
   AuthoringContentClient,
   AuthoringItemDetails,
@@ -74,8 +75,6 @@ interface TracedPublishSetup {
 }
 
 export class PublishingManager implements vscode.Disposable {
-  private panel: vscode.WebviewPanel | undefined;
-  private displayedRunId: string | undefined;
   private readonly controllers = new Map<string, AbortController>();
   private readonly connectionSubscription: vscode.Disposable;
 
@@ -90,6 +89,7 @@ export class PublishingManager implements vscode.Disposable {
     private readonly edge: ExperienceEdgeClient,
     private readonly output: vscode.OutputChannel,
     private readonly operations: TransferQueueStore,
+    private readonly operationDetails: OperationDetailsPanel,
   ) {
     this.connectionSubscription = connections.onDidChange(() => {
       void this.removeOrphanedProfiles();
@@ -774,7 +774,6 @@ export class PublishingManager implements vscode.Disposable {
       controller.abort();
     }
     this.connectionSubscription.dispose();
-    this.panel?.dispose();
   }
 
   private async execute(
@@ -2057,37 +2056,17 @@ export class PublishingManager implements vscode.Disposable {
   }
 
   private openTrace(run: PublishRun): void {
-    if (!this.panel) {
-      this.panel = vscode.window.createWebviewPanel(
-        "xmCloudSync.publishTrace",
-        "Operation Details",
-        vscode.ViewColumn.Active,
-        {
-          enableScripts: false,
-          retainContextWhenHidden: true,
-          enableCommandUris: [
-            retryVerificationCommand,
-            republishTraceCommand,
-            recheckStatusCommand,
-          ],
-        },
-      );
-      this.panel.iconPath = vscode.Uri.joinPath(this.extensionUri, "media", "sitecore-xm-cloud-sync.svg");
-      this.panel.onDidDispose(() => {
-        this.panel = undefined;
-        this.displayedRunId = undefined;
-      });
-    } else {
-      this.panel.reveal(vscode.ViewColumn.Active);
-    }
-    this.displayedRunId = run.id;
-    this.panel.webview.html = traceHtml(run, this.panel.webview.cspSource);
+    this.operationDetails.show(
+      run.id,
+      (cspSource) => traceHtml(run, cspSource),
+    );
   }
 
   private renderIfDisplayed(run: PublishRun): void {
-    if (this.panel && this.displayedRunId === run.id) {
-      this.panel.webview.html = traceHtml(run, this.panel.webview.cspSource);
-    }
+    this.operationDetails.renderIfDisplayed(
+      run.id,
+      (cspSource) => traceHtml(run, cspSource),
+    );
   }
 }
 

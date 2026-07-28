@@ -6,6 +6,7 @@
 - Made publishing asynchronous: configuration now queues a publishing operation and its existing trace can be reopened directly from the matching Operations row.
 - Added restart recovery for incomplete publishing runs without starting duplicate server operations.
 - Added a shared **Operation Details** editor presentation for transfer evidence and publishing trace stages.
+- Corrected Operation Details panel ownership so transfers and publishing traces reuse the same editor instead of opening one editor per operation family.
 - Added **Recent Operations**, retaining the newest 30 terminal records and showing the newest 10 by default with a show-more/fewer action.
 - Changed the Operations badge to count the complete active FIFO and explain its transfer/publishing breakdown.
 

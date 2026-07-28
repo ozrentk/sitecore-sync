@@ -22,6 +22,7 @@ import { TransfersTreeProvider, TransferTreeItem } from "./transfers/transfersTr
 import { PublishingClient } from "./sitecore/publishingClient";
 import { ExperienceEdgeClient } from "./sitecore/experienceEdgeClient";
 import { PublishingManager } from "./publishing/publishingManager";
+import { OperationDetailsPanel } from "./operations/operationDetailsPanel";
 
 export function activate(context: vscode.ExtensionContext): void {
   const log = vscode.window.createOutputChannel("XM Cloud Sync", { log: true });
@@ -34,6 +35,14 @@ export function activate(context: vscode.ExtensionContext): void {
   const publishingClient = new PublishingClient(log);
   const experienceEdgeClient = new ExperienceEdgeClient(log);
   const transferQueue = new TransferQueueStore(context.workspaceState);
+  const operationDetails = new OperationDetailsPanel(
+    context.extensionUri,
+    [
+      "xmCloudSync.retryPublishTraceVerification",
+      "xmCloudSync.republishTrace",
+      "xmCloudSync.recheckPublishTraceStatus",
+    ],
+  );
   const publishingManager = new PublishingManager(
     context.extensionUri,
     context.workspaceState,
@@ -45,6 +54,7 @@ export function activate(context: vscode.ExtensionContext): void {
     experienceEdgeClient,
     publishOutput,
     transferQueue,
+    operationDetails,
   );
   const itemTaskRunner = new ItemTaskRunner(
     context.globalStorageUri,
@@ -65,7 +75,6 @@ export function activate(context: vscode.ExtensionContext): void {
     (runId) => publishingManager.executeQueued(runId),
   );
   const transfersProvider = new TransfersTreeProvider(transferQueue, connectionStore);
-  let transferOperationPanel: vscode.WebviewPanel | undefined;
   const comparisonPanelManager = new ComparisonPanelManager(
     context.extensionUri,
     context.workspaceState,
@@ -129,6 +138,7 @@ export function activate(context: vscode.ExtensionContext): void {
     transferQueue,
     transferProcessor,
     transfersProvider,
+    operationDetails,
     itemTaskRunner,
     publishOutput,
     publishingManager,
@@ -312,23 +322,14 @@ export function activate(context: vscode.ExtensionContext): void {
       if (!(argument instanceof TransferTreeItem)) {
         return;
       }
-      if (argument.record.kind === "publishing") {
-        publishingManager.showTrace(argument.record.publishRunId);
+      const record = argument.record;
+      if (record.kind === "publishing") {
+        publishingManager.showTrace(record.publishRunId);
       } else {
-        if (!transferOperationPanel) {
-          transferOperationPanel = vscode.window.createWebviewPanel(
-            "xmCloudSync.operationDetails",
-            "Operation Details",
-            vscode.ViewColumn.Active,
-            { enableScripts: false, retainContextWhenHidden: true },
-          );
-          transferOperationPanel.onDidDispose(() => {
-            transferOperationPanel = undefined;
-          });
-        } else {
-          transferOperationPanel.reveal(vscode.ViewColumn.Active);
-        }
-        transferOperationPanel.webview.html = transferOperationHtml(argument.record);
+        operationDetails.show(
+          record.id,
+          () => transferOperationHtml(record),
+        );
       }
     }),
     vscode.commands.registerCommand("xmCloudSync.compareWithConnection", async (argument) => {
