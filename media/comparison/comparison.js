@@ -1072,7 +1072,6 @@ function showContextMenu(event, pair, clickedSide, forceDisabled = false) {
   syncRightToLeft.addEventListener("click", () => startSubtreeSync(pair, "rightToLeft"));
   menu.append(
     detailedDiff,
-    runTask,
     publishMenu,
     addFavorite,
     createContextMenuSeparator(),
@@ -1085,6 +1084,8 @@ function showContextMenu(event, pair, clickedSide, forceDisabled = false) {
     createContextMenuSeparator(),
     refreshItem,
     refreshSubtree,
+    createContextMenuSeparator(),
+    runTask,
   );
   document.body.append(menu);
   contextMenu = menu;
