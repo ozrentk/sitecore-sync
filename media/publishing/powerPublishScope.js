@@ -44,7 +44,7 @@ function render() {
   const selectedNodes = state.model.nodes.filter((node) => state.selected.has(node.id));
   strategy.textContent = state.model.publishSubItemsThroughSitecore
     ? "Sitecore will publish structural descendants for every selected scope root."
-    : "Only the selected scope-root items will be sent to Sitecore.";
+    : "Every inspected item inside the selected collapsed scopes will be published explicitly.";
   selectedCount.textContent = String(selectedNodes.length);
   itemCount.textContent = String(
     selectedNodes.reduce((total, node) => total + node.inspectedItemCount, 0),

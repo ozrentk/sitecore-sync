@@ -151,7 +151,7 @@ export async function showTracedPublishForm(
               ...initial.fields,
               ...(descendants ?? []),
             ];
-            const result = validateSubmission(message, available, initial.sites);
+            const result = validateSubmission(message, available, initial.sites, initial.kind);
             if (typeof result === "string") {
               await panel.webview.postMessage({ type: "validationError", message: result });
               return;
@@ -175,6 +175,7 @@ function validateSubmission(
   message: SubmitMessage,
   availableFields: readonly TracedPublishFieldCandidate[],
   sites: readonly TracedPublishSiteCandidate[],
+  kind: TracedPublishFormInitialState["kind"],
 ): TracedPublishFormResult | string {
   if (message.mode !== "SMART" && message.mode !== "FULL") {
     return "Select Smart publish or Full publish.";
@@ -227,7 +228,7 @@ function validateSubmission(
     if (!field) {
       return "A selected field is no longer available.";
     }
-    if (field.descendant && !message.publishSubItems) {
+    if (field.descendant && !message.publishSubItems && kind !== "power") {
       return "Enable Descendants before selecting fields owned by descendant items.";
     }
     if (!siteName || !route) {

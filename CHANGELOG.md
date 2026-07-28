@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.9.10
+
+- Fixed collapsed Power Publish scopes so structural descendants are always absorbed beneath their scope root instead of appearing as followable external nodes when Sitecore descendant publishing is disabled.
+- Separated scope discovery from execution strategy: enabled descendant delegation publishes selected scope roots through Sitecore, while disabled delegation publishes every inspected item in the selected scopes explicitly.
+- Made Power Publish load structural descendant assertion fields independently of the Sitecore descendant-publishing option.
+
 ## 0.9.9
 
 - Replaced Power Publish's eager recursive GUID crawl with a user-directed **collapsed scope graph**. Each node represents one Sitecore structural scope and exposes only references that leave its boundary.
