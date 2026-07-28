@@ -15,6 +15,7 @@
 - Corrected rendered-layout verification to retain every value observed for an item field instead of allowing the last duplicate occurrence to overwrite earlier matches, and reports all observed values plus matching-object counts as evidence.
 - Added **Recent Operations**, retaining the newest 30 terminal records and showing the newest 10 by default with a show-more/fewer action.
 - Changed the Operations badge to count the complete active FIFO and explain its transfer/publishing breakdown.
+- Restored **Expand Loaded Items** and the automatic expansion after **Expand All** by correcting comparison-row traversal introduced by one-sided failure isolation.
 
 ## 0.9.6
 

@@ -531,8 +531,7 @@ function findLoadedPairContext(rowKey) {
     if (pair.key === rowKey) {
       return { pair, parent };
     }
-    const selectedNode = pair[side];
-    if (!selectedNode || (selectedNode.hasChildren && !selectedNode.childrenLoaded)) {
+    if (!pairLevelsLoaded(pair)) {
       return undefined;
     }
     for (const childPair of pairChildren(
