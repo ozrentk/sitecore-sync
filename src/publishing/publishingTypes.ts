@@ -65,6 +65,9 @@ export interface PublishBatch {
   readonly itemIds: readonly string[];
   readonly label: string;
   readonly operationId?: string;
+  readonly checkpointStatus?: "pending" | "running" | "matched" | "diverged";
+  readonly checkpointSummary?: string;
+  readonly checkpointEvidence?: readonly string[];
 }
 
 export interface PublishRun {

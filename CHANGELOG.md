@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.9.8
+
+- Reused the grouped Traced Publish configurator for Power Publish, retaining Smart/Full mode, optional structural descendants, one route/application verification, structural field assertions, and optional Browser DOM selectors.
+- Made supported reference discovery intrinsic to Power Publish instead of exposing Sitecore's non-deterministic **Include related items** option.
+- Added structural descendants to the explicit Observed Reference Graph when selected, while keeping referenced-item fields out of the assertion picker.
+- Increased the Power Publish graph safety budget to 500 items and blocks queueing when structural or reference discovery is truncated, depth-limited, or unable to load an observed target.
+- Replaced one-publish-operation-per-item execution with dependency-layer batches of up to 20 independent root item IDs, preserving cyclic components and publishing the selected root in a final batch.
+- Added persisted Raw Experience Edge checkpoints after every Power Publish batch. Item identity, selected fields, and graph-forming reference fields must match before a dependent layer begins; restart recovery resumes from the first unmatched checkpoint.
+- Added expandable Power Publish checkpoint evidence to Operation Details.
+- Added advisory Traced Publish evidence for supported references observed outside the selected structural scope without publishing or verifying referenced-item fields.
+
 ## 0.9.7
 
 - Replaced the Transfers view with **Operations**, where subtree transfers, field-value transfers, and all publishing modes share one durable FIFO and one Play/Pause processor.

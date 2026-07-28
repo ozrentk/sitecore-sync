@@ -11,10 +11,13 @@ const state = {
 };
 const maximumFieldSuggestions = 50;
 
+const title = document.getElementById("title");
 const context = document.getElementById("context");
 const mode = document.getElementById("mode");
 const descendants = document.getElementById("descendants");
 const related = document.getElementById("related");
+const relatedOption = document.getElementById("related-option");
+const powerScopeHint = document.getElementById("power-scope-hint");
 const site = document.getElementById("site");
 const manualSite = document.getElementById("manual-site");
 const route = document.getElementById("route");
@@ -59,6 +62,14 @@ window.addEventListener("message", (event) => {
 function initialize(initial) {
   state.initial = initial;
   state.fields = initial.fields.map(toFieldState);
+  const power = initial.kind === "power";
+  const publishName = power ? "Power Publish" : "Traced Publish";
+  title.textContent = `Configure ${publishName}`;
+  document.title = `Configure ${publishName}`;
+  publish.textContent = `Queue ${publishName}`;
+  related.checked = false;
+  relatedOption.hidden = power;
+  powerScopeHint.hidden = !power;
   context.textContent =
     `${initial.connectionName} (${initial.targetHost}) · ${initial.language} · ${initial.rootPath}`;
   applicationUrl.value = initial.applicationUrl || "";
@@ -331,7 +342,7 @@ function updateSummary() {
   const selectors = selected.filter((field) => field.browserSelector.trim()).length;
   const scopes = [
     descendants.checked ? "descendants" : "",
-    related.checked ? "related items" : "",
+    state.initial?.kind !== "power" && related.checked ? "related items" : "",
   ].filter(Boolean).join(", ") || "selected item only";
   summary.textContent =
     `${mode.value === "SMART" ? "Smart" : "Full"} · ${scopes} · ${selected.length} assertion(s) · ${selectors} DOM selector(s)`;
@@ -467,7 +478,7 @@ publish.addEventListener("click", () => {
     type: "submit",
     mode: mode.value,
     publishSubItems: descendants.checked,
-    publishRelatedItems: related.checked,
+    publishRelatedItems: state.initial.kind === "power" ? false : related.checked,
     siteName: selectedSiteName(),
     route: route.value,
     applicationUrl: applicationUrl.value,
