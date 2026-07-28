@@ -691,11 +691,18 @@ function hasRefreshOverlap(itemIds) {
   );
 }
 
-function subtreeIsLoading(node) {
+function subtreeStructureIsLoading(node) {
   if (!node) {
     return false;
   }
-  return node.loading || node.detailsLoading || node.children.some(subtreeIsLoading);
+  return node.loading || node.children.some(subtreeStructureIsLoading);
+}
+
+function subtreeDetailsAreLoading(node) {
+  if (!node) {
+    return false;
+  }
+  return node.detailsLoading || node.children.some(subtreeDetailsAreLoading);
 }
 
 function clearNodeLoadingState(node) {
@@ -711,7 +718,13 @@ function clearNodeLoadingState(node) {
 
 function startSubtreeRefresh(pair) {
   const itemIds = refreshIdsForPair(pair);
-  if (hasRefreshOverlap(itemIds) || subtreeIsLoading(pair.left) || subtreeIsLoading(pair.right)) {
+  if (
+    hasRefreshOverlap(itemIds) ||
+    subtreeStructureIsLoading(pair.left) ||
+    subtreeStructureIsLoading(pair.right) ||
+    subtreeDetailsAreLoading(pair.left) ||
+    subtreeDetailsAreLoading(pair.right)
+  ) {
     return;
   }
 
@@ -734,7 +747,14 @@ function startItemRefresh(pair) {
       .filter(Boolean)
       .map((node) => normalizeItemId(node.itemId)),
   );
-  if (!itemIds.size || hasRefreshOverlap(itemIds) || subtreeIsLoading(pair.left) || subtreeIsLoading(pair.right)) {
+  if (
+    !itemIds.size ||
+    hasRefreshOverlap(itemIds) ||
+    subtreeStructureIsLoading(pair.left) ||
+    subtreeStructureIsLoading(pair.right) ||
+    subtreeDetailsAreLoading(pair.left) ||
+    subtreeDetailsAreLoading(pair.right)
+  ) {
     return;
   }
 
@@ -759,8 +779,10 @@ function startRefreshAll() {
     const itemIds = refreshIdsForPair(rootPair);
     if (
       hasRefreshOverlap(itemIds) ||
-      subtreeIsLoading(rootPair.left) ||
-      subtreeIsLoading(rootPair.right)
+      subtreeStructureIsLoading(rootPair.left) ||
+      subtreeStructureIsLoading(rootPair.right) ||
+      subtreeDetailsAreLoading(rootPair.left) ||
+      subtreeDetailsAreLoading(rootPair.right)
     ) {
       return;
     }
@@ -782,8 +804,8 @@ function startSubtreeLoad(pair) {
   if (
     !pairCanExpand(pair) ||
     hasRefreshOverlap(itemIds) ||
-    subtreeIsLoading(pair.left) ||
-    subtreeIsLoading(pair.right)
+    subtreeStructureIsLoading(pair.left) ||
+    subtreeStructureIsLoading(pair.right)
   ) {
     return;
   }
@@ -847,8 +869,11 @@ function showContextMenu(event, pair, clickedSide, forceDisabled = false) {
   const itemIds = refreshIdsForPair(pair);
   const disabled = forceDisabled ||
     hasRefreshOverlap(itemIds) ||
-    subtreeIsLoading(pair.left) ||
-    subtreeIsLoading(pair.right);
+    subtreeStructureIsLoading(pair.left) ||
+    subtreeStructureIsLoading(pair.right);
+  const refreshDisabled = disabled ||
+    subtreeDetailsAreLoading(pair.left) ||
+    subtreeDetailsAreLoading(pair.right);
   const menu = document.createElement("div");
   menu.className = "comparison-context-menu";
   menu.setAttribute("role", "menu");
@@ -909,9 +934,9 @@ function showContextMenu(event, pair, clickedSide, forceDisabled = false) {
   refreshItem.className = "context-menu-item";
   refreshItem.type = "button";
   refreshItem.textContent = "Refresh Item";
-  refreshItem.disabled = disabled;
-  refreshItem.title = disabled
-    ? "This item overlaps another operation or is still loading."
+  refreshItem.disabled = refreshDisabled;
+  refreshItem.title = refreshDisabled
+    ? "This item overlaps another operation or its data is still loading."
     : "Refresh this item's template, version, and fields without changing its loaded children.";
   refreshItem.addEventListener("click", () => startItemRefresh(pair));
 
@@ -919,9 +944,9 @@ function showContextMenu(event, pair, clickedSide, forceDisabled = false) {
   refreshSubtree.className = "context-menu-item";
   refreshSubtree.type = "button";
   refreshSubtree.textContent = "Refresh Subtree";
-  refreshSubtree.disabled = disabled;
-  refreshSubtree.title = disabled
-    ? "This subtree overlaps another operation or is still loading."
+  refreshSubtree.disabled = refreshDisabled;
+  refreshSubtree.title = refreshDisabled
+    ? "This subtree overlaps another operation or its data is still loading."
     : "Refresh the selected item and every loaded descendant level.";
   refreshSubtree.addEventListener("click", () => startSubtreeRefresh(pair));
 
