@@ -133,8 +133,8 @@ function operationLabel(record: OperationRecord): string {
     return `${publishKindLabel(record.publishKind)} · ${itemName(record.itemPath)}`;
   }
   return record.kind === "fieldValue"
-    ? `Field ${fieldName(record)} · ${itemName(record.source.itemPath)}`
-    : `Subtree · ${itemName(record.sourcePath)} · ${
+    ? `Field Transfer · ${itemName(record.source.itemPath)}`
+    : `Subtree Transfer · ${itemName(record.sourcePath)} · ${
         subtreeTransferModeLabel(subtreeTransferMode(record))
       }`;
 }
@@ -245,7 +245,7 @@ function operationTooltip(record: OperationRecord): vscode.MarkdownString {
     }
     return tooltip;
   }
-  tooltip.appendMarkdown(`**${record.kind === "fieldValue" ? "Field value" : "Subtree"} transfer**\n\n`);
+  tooltip.appendMarkdown(`**${record.kind === "fieldValue" ? "Field Transfer" : "Subtree Transfer"}**\n\n`);
   tooltip.appendMarkdown(`Status: ${statusLabel(record)}  \n`);
   tooltip.appendMarkdown(`Queued: ${record.enqueuedAt}  \n`);
   if (record.startedAt) {
