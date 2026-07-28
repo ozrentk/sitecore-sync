@@ -19,6 +19,7 @@
 - Kept comparison actions available while **Expand All** loads field details in the background; only refresh actions remain guarded until those detail requests finish.
 - Scoped the **Refresh Item** guard to the selected row so pending field details on unrelated descendants no longer disable it; **Refresh Subtree** still waits for its complete branch.
 - Standardized Operations labels as **Subtree Transfer** and **Field Transfer** in both the queue and recent history.
+- Removed redundant **completed** text from successful Operations rows; the green completion icon communicates the status while queue progress and failures remain explicit.
 
 ## 0.9.6
 

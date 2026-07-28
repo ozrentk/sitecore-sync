@@ -100,9 +100,10 @@ implements vscode.TreeDataProvider<OperationTreeElement>, vscode.Disposable {
     if (record.kind === "publishing") {
       const connection = this.connections.get(record.connectionId)?.name ??
         record.connectionName;
-      return `${connection} · ${record.language} · ${
-        record.progressSummary ?? statusLabel(record)
-      }`;
+      const status = record.status === "completed"
+        ? ""
+        : ` · ${record.progressSummary ?? statusLabel(record)}`;
+      return `${connection} · ${record.language}${status}`;
     }
     const sourceId = record.kind === "fieldValue"
       ? record.source.connectionId
@@ -118,7 +119,8 @@ implements vscode.TreeDataProvider<OperationTreeElement>, vscode.Disposable {
       : record.targetConnectionName;
     const source = this.connections.get(sourceId)?.name ?? sourceFallback;
     const target = this.connections.get(targetId)?.name ?? targetFallback;
-    return `${source} → ${target} · ${statusLabel(record)}`;
+    const status = record.status === "completed" ? "" : ` · ${statusLabel(record)}`;
+    return `${source} → ${target}${status}`;
   }
 
   dispose(): void {
