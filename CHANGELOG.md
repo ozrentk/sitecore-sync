@@ -17,6 +17,7 @@
 - Changed the Operations badge to count the complete active FIFO and explain its transfer/publishing breakdown.
 - Restored **Expand Loaded Items** and the automatic expansion after **Expand All** by correcting comparison-row traversal introduced by one-sided failure isolation.
 - Kept comparison actions available while **Expand All** loads field details in the background; only refresh actions remain guarded until those detail requests finish.
+- Scoped the **Refresh Item** guard to the selected row so pending field details on unrelated descendants no longer disable it; **Refresh Subtree** still waits for its complete branch.
 
 ## 0.9.6
 
