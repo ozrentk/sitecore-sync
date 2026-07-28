@@ -5,12 +5,12 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src {{cspSource}}; script-src {{cspSource}};">
   <link rel="stylesheet" href="{{styleUri}}">
-  <title>Configure Traced Publish</title>
+  <title>Configure Publish</title>
 </head>
 <body>
   <main>
     <header>
-      <h1>Configure Traced Publish</h1>
+      <h1 id="title">Configure Publish</h1>
       <p id="context" class="muted"></p>
     </header>
 
@@ -23,7 +23,8 @@
           <option value="FULL">Full publish</option>
         </select>
         <label class="check"><input id="descendants" type="checkbox"> Include structural descendants</label>
-        <label class="check"><input id="related" type="checkbox"> Include related items</label>
+        <label id="related-option" class="check"><input id="related" type="checkbox"> Include related items</label>
+        <p id="power-scope-hint" class="hint" hidden>Supported item references are always discovered into the explicit Power Publish plan.</p>
       </fieldset>
 
       <fieldset>

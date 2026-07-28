@@ -18,6 +18,7 @@ export interface TracedPublishSiteCandidate {
 }
 
 export interface TracedPublishFormInitialState {
+  readonly kind: "traced" | "power";
   readonly connectionName: string;
   readonly targetHost: string;
   readonly rootPath: string;
@@ -69,7 +70,7 @@ export async function showTracedPublishForm(
   const mediaUri = vscode.Uri.joinPath(extensionUri, "media", "publishing");
   const panel = vscode.window.createWebviewPanel(
     "xmCloudSync.tracedPublishForm",
-    "Configure Traced Publish",
+    initial.kind === "power" ? "Configure Power Publish" : "Configure Traced Publish",
     vscode.ViewColumn.Active,
     {
       enableScripts: true,
