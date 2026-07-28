@@ -177,7 +177,7 @@ export class PublishingManager implements vscode.Disposable {
       if (kind === "power" && !powerPlan) {
         return;
       }
-      const selectedIds = powerPlan?.selectedRootItemIds ?? [rootDetails.itemId];
+      const selectedIds = powerPlan?.publishItemIds ?? [rootDetails.itemId];
 
       if (kind !== "standard" && !profileSettings) {
         return;
@@ -1584,7 +1584,9 @@ export class PublishingManager implements vscode.Disposable {
         applicationUrl: result.applicationUrl,
       },
       tracedFields: { snapshots, fields },
-      structuralDetails: result.publishSubItems ? discoveredDetails : [root],
+      structuralDetails: kind === "power" || result.publishSubItems
+        ? discoveredDetails
+        : [root],
     };
   }
 
@@ -2066,7 +2068,9 @@ export class PublishingManager implements vscode.Disposable {
         `${root.path} — ${root.itemId}`,
         `Language: ${language}; mode: ${options.mode}; ${
           kind === "power"
-            ? `${itemCount} selected collapsed scope root(s)`
+            ? options.publishSubItems
+              ? `${itemCount} selected collapsed scope root(s)`
+              : `${itemCount} explicit inspected item(s)`
             : `${itemCount} explicit item(s)`
         }`,
         `Additional scope: ${scope.join(", ") || "none"}`,

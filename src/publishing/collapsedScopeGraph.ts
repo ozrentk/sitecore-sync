@@ -27,7 +27,7 @@ export interface CollapsedScopeGraphLoader {
 }
 
 export interface CollapsedScopeGraphPlan {
-  readonly selectedRootItemIds: readonly string[];
+  readonly publishItemIds: readonly string[];
   readonly snapshots: readonly PublishSnapshot[];
   readonly concreteEdges: readonly ReferenceEdge[];
   readonly planningEdges: readonly ReferenceEdge[];
@@ -162,23 +162,28 @@ export class CollapsedScopeGraph {
         selectedItemIds.has(normalizeId(edge.sourceItemId)) &&
         selectedItemIds.has(normalizeId(edge.targetItemId))
       );
-    const planningEdges: ReferenceEdge[] = [];
-    for (const record of records) {
-      for (const reference of record.outgoingReferences) {
-        if (!selected.has(reference.targetScopeId)) {
-          continue;
+    const scopePlanningEdges: ReferenceEdge[] = [];
+    if (this.publishSubItemsThroughSitecore) {
+      for (const record of records) {
+        for (const reference of record.outgoingReferences) {
+          if (!selected.has(reference.targetScopeId)) {
+            continue;
+          }
+          const target = this.records.get(reference.targetScopeId);
+          if (!target) {
+            continue;
+          }
+          scopePlanningEdges.push({
+            sourceItemId: record.root.itemId,
+            targetItemId: target.root.itemId,
+            fieldName: reference.fieldName,
+          });
         }
-        const target = this.records.get(reference.targetScopeId);
-        if (!target) {
-          continue;
-        }
-        planningEdges.push({
-          sourceItemId: record.root.itemId,
-          targetItemId: target.root.itemId,
-          fieldName: reference.fieldName,
-        });
       }
     }
+    const publishItemIds = this.publishSubItemsThroughSitecore
+      ? records.map((record) => record.root.itemId)
+      : snapshots.map((snapshot) => snapshot.itemId);
     const mediaRecords = records.filter((record) => record.kind === "media");
     const externalUrlCount = records.reduce(
       (total, record) => total + record.externalLinks.size,
@@ -187,6 +192,9 @@ export class CollapsedScopeGraph {
     const evidence = [
       `Selected ${records.length} collapsed scope(s): ${records.length - mediaRecords.length} content scope(s) and ${mediaRecords.length} media item(s).`,
       `Inspected ${records.reduce((total, record) => total + record.inspectedItemIds.size, 0)} concrete item(s); recorded ${externalUrlCount} external URL(s).`,
+      this.publishSubItemsThroughSitecore
+        ? `Execution delegates structural descendants to Sitecore for ${publishItemIds.length} selected scope root(s).`
+        : `Execution publishes ${publishItemIds.length} inspected item(s) explicitly without Sitecore descendant expansion.`,
       ...records.flatMap((record) => [
         `${record.root.path}: ${record.inspectedItemIds.size} item(s), ${record.internalReferenceKeys.size} internal reference(s), ${uniqueTargetScopeIds(record).length} external scope(s).`,
         ...record.externalLinks.size
@@ -201,10 +209,12 @@ export class CollapsedScopeGraph {
       ]),
     ];
     return {
-      selectedRootItemIds: records.map((record) => record.root.itemId),
+      publishItemIds,
       snapshots,
       concreteEdges: deduplicateEdges(concreteEdges),
-      planningEdges: deduplicateEdges(planningEdges),
+      planningEdges: this.publishSubItemsThroughSitecore
+        ? deduplicateEdges(scopePlanningEdges)
+        : deduplicateEdges(concreteEdges),
       evidence,
       scopes: records.map((record) => ({
         rootItemId: record.root.itemId,
@@ -243,11 +253,7 @@ export class CollapsedScopeGraph {
         this.itemCache.set(currentKey, current);
         await this.inspectReferences(record, current, signal);
 
-        if (
-          this.publishSubItemsThroughSitecore &&
-          record.kind === "content" &&
-          current.hasChildren
-        ) {
+        if (record.kind === "content" && current.hasChildren) {
           const children = await this.loader.loadChildren(current, signal);
           for (const child of children) {
             const childKey = normalizeId(child.itemId);
@@ -342,10 +348,7 @@ export class CollapsedScopeGraph {
         record.concreteEdges.push(edge);
         if (
           normalizeId(target.itemId) === normalizeId(record.root.itemId) ||
-          (
-            this.publishSubItemsThroughSitecore &&
-            isPathInsideScope(target.path, record.root.path)
-          )
+          isPathInsideScope(target.path, record.root.path)
         ) {
           record.internalReferenceKeys.add(referenceKey);
           continue;
@@ -377,9 +380,6 @@ export class CollapsedScopeGraph {
   }
 
   private findContainingRecord(target: AuthoringItemDetails): ScopeRecord | undefined {
-    if (!this.publishSubItemsThroughSitecore) {
-      return this.records.get(normalizeId(target.itemId));
-    }
     return [...this.records.values()]
       .filter((record) =>
         (record.kind === "content" || record.kind === "media") &&

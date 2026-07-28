@@ -49,7 +49,7 @@ window.addEventListener("message", (event) => {
       break;
     case "descendantsFailed":
       state.descendantsLoading = false;
-      descendants.checked = false;
+      if (state.initial?.kind !== "power") descendants.checked = false;
       showError(`Unable to load descendant fields: ${message.message}`);
       renderFields();
       updateSummary();
@@ -81,6 +81,10 @@ function initialize(initial) {
   applicationUrl.value = initial.applicationUrl || "";
   renderSites(initial);
   route.value = initial.route || "";
+  if (power && !state.descendantsLoaded && !state.descendantsLoading) {
+    state.descendantsLoading = true;
+    vscode.postMessage({ type: "loadDescendants" });
+  }
   renderFields();
   updateSummary();
 }
@@ -201,7 +205,11 @@ function renderFields() {
 }
 
 function availableFields() {
-  return state.fields.filter((field) => !field.descendant || descendants.checked);
+  return state.fields.filter((field) => !field.descendant || descendantFieldsEnabled());
+}
+
+function descendantFieldsEnabled() {
+  return state.initial?.kind === "power" || descendants.checked;
 }
 
 function fieldPickerValue(field) {
@@ -326,7 +334,7 @@ function fieldStatusText(selectedCount, total) {
   if (state.descendantsLoading) {
     return "Loading structural descendant fields…";
   }
-  if (descendants.checked && !state.descendantsLoaded) {
+  if (descendantFieldsEnabled() && !state.descendantsLoaded) {
     return "Structural descendant fields have not been loaded.";
   }
   const itemCount = new Set(availableFields().map((field) => field.itemId)).size;
@@ -343,7 +351,7 @@ function suggestedRoute(siteName) {
 
 function updateSummary() {
   const selected = state.fields.filter((field) =>
-    field.selected && (!field.descendant || descendants.checked)
+    field.selected && (!field.descendant || descendantFieldsEnabled())
   );
   const selectors = selected.filter((field) => field.browserSelector.trim()).length;
   const scopes = [
@@ -353,7 +361,9 @@ function updateSummary() {
         : "descendants"
       : "",
     state.initial?.kind !== "power" && related.checked ? "related items" : "",
-  ].filter(Boolean).join(", ") || "selected item only";
+  ].filter(Boolean).join(", ") || (
+    state.initial?.kind === "power" ? "explicit collapsed-scope items" : "selected item only"
+  );
   summary.textContent =
     `${mode.value === "SMART" ? "Smart" : "Full"} · ${scopes} · ${selected.length} assertion(s) · ${selectors} DOM selector(s)`;
 }
@@ -376,7 +386,7 @@ descendants.addEventListener("change", () => {
     fieldStatus.textContent = "Loading structural descendant fields…";
     vscode.postMessage({ type: "loadDescendants" });
   }
-  if (!descendants.checked) {
+  if (!descendants.checked && state.initial?.kind !== "power") {
     for (const field of state.fields.filter((candidate) => candidate.descendant)) {
       field.selected = false;
       field.browserSelector = "";
@@ -452,7 +462,7 @@ related.addEventListener("change", updateSummary);
 cancel.addEventListener("click", () => vscode.postMessage({ type: "cancel" }));
 publish.addEventListener("click", () => {
   clearError();
-  if (descendants.checked && state.descendantsLoading) {
+  if (descendantFieldsEnabled() && state.descendantsLoading) {
     showError("Wait for descendant fields to finish loading.");
     return;
   }
@@ -475,7 +485,7 @@ publish.addEventListener("click", () => {
     !applicationUrl.value.trim() &&
     state.fields.some((field) =>
       field.selected &&
-      (!field.descendant || descendants.checked) &&
+      (!field.descendant || descendantFieldsEnabled()) &&
       field.browserSelector.trim()
     )
   ) {
@@ -493,7 +503,7 @@ publish.addEventListener("click", () => {
     route: route.value,
     applicationUrl: applicationUrl.value,
     fields: state.fields
-      .filter((field) => field.selected && (!field.descendant || descendants.checked))
+      .filter((field) => field.selected && (!field.descendant || descendantFieldsEnabled()))
       .map((field) => ({
         key: field.key,
         browserSelector: field.browserSelector,
