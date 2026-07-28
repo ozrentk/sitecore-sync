@@ -138,9 +138,6 @@ export class CollapsedScopeGraph {
       if (record.status === "failed") {
         return `${record.root.path} could not be scanned: ${record.error ?? "unknown error"}`;
       }
-      if (record.unresolvedReferences.size) {
-        return `${record.root.path} contains ${record.unresolvedReferences.size} unresolved reference(s).`;
-      }
     }
     return undefined;
   }
@@ -207,6 +204,14 @@ export class CollapsedScopeGraph {
           : [],
         ...record.externalLinks.size
           ? [...record.externalLinks].map((link) => `External link: ${link}`)
+          : [],
+        ...record.unresolvedReferences.size
+          ? [
+            `${record.root.path}: WARNING — ${record.unresolvedReferences.size} unresolved field reference(s) did not block Power Publish.`,
+            ...[...record.unresolvedReferences].map((reference) =>
+              `Unresolved reference warning: ${reference}`
+            ),
+          ]
           : [],
         ...record.outgoingReferences
           .filter((reference) => !selected.has(reference.targetScopeId))
@@ -323,6 +328,9 @@ export class CollapsedScopeGraph {
     signal: AbortSignal,
   ): Promise<void> {
     for (const field of source.fields) {
+      if (field.isStandardTemplate) {
+        continue;
+      }
       const parsed = parseReferenceField(field);
       for (const url of parsed.externalLinks) {
         record.externalLinks.add(`${source.path} › ${field.name}: ${url}`);
@@ -495,9 +503,11 @@ function snapshotFromDetails(details: AuthoringItemDetails): PublishSnapshot {
     language: details.language,
     version: details.version,
     fields,
-    references: details.fields.flatMap((field: AuthoringItemField) =>
-      parseReferenceField(field).itemReferences.map((reference) => reference.target)
-    ),
+    references: details.fields
+      .filter((field: AuthoringItemField) => !field.isStandardTemplate)
+      .flatMap((field: AuthoringItemField) =>
+        parseReferenceField(field).itemReferences.map((reference) => reference.target)
+      ),
   };
 }
 
