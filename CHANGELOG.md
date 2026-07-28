@@ -2,6 +2,7 @@
 
 ## 0.9.8
 
+- Corrected the Power Publish configurator so its intentionally omitted **Include related items** option is actually hidden even though checkbox labels use a flex layout; submissions already forced the value off.
 - Reused the grouped Traced Publish configurator for Power Publish, retaining Smart/Full mode, optional structural descendants, one route/application verification, structural field assertions, and optional Browser DOM selectors.
 - Made supported reference discovery intrinsic to Power Publish instead of exposing Sitecore's non-deterministic **Include related items** option.
 - Added structural descendants to the explicit Observed Reference Graph when selected, while keeping referenced-item fields out of the assertion picker.
