@@ -16,6 +16,7 @@
 - Added **Recent Operations**, retaining the newest 30 terminal records and showing the newest 10 by default with a show-more/fewer action.
 - Changed the Operations badge to count the complete active FIFO and explain its transfer/publishing breakdown.
 - Restored **Expand Loaded Items** and the automatic expansion after **Expand All** by correcting comparison-row traversal introduced by one-sided failure isolation.
+- Kept comparison actions available while **Expand All** loads field details in the background; only refresh actions remain guarded until those detail requests finish.
 
 ## 0.9.6
 
