@@ -531,7 +531,8 @@ function findLoadedPairContext(rowKey) {
     if (pair.key === rowKey) {
       return { pair, parent };
     }
-    if (!pairLevelsLoaded(pair)) {
+    const selectedNode = pair[side];
+    if (!selectedNode || (selectedNode.hasChildren && !selectedNode.childrenLoaded)) {
       return undefined;
     }
     for (const childPair of pairChildren(
@@ -1046,11 +1047,11 @@ function showContextMenu(event, pair, clickedSide, forceDisabled = false) {
   syncLeftToRight.className = "context-menu-item";
   syncLeftToRight.type = "button";
   syncLeftToRight.textContent = "Add Subtree Transfer Left → Right…";
-  syncLeftToRight.disabled = disabled || sameEnvironment || !pair.left || pathIdentityConflict;
+  syncLeftToRight.disabled = disabled || sameEnvironment || !pair.left;
   syncLeftToRight.title = sameEnvironment
     ? "Subtree transfer requires two different XM Cloud environments."
     : pathIdentityConflict
-      ? "Resolve the same-path item ID conflict before transferring."
+      ? "The target path has a different item ID. Choose Exact mirror to replace it."
       : !pair.left
         ? "The source item does not exist on the left."
         : "Transfer this item, its descendants, and all languages and versions from left to right.";
@@ -1060,11 +1061,11 @@ function showContextMenu(event, pair, clickedSide, forceDisabled = false) {
   syncRightToLeft.className = "context-menu-item";
   syncRightToLeft.type = "button";
   syncRightToLeft.textContent = "Add Subtree Transfer Right → Left…";
-  syncRightToLeft.disabled = disabled || sameEnvironment || !pair.right || pathIdentityConflict;
+  syncRightToLeft.disabled = disabled || sameEnvironment || !pair.right;
   syncRightToLeft.title = sameEnvironment
     ? "Subtree transfer requires two different XM Cloud environments."
     : pathIdentityConflict
-      ? "Resolve the same-path item ID conflict before transferring."
+      ? "The target path has a different item ID. Choose Exact mirror to replace it."
       : !pair.right
         ? "The source item does not exist on the right."
         : "Transfer this item, its descendants, and all languages and versions from right to left.";
@@ -1583,7 +1584,9 @@ function renderPair(pair, depth, ancestorRefreshing = false) {
       createInlineSideStatus("right", pair.right),
     );
     fragment.append(statusRow);
-    return fragment;
+    if (!pairReady(pair)) {
+      return fragment;
+    }
   }
 
   const children = pairChildren(

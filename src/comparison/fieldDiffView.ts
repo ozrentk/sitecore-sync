@@ -15,6 +15,8 @@ export interface FieldDiffSnapshot extends FieldDiffSelection {
   readonly rightConnectionName?: string;
   readonly leftDetails?: AuthoringItemDetails;
   readonly rightDetails?: AuthoringItemDetails;
+  readonly leftError?: string;
+  readonly rightError?: string;
   readonly textNormalization: "none" | "lineEndings";
 }
 

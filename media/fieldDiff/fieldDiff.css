@@ -109,3 +109,4 @@ pre {
 .diff-launch:hover strong { color: var(--vscode-textLink-foreground); text-decoration: underline; }
 .state { margin: 0; padding: 16px; color: var(--vscode-descriptionForeground); }
 .state.error { color: var(--vscode-errorForeground); }
+.summary-cell .error { color: var(--vscode-errorForeground); }

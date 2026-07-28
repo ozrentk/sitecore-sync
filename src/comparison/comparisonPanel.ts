@@ -947,7 +947,8 @@ export class ComparisonPanelManager implements vscode.Disposable {
             normalizeItemId(targetRootItem.itemId) !== normalizeItemId(sourceRoot.item.itemId)
           ) {
             throw new Error(
-              `The target path already exists with a different item ID (${targetRootItem.itemId}).`,
+              `The target path already exists with a different item ID (${targetRootItem.itemId}). ` +
+              "Choose Exact mirror to replace it.",
             );
           }
 
@@ -986,7 +987,8 @@ export class ComparisonPanelManager implements vscode.Disposable {
               const targetId = targetPaths.get(normalizedPath(sourceItem.path));
               if (targetId && targetId !== normalizeItemId(sourceItem.itemId)) {
                 throw new Error(
-                  `The target path ${sourceItem.path} exists with a different item ID.`,
+                  `The target path ${sourceItem.path} exists with a different item ID. ` +
+                  "Choose Exact mirror to replace it.",
                 );
               }
             }
@@ -2084,7 +2086,7 @@ export class ComparisonPanelManager implements vscode.Disposable {
     const selection = this.getSelection();
     await this.fieldDiffViewProvider.showLoading(selected);
     try {
-      const [leftDetails, rightDetails] = await Promise.all([
+      const [leftResult, rightResult] = await Promise.allSettled([
         selected.leftItemId && selection.leftConnectionId
           ? this.getItemDetails(
               selection.leftConnectionId,
@@ -2100,6 +2102,14 @@ export class ComparisonPanelManager implements vscode.Disposable {
             )
           : undefined,
       ]);
+      const leftDetails = leftResult.status === "fulfilled" ? leftResult.value : undefined;
+      const rightDetails = rightResult.status === "fulfilled" ? rightResult.value : undefined;
+      const leftError = leftResult.status === "rejected"
+        ? errorMessage(leftResult.reason)
+        : undefined;
+      const rightError = rightResult.status === "rejected"
+        ? errorMessage(rightResult.reason)
+        : undefined;
       if (selected !== this.selectedFieldDiffItem || !this.fieldDiffViewProvider.visible) {
         return;
       }
@@ -2113,6 +2123,8 @@ export class ComparisonPanelManager implements vscode.Disposable {
           : undefined,
         leftDetails,
         rightDetails,
+        leftError,
+        rightError,
         textNormalization: vscode.workspace
           .getConfiguration("xmCloudSync")
           .get<"none" | "lineEndings">("textNormalization", "none"),
