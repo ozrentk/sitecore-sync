@@ -705,6 +705,10 @@ function subtreeDetailsAreLoading(node) {
   return node.detailsLoading || node.children.some(subtreeDetailsAreLoading);
 }
 
+function pairDetailsAreLoading(pair) {
+  return pair.left?.detailsLoading === true || pair.right?.detailsLoading === true;
+}
+
 function clearNodeLoadingState(node) {
   if (!node) {
     return;
@@ -750,10 +754,8 @@ function startItemRefresh(pair) {
   if (
     !itemIds.size ||
     hasRefreshOverlap(itemIds) ||
-    subtreeStructureIsLoading(pair.left) ||
-    subtreeStructureIsLoading(pair.right) ||
-    subtreeDetailsAreLoading(pair.left) ||
-    subtreeDetailsAreLoading(pair.right)
+    pairLoading(pair) ||
+    pairDetailsAreLoading(pair)
   ) {
     return;
   }
@@ -867,11 +869,20 @@ function showContextMenu(event, pair, clickedSide, forceDisabled = false) {
   closeContextMenu();
 
   const itemIds = refreshIdsForPair(pair);
+  const selectedItemIds = new Set(
+    [pair.left, pair.right]
+      .filter(Boolean)
+      .map((node) => normalizeItemId(node.itemId)),
+  );
   const disabled = forceDisabled ||
     hasRefreshOverlap(itemIds) ||
     subtreeStructureIsLoading(pair.left) ||
     subtreeStructureIsLoading(pair.right);
-  const refreshDisabled = disabled ||
+  const refreshItemDisabled = forceDisabled ||
+    hasRefreshOverlap(selectedItemIds) ||
+    pairLoading(pair) ||
+    pairDetailsAreLoading(pair);
+  const refreshSubtreeDisabled = disabled ||
     subtreeDetailsAreLoading(pair.left) ||
     subtreeDetailsAreLoading(pair.right);
   const menu = document.createElement("div");
@@ -934,8 +945,8 @@ function showContextMenu(event, pair, clickedSide, forceDisabled = false) {
   refreshItem.className = "context-menu-item";
   refreshItem.type = "button";
   refreshItem.textContent = "Refresh Item";
-  refreshItem.disabled = refreshDisabled;
-  refreshItem.title = refreshDisabled
+  refreshItem.disabled = refreshItemDisabled;
+  refreshItem.title = refreshItemDisabled
     ? "This item overlaps another operation or its data is still loading."
     : "Refresh this item's template, version, and fields without changing its loaded children.";
   refreshItem.addEventListener("click", () => startItemRefresh(pair));
@@ -944,8 +955,8 @@ function showContextMenu(event, pair, clickedSide, forceDisabled = false) {
   refreshSubtree.className = "context-menu-item";
   refreshSubtree.type = "button";
   refreshSubtree.textContent = "Refresh Subtree";
-  refreshSubtree.disabled = refreshDisabled;
-  refreshSubtree.title = refreshDisabled
+  refreshSubtree.disabled = refreshSubtreeDisabled;
+  refreshSubtree.title = refreshSubtreeDisabled
     ? "This subtree overlaps another operation or its data is still loading."
     : "Refresh the selected item and every loaded descendant level.";
   refreshSubtree.addEventListener("click", () => startSubtreeRefresh(pair));
