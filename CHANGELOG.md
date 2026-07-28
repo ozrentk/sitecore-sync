@@ -12,6 +12,7 @@
 - Moved **Run task…** to a separate final section of the comparison context menu so the primary diff, publish, transfer, expand, and refresh actions remain prominent.
 - Simplified comparison transfer labels to **Transfer Left → Right** or **Transfer Right → Left** and shows only the direction originating from the item cell that opened the context menu.
 - Replaced Traced Publish's browser datalist with an explicit filtered field-assertion picker supporting keyboard selection, ranked multi-token search, and a bounded result list; empty values are excluded and the status now explains how many structural items contributed fields.
+- Corrected rendered-layout verification to retain every value observed for an item field instead of allowing the last duplicate occurrence to overwrite earlier matches, and reports all observed values plus matching-object counts as evidence.
 - Added **Recent Operations**, retaining the newest 30 terminal records and showing the newest 10 by default with a show-more/fewer action.
 - Changed the Operations badge to count the complete active FIFO and explain its transfer/publishing breakdown.
 

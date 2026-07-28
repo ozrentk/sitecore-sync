@@ -2408,7 +2408,7 @@ function inspectRenderedSnapshot(
       fieldMatches: [],
     };
   }
-  const actualFields = new Map<string, string>();
+  const actualFields = new Map<string, Set<string>>();
   for (const candidate of candidates) {
     collectNamedFieldValues(candidate, actualFields);
   }
@@ -2418,18 +2418,25 @@ function inspectRenderedSnapshot(
   const fieldMismatches: string[] = [];
   const fieldMatches: string[] = [];
   for (const [name, expected] of expectedFields) {
-    const actual = actualFields.get(name);
-    if (actual === undefined) {
+    const expectedValue = expected ?? "";
+    const observedValues = actualFields.get(name);
+    if (!observedValues || observedValues.size === 0) {
       fieldMismatches.push(
-        `${snapshot.path} › ${name}: not observable in rendered layout; expected ${formatFieldValue(expected ?? "")}`,
+        `${snapshot.path} › ${name}: not observable in rendered layout; expected ${formatFieldValue(expectedValue)}`,
       );
-    } else if (actual !== expected) {
+    } else if (!observedValues.has(expectedValue)) {
+      const renderedValues = [...observedValues].map(formatFieldValue).join(", ");
       fieldMismatches.push(
-        `${snapshot.path} › ${name}: expected ${formatFieldValue(expected ?? "")}, rendered layout returned ${formatFieldValue(actual)}`,
+        `${snapshot.path} › ${name}: expected ${formatFieldValue(expectedValue)}, ` +
+        `rendered layout exposed ${renderedValues} across ${candidates.length} matching object(s)`,
       );
     } else if (selectedFieldNames) {
+      const observation = observedValues.size > 1
+        ? ` matched among ${observedValues.size} observed values`
+        : " matched";
       fieldMatches.push(
-        `${snapshot.path} › ${name}: ${formatFieldValue(expected ?? "")} matched`,
+        `${snapshot.path} › ${name}: ${formatFieldValue(expectedValue)}${observation} ` +
+        `across ${candidates.length} matching object(s)`,
       );
     }
   }
@@ -2489,10 +2496,18 @@ function walkObjects(
   }
 }
 
-function collectNamedFieldValues(value: unknown, target: Map<string, string>): void {
+function collectNamedFieldValues(
+  value: unknown,
+  target: Map<string, Set<string>>,
+): void {
+  const add = (name: string, fieldValue: string): void => {
+    const values = target.get(name) ?? new Set<string>();
+    values.add(fieldValue);
+    target.set(name, values);
+  };
   walkObjects(value, (record) => {
     if (typeof record.name === "string" && typeof record.value === "string") {
-      target.set(record.name, record.value);
+      add(record.name, record.value);
     }
     const fields = record.fields;
     if (!fields || typeof fields !== "object" || Array.isArray(fields)) {
@@ -2500,14 +2515,14 @@ function collectNamedFieldValues(value: unknown, target: Map<string, string>): v
     }
     for (const [name, field] of Object.entries(fields)) {
       if (typeof field === "string") {
-        target.set(name, field);
+        add(name, field);
       } else if (
         field &&
         typeof field === "object" &&
         !Array.isArray(field) &&
         typeof (field as Readonly<Record<string, unknown>>).value === "string"
       ) {
-        target.set(name, (field as Readonly<Record<string, string>>).value);
+        add(name, (field as Readonly<Record<string, string>>).value);
       }
     }
   });
