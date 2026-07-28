@@ -46,6 +46,9 @@ h2 { margin: 24px 0 10px; font-size: 16px; }
 .scope-row.status-paused { border-left: 3px solid var(--vscode-editorWarning-foreground); }
 .scope-row.status-scanning { border-left: 3px solid var(--vscode-progressBar-background); }
 .scope-row.is-blocking { border-left: 3px solid var(--vscode-inputValidation-errorBorder); }
+.scope-row.has-warning:not(.is-blocking) {
+  border-left: 3px solid var(--vscode-editorWarning-foreground);
+}
 .expander, .scan {
   min-width: 0;
   color: var(--vscode-button-foreground);
@@ -80,6 +83,14 @@ input[type="checkbox"] { width: 14px; height: 14px; margin: 0; }
   border: 1px solid var(--vscode-inputValidation-errorBorder);
 }
 .readiness-message { font-weight: 600; }
+.scope-warnings {
+  margin-top: 8px;
+  padding: 7px 9px;
+  color: var(--vscode-editorWarning-foreground);
+  background: var(--vscode-inputValidation-warningBackground);
+  border: 1px solid var(--vscode-inputValidation-warningBorder);
+}
+.warning-message { font-weight: 600; }
 .unresolved-details { margin-top: 6px; }
 .unresolved-details summary {
   color: var(--vscode-textLink-foreground);

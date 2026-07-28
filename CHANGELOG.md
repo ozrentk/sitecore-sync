@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.9.13
+
+- Stopped Power Publish reference discovery from following Sitecore standard-template metadata fields such as `__Editors`.
+- Changed unresolved references from custom item fields from queue blockers to visible warnings.
+- Retained unresolved warning details in the Power Publish operation evidence when the user proceeds.
+
 ## 0.9.12
 
 - Added inline Power Publish readiness diagnostics to every selected scope that cannot be queued.

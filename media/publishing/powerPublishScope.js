@@ -61,6 +61,10 @@ function render() {
   );
   renderSummary(selectedNodes, nodes);
   const blocking = selectedNodes.filter((node) => readinessReasons(node).length > 0);
+  const warningCount = selectedNodes.reduce(
+    (total, node) => total + node.unresolvedReferences.length,
+    0,
+  );
   queue.disabled = blocking.length > 0;
   if (blocking.length) {
     const first = blocking[0];
@@ -70,8 +74,12 @@ function render() {
       : `Cannot queue: ${blocking.length} selected scopes require attention. Review the highlighted scopes above.`;
     queue.title = `${blocking.length} selected scope(s) are not ready. Review the highlighted scope diagnostics.`;
   } else {
-    footerSummary.textContent = `${selectedNodes.length} scope(s) ready to queue`;
-    queue.title = "Queue the selected Power Publish scopes";
+    footerSummary.textContent = warningCount
+      ? `${selectedNodes.length} scope(s) ready to queue · ${warningCount} unresolved reference warning(s) will be recorded`
+      : `${selectedNodes.length} scope(s) ready to queue`;
+    queue.title = warningCount
+      ? "Queue Power Publish and retain unresolved references as warning evidence"
+      : "Queue the selected Power Publish scopes";
   }
 }
 
@@ -86,8 +94,12 @@ function renderNode(node, nodes, ancestors, renderedNodes) {
   if (!repeated) renderedNodes.add(node.id);
   const selected = state.selected.has(node.id);
   const blockers = selected ? readinessReasons(node) : [];
+  const hasWarnings = selected && node.unresolvedReferences.length > 0;
   const row = document.createElement("div");
-  row.className = `scope-row status-${node.status}${blockers.length ? " is-blocking" : ""}`;
+  row.className =
+    `scope-row status-${node.status}` +
+    `${blockers.length ? " is-blocking" : ""}` +
+    `${hasWarnings ? " has-warning" : ""}`;
 
   const children = uniqueTargets(node)
     .map((id) => nodes.get(id))
@@ -152,6 +164,9 @@ function renderNode(node, nodes, ancestors, renderedNodes) {
   content.append(heading, path, detail);
   if (!repeated && blockers.length) {
     content.append(renderReadinessBlockers(node, blockers));
+  }
+  if (!repeated && hasWarnings) {
+    content.append(renderUnresolvedWarnings(node));
   }
 
   const action = document.createElement("button");
@@ -219,11 +234,6 @@ function readinessReasons(node) {
   } else if (node.status === "failed") {
     reasons.push(`scan failed: ${node.error || "unknown error"}`);
   }
-  if (node.unresolvedReferences.length) {
-    reasons.push(
-      `${node.unresolvedReferences.length} unresolved reference(s) must be reviewed`,
-    );
-  }
   return reasons;
 }
 
@@ -237,23 +247,34 @@ function renderReadinessBlockers(node, blockers) {
   message.textContent = `Cannot queue this selected scope: ${blockers.join("; ")}.`;
   wrapper.append(message);
 
-  if (node.unresolvedReferences.length) {
-    const details = document.createElement("details");
-    details.className = "unresolved-details";
-    details.open = true;
-    const summary = document.createElement("summary");
-    summary.textContent = `Unresolved references (${node.unresolvedReferences.length})`;
-    const list = document.createElement("ul");
-    for (const reference of node.unresolvedReferences) {
-      const item = document.createElement("li");
-      const evidence = document.createElement("code");
-      evidence.textContent = reference;
-      item.append(evidence);
-      list.append(item);
-    }
-    details.append(summary, list);
-    wrapper.append(details);
+  return wrapper;
+}
+
+function renderUnresolvedWarnings(node) {
+  const wrapper = document.createElement("div");
+  wrapper.className = "scope-warnings";
+  wrapper.setAttribute("aria-label", "Publishing warning");
+
+  const message = document.createElement("div");
+  message.className = "warning-message";
+  message.textContent =
+    `${node.unresolvedReferences.length} unresolved reference(s) will be recorded as warnings and will not prevent queueing.`;
+
+  const details = document.createElement("details");
+  details.className = "unresolved-details";
+  details.open = true;
+  const summary = document.createElement("summary");
+  summary.textContent = `Unresolved reference warnings (${node.unresolvedReferences.length})`;
+  const list = document.createElement("ul");
+  for (const reference of node.unresolvedReferences) {
+    const item = document.createElement("li");
+    const evidence = document.createElement("code");
+    evidence.textContent = reference;
+    item.append(evidence);
+    list.append(item);
   }
+  details.append(summary, list);
+  wrapper.append(message, details);
   return wrapper;
 }
 
@@ -312,6 +333,15 @@ function renderSummary(selectedNodes, nodes) {
   if (externalLinks.length) {
     const item = document.createElement("li");
     item.textContent = `${externalLinks.length} external URL(s) recorded as evidence.`;
+    list.append(item);
+  }
+  const unresolvedReferences = selectedNodes.flatMap((node) =>
+    node.unresolvedReferences.map((reference) => `${node.path}: ${reference}`)
+  );
+  if (unresolvedReferences.length) {
+    const item = document.createElement("li");
+    item.textContent =
+      `${unresolvedReferences.length} unresolved reference warning(s) will be retained as operation evidence.`;
     list.append(item);
   }
   publishingSummary.append(list);
