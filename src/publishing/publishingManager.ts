@@ -5,7 +5,6 @@ import type { OperationDetailsPanel } from "../operations/operationDetailsPanel"
 import type {
   AuthoringContentClient,
   AuthoringItemDetails,
-  AuthoringItemField,
   AuthoringSite,
 } from "../sitecore/authoringClient";
 import { ExperienceEdgeClient } from "../sitecore/experienceEdgeClient";
@@ -15,6 +14,12 @@ import {
   verifyBrowserDom,
   type BrowserDomAssertion,
 } from "./browserDomVerifier";
+import {
+  CollapsedScopeGraph,
+  type CollapsedScopeGraphPlan,
+} from "./collapsedScopeGraph";
+import { showPowerPublishScopeForm } from "./powerPublishScopeForm";
+import { parseReferenceField } from "./referenceDiscovery";
 import type {
   PublishKind,
   PublishBatch,
@@ -36,10 +41,10 @@ import {
 
 const runsKey = "sitecoreXmCloudSync.publishRuns.v1";
 const profilesKey = "sitecoreXmCloudSync.publishingProfiles.v1";
-const maximumReferenceItems = 500;
-const maximumReferenceDepth = 8;
 const maximumTracedFieldItems = 200;
 const maximumPowerBatchItems = 20;
+const collapsedScopeItemBudget = 500;
+const collapsedScopeReferenceBudget = 200;
 const retryVerificationCommand = "xmCloudSync.retryPublishTraceVerification";
 const republishTraceCommand = "xmCloudSync.republishTrace";
 const recheckStatusCommand = "xmCloudSync.recheckPublishTraceStatus";
@@ -49,13 +54,6 @@ interface PublishOptions {
   readonly mode: PublishMode;
   readonly publishSubItems: boolean;
   readonly publishRelatedItems: boolean;
-}
-
-interface GraphBuildResult {
-  readonly snapshots: readonly PublishSnapshot[];
-  readonly edges: readonly ReferenceEdge[];
-  readonly orderedItemIds: readonly string[];
-  readonly incompleteReasons: readonly string[];
 }
 
 interface ProfileRunSettings {
@@ -76,8 +74,6 @@ interface DiagnosticPublishSetup {
   readonly profileSettings: ProfileRunSettings;
   readonly tracedFields: TracedFieldSelectionResult;
   readonly structuralDetails: readonly AuthoringItemDetails[];
-  readonly structuralDiscoveryComplete: boolean;
-  readonly structuralIncompleteReasons: readonly string[];
 }
 
 export class PublishingManager implements vscode.Disposable {
@@ -167,57 +163,21 @@ export class PublishingManager implements vscode.Disposable {
         options = collectedOptions;
       }
 
-      const graph = kind === "power"
-        ? await this.buildObservedGraph(
+      const powerPlan = kind === "power"
+        ? await this.reviewCollapsedPowerScope(
             connection,
             clientSecret,
+            rootDetails,
+            options.publishSubItems,
+            tracedFields.fields.map((field) => field.itemId),
             diagnosticSetup?.structuralDetails ?? [rootDetails],
             controller.signal,
           )
-        : {
-            snapshots: [snapshotFromDetails(rootDetails)],
-            edges: [],
-            orderedItemIds: [rootDetails.itemId],
-            incompleteReasons: [],
-          };
-      if (
-        kind === "power" &&
-        (!diagnosticSetup?.structuralDiscoveryComplete || graph.incompleteReasons.length)
-      ) {
-        const reasons = [
-          ...(!diagnosticSetup?.structuralDiscoveryComplete
-            ? diagnosticSetup?.structuralIncompleteReasons.length
-              ? diagnosticSetup.structuralIncompleteReasons
-              : ["Structural discovery did not complete."]
-            : []),
-          ...graph.incompleteReasons,
-        ];
-        for (const reason of reasons) {
-          this.output.appendLine(`Incomplete Power Publish graph: ${reason}`);
-        }
-        const visibleReasons = reasons.slice(0, 20);
-        if (reasons.length > visibleReasons.length) {
-          visibleReasons.push(`${reasons.length - visibleReasons.length} additional reason(s) were written to XM Cloud Publish output.`);
-        }
-        await vscode.window.showErrorMessage(
-          "Power Publish was not queued because the Observed Reference Graph is incomplete.",
-          {
-            modal: true,
-            detail: visibleReasons.join("\n"),
-          },
-        );
+        : undefined;
+      if (kind === "power" && !powerPlan) {
         return;
       }
-      const selectedIds = kind === "power"
-        ? await this.reviewPowerPlan(
-            graph,
-            rootDetails.itemId,
-            tracedFields.fields.map((field) => field.itemId),
-          )
-        : graph.orderedItemIds;
-      if (!selectedIds) {
-        return;
-      }
+      const selectedIds = powerPlan?.selectedRootItemIds ?? [rootDetails.itemId];
 
       if (kind !== "standard" && !profileSettings) {
         return;
@@ -259,7 +219,7 @@ export class PublishingManager implements vscode.Disposable {
         ? powerPublishBatches(
             selectedIds,
             rootDetails.itemId,
-            graph.edges,
+            powerPlan?.planningEdges ?? [],
             maximumPowerBatchItems,
           )
         : [{ itemIds: [rootDetails.itemId], label: publishKindLabel(kind) }];
@@ -267,7 +227,7 @@ export class PublishingManager implements vscode.Disposable {
         ? externalScopeReferenceEvidence(
             diagnosticSetup?.structuralDetails ?? [rootDetails],
           )
-        : [];
+        : powerPlan?.evidence ?? [];
       run = {
         id: randomUUID(),
         kind,
@@ -278,19 +238,14 @@ export class PublishingManager implements vscode.Disposable {
         rootPath: rootDetails.path,
         language: target.language,
         publishMode: options.mode,
-        publishSubItems: kind === "power" ? false : options.publishSubItems,
+        publishSubItems: options.publishSubItems,
         publishRelatedItems: kind === "power" ? false : options.publishRelatedItems,
         createdAt: new Date().toISOString(),
         snapshots: kind === "traced"
           ? tracedFields.snapshots
-          : graph.snapshots.filter((snapshot) =>
-              selectedIds.some((itemId) => normalizeId(itemId) === normalizeId(snapshot.itemId))
-            ),
+          : powerPlan?.snapshots ?? [snapshotFromDetails(rootDetails)],
         fieldSelections: tracedFields.fields.length ? tracedFields.fields : undefined,
-        referenceEdges: graph.edges.filter((edge) =>
-          selectedIds.some((itemId) => normalizeId(itemId) === normalizeId(edge.sourceItemId)) &&
-          selectedIds.some((itemId) => normalizeId(itemId) === normalizeId(edge.targetItemId))
-        ),
+        referenceEdges: powerPlan?.concreteEdges ?? [],
         batches,
         stages: initialStages(kind, profileSettings, tracedFields, scopeEvidence),
         route: profileSettings?.route,
@@ -1558,8 +1513,6 @@ export class PublishingManager implements vscode.Disposable {
         ).toString()
       : undefined;
     let discoveredDetails: readonly AuthoringItemDetails[] = [root];
-    let structuralDiscoveryComplete = true;
-    let structuralIncompleteReasons: readonly string[] = [];
     const result = await showTracedPublishForm(
       this.extensionUri,
       {
@@ -1586,8 +1539,6 @@ export class PublishingManager implements vscode.Disposable {
           signal,
         );
         discoveredDetails = discovery.details;
-        structuralDiscoveryComplete = discovery.incompleteReasons.length === 0;
-        structuralIncompleteReasons = discovery.incompleteReasons;
         if (discovery.truncated) {
           this.output.appendLine(
             `${publishKindLabel(kind)} field discovery stopped after ${maximumTracedFieldItems} structural items.`,
@@ -1634,8 +1585,6 @@ export class PublishingManager implements vscode.Disposable {
       },
       tracedFields: { snapshots, fields },
       structuralDetails: result.publishSubItems ? discoveredDetails : [root],
-      structuralDiscoveryComplete: !result.publishSubItems || structuralDiscoveryComplete,
-      structuralIncompleteReasons: result.publishSubItems ? structuralIncompleteReasons : [],
     };
   }
 
@@ -1725,150 +1674,92 @@ export class PublishingManager implements vscode.Disposable {
     );
   }
 
-  private async buildObservedGraph(
+  private async reviewCollapsedPowerScope(
     connection: NonNullable<ReturnType<ConnectionStore["get"]>>,
     clientSecret: string,
-    roots: readonly AuthoringItemDetails[],
-    signal: AbortSignal,
-  ): Promise<GraphBuildResult> {
-    return vscode.window.withProgress(
-      {
-        location: vscode.ProgressLocation.Notification,
-        title: "Building observed reference graph",
-        cancellable: true,
-      },
-      async (progress, token) => {
-        const graphController = new AbortController();
-        const forwardAbort = (): void => graphController.abort(signal.reason);
-        signal.addEventListener("abort", forwardAbort, { once: true });
-        const subscription = token.onCancellationRequested(() =>
-          graphController.abort(new DOMException("Reference discovery cancelled.", "AbortError"))
-        );
-        try {
-          const detailsById = new Map<string, AuthoringItemDetails>();
-          const edges: ReferenceEdge[] = [];
-          const incompleteReasons = new Set<string>();
-          const queuedIds = new Set(roots.map((root) => normalizeId(root.itemId)));
-          const queue: Array<{ readonly details: AuthoringItemDetails; readonly depth: number }> =
-            roots.map((details) => ({ details, depth: 0 }));
-          while (queue.length > 0) {
-            if (detailsById.size >= maximumReferenceItems) {
-              incompleteReasons.add(
-                `Reference discovery reached its ${maximumReferenceItems}-item safety limit.`,
-              );
-              break;
-            }
-            const current = queue.shift();
-            if (!current) {
-              break;
-            }
-            const currentId = normalizeId(current.details.itemId);
-            if (detailsById.has(currentId)) {
-              continue;
-            }
-            detailsById.set(currentId, current.details);
-            progress.report({ message: current.details.path });
-            for (const field of current.details.fields.filter(isReferenceField)) {
-              for (const targetId of extractItemIds(field.value)) {
-                edges.push({
-                  sourceItemId: current.details.itemId,
-                  targetItemId: targetId,
-                  fieldName: field.name,
-                });
-                const targetKey = normalizeId(targetId);
-                if (detailsById.has(targetKey) || queuedIds.has(targetKey)) {
-                  continue;
-                }
-                if (current.depth >= maximumReferenceDepth) {
-                  incompleteReasons.add(
-                    `Reference discovery reached depth ${maximumReferenceDepth} at ${current.details.path}.`,
-                  );
-                  continue;
-                }
-                try {
-                  const details = await this.authoring.loadItemDetails(
-                    connection,
-                    clientSecret,
-                    targetId,
-                    current.details.language,
-                    graphController.signal,
-                  );
-                  queuedIds.add(normalizeId(details.itemId));
-                  queue.push({ details, depth: current.depth + 1 });
-                } catch (error: unknown) {
-                  if (graphController.signal.aborted) {
-                    throw graphController.signal.reason;
-                  }
-                  this.output.appendLine(
-                    `Observed reference ${targetId} from ${current.details.path} could not be loaded: ${errorMessage(error)}`,
-                  );
-                  incompleteReasons.add(
-                    `Unable to load ${targetId}, referenced by ${current.details.path} › ${field.name}.`,
-                  );
-                }
-              }
-            }
-          }
-          const rootItemId = roots[0]?.itemId;
-          if (!rootItemId) {
-            throw new Error("Power Publish graph discovery has no root item.");
-          }
-          const orderedItemIds = dependencyOrder(rootItemId, detailsById, edges);
-          return {
-            snapshots: [...detailsById.values()].map(snapshotFromDetails),
-            edges,
-            orderedItemIds,
-            incompleteReasons: [...incompleteReasons],
-          };
-        } finally {
-          subscription.dispose();
-          signal.removeEventListener("abort", forwardAbort);
-        }
-      },
-    );
-  }
-
-  private async reviewPowerPlan(
-    graph: GraphBuildResult,
-    rootItemId: string,
+    root: AuthoringItemDetails,
+    publishSubItemsThroughSitecore: boolean,
     requiredItemIds: readonly string[],
-  ): Promise<readonly string[] | undefined> {
-    const byId = new Map(graph.snapshots.map((snapshot) => [normalizeId(snapshot.itemId), snapshot]));
-    const required = new Set([
-      normalizeId(rootItemId),
-      ...requiredItemIds.map(normalizeId),
-    ]);
-    const selected = await vscode.window.showQuickPick(
-      graph.orderedItemIds.map((itemId, index) => {
-        const snapshot = byId.get(normalizeId(itemId));
-        return {
-          label: `${index + 1}. ${snapshot?.displayName ?? itemId}`,
-          description: normalizeId(itemId) === normalizeId(rootItemId)
-            ? "Route/root item — required and published last"
-            : required.has(normalizeId(itemId))
-              ? "Field assertion owner — required"
-            : snapshot?.path,
-          detail: itemId,
-          itemId,
-          picked: true,
-        };
-      }),
+    knownStructuralDetails: readonly AuthoringItemDetails[],
+    signal: AbortSignal,
+  ): Promise<CollapsedScopeGraphPlan | undefined> {
+    const knownDetails = new Map<string, AuthoringItemDetails>();
+    for (const details of knownStructuralDetails) {
+      knownDetails.set(normalizeId(details.itemId), details);
+      knownDetails.set(details.path.toLocaleLowerCase(), details);
+    }
+    const graph = new CollapsedScopeGraph(
+      root,
+      publishSubItemsThroughSitecore,
       {
-        title: "Power publish: review observed dependency order",
-        placeHolder: "Dependencies publish first; the selected root publishes last",
-        canPickMany: true,
-        matchOnDescription: true,
-        matchOnDetail: true,
+        loadItem: (target, scanSignal) => {
+          const cached = knownDetails.get(normalizeId(target));
+          return cached
+            ? Promise.resolve(cached)
+            : this.authoring.loadItem(
+                connection,
+                clientSecret,
+                target.toLocaleLowerCase().startsWith("/sitecore/")
+                  ? { path: target }
+                  : { itemId: target },
+                root.language,
+                undefined,
+                scanSignal,
+              );
+        },
+        loadChildren: async (parent, scanSignal) => {
+          const level = await this.authoring.loadTreeLevel(
+            connection,
+            clientSecret,
+            { itemId: parent.itemId },
+            root.language,
+            scanSignal,
+          );
+          const details: AuthoringItemDetails[] = [];
+          for (const child of level.children) {
+            const cached = knownDetails.get(normalizeId(child.itemId));
+            const childDetails = cached ??
+              await this.authoring.loadItemDetails(
+                connection,
+                clientSecret,
+                child.itemId,
+                root.language,
+                scanSignal,
+              );
+            knownDetails.set(normalizeId(childDetails.itemId), childDetails);
+            knownDetails.set(childDetails.path.toLocaleLowerCase(), childDetails);
+            details.push(childDetails);
+          }
+          return details;
+        },
       },
+      collapsedScopeItemBudget,
+      collapsedScopeReferenceBudget,
     );
-    if (!selected) {
+    const result = await showPowerPublishScopeForm(
+      this.extensionUri,
+      graph.state(),
+      (scopeId, scanSignal, report) => graph.scan(scopeId, scanSignal, report),
+      (selectedScopeIds) => {
+        const validation = graph.validate(selectedScopeIds);
+        if (validation) {
+          return validation;
+        }
+        const plan = graph.plan(selectedScopeIds);
+        const snapshotIds = new Set(plan.snapshots.map((snapshot) => normalizeId(snapshot.itemId)));
+        const missingAssertionOwner = requiredItemIds.find((itemId) =>
+          !snapshotIds.has(normalizeId(itemId))
+        );
+        return missingAssertionOwner
+          ? "A selected field assertion belongs to an item outside the selected collapsed scopes."
+          : { selectedScopeIds };
+      },
+      signal,
+    );
+    if (!result) {
       return undefined;
     }
-    const selectedIds = graph.orderedItemIds.filter((itemId) =>
-      required.has(normalizeId(itemId)) ||
-      selected.some((choice) => normalizeId(choice.itemId) === normalizeId(itemId))
-    );
-    return selectedIds;
+    return graph.plan(result.selectedScopeIds);
   }
 
   private async collectPublishOptions(kind: PublishKind): Promise<PublishOptions | undefined> {
@@ -2162,14 +2053,22 @@ export class PublishingManager implements vscode.Disposable {
     itemCount: number,
   ): Promise<boolean> {
     const scope = [
-      options.publishSubItems ? "descendants" : undefined,
+      options.publishSubItems
+        ? kind === "power"
+          ? "Sitecore descendants for every selected scope"
+          : "descendants"
+        : undefined,
       options.publishRelatedItems ? "related items" : undefined,
     ].filter((value): value is string => Boolean(value));
     const selection = await vscode.window.showWarningMessage(
       [
         `${publishKindLabel(kind)} to “${connectionName}” (${new URL(serverUrl).hostname})?`,
         `${root.path} — ${root.itemId}`,
-        `Language: ${language}; mode: ${options.mode}; ${itemCount} explicit item(s)`,
+        `Language: ${language}; mode: ${options.mode}; ${
+          kind === "power"
+            ? `${itemCount} selected collapsed scope root(s)`
+            : `${itemCount} explicit item(s)`
+        }`,
         `Additional scope: ${scope.join(", ") || "none"}`,
       ].filter((value): value is string => Boolean(value)).join("\n"),
       { modal: true },
@@ -2319,7 +2218,9 @@ function snapshotFromDetails(details: AuthoringItemDetails): PublishSnapshot {
     language: details.language,
     version: details.version,
     fields,
-    references: details.fields.filter(isReferenceField).flatMap((field) => extractItemIds(field.value)),
+    references: details.fields.flatMap((field) =>
+      parseReferenceField(field).itemReferences.map((reference) => reference.target)
+    ),
   };
 }
 
@@ -2546,31 +2447,17 @@ function formatFieldValue(value: string): string {
   );
 }
 
-function isReferenceField(field: AuthoringItemField): boolean {
-  const type = `${field.type} ${field.typeKey}`.toLowerCase();
-  return ["droplink", "droptree", "multilist", "treelist", "general link", "image", "layout", "tree list"]
-    .some((token) => type.includes(token));
-}
-
-function extractItemIds(value: string): readonly string[] {
-  const matches = value.match(
-    /\{?[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\}?/giu,
-  ) ?? [];
-  return [...new Map(matches.map((match) => [normalizeId(match), match])).values()];
-}
-
 function externalScopeReferenceEvidence(
   details: readonly AuthoringItemDetails[],
 ): readonly string[] {
   const scopeIds = new Set(details.map((item) => normalizeId(item.itemId)));
   const evidence = details.flatMap((item) =>
     item.fields
-      .filter(isReferenceField)
       .flatMap((field) =>
-        extractItemIds(field.value)
-          .filter((targetId) => !scopeIds.has(normalizeId(targetId)))
-          .map((targetId) =>
-            `Outside structural scope: ${item.path} › ${field.name} references ${targetId}`
+        parseReferenceField(field).itemReferences
+          .filter((reference) => !scopeIds.has(normalizeId(reference.target)))
+          .map((reference) =>
+            `Outside structural scope: ${item.path} › ${field.name} references ${reference.target}`
           )
       )
   );
@@ -2581,46 +2468,6 @@ function externalScopeReferenceEvidence(
         `${evidence.length - maximumEvidence} additional outside-scope reference(s) omitted.`,
       ]
     : evidence;
-}
-
-function dependencyOrder(
-  rootItemId: string,
-  detailsById: ReadonlyMap<string, AuthoringItemDetails>,
-  edges: readonly ReferenceEdge[],
-): readonly string[] {
-  const bySource = new Map<string, string[]>();
-  for (const edge of edges) {
-    const source = normalizeId(edge.sourceItemId);
-    const targets = bySource.get(source) ?? [];
-    targets.push(edge.targetItemId);
-    bySource.set(source, targets);
-  }
-  const visited = new Set<string>();
-  const visiting = new Set<string>();
-  const ordered: string[] = [];
-  const visit = (itemId: string): void => {
-    const normalized = normalizeId(itemId);
-    if (visited.has(normalized) || visiting.has(normalized) || !detailsById.has(normalized)) {
-      return;
-    }
-    visiting.add(normalized);
-    for (const targetId of bySource.get(normalized) ?? []) {
-      visit(targetId);
-    }
-    visiting.delete(normalized);
-    visited.add(normalized);
-    ordered.push(detailsById.get(normalized)?.itemId ?? itemId);
-  };
-  visit(rootItemId);
-  for (const details of detailsById.values()) {
-    visit(details.itemId);
-  }
-  const rootIndex = ordered.findIndex((itemId) => normalizeId(itemId) === normalizeId(rootItemId));
-  if (rootIndex >= 0) {
-    const [root] = ordered.splice(rootIndex, 1);
-    ordered.push(root);
-  }
-  return ordered;
 }
 
 function powerPublishBatches(
@@ -3094,7 +2941,7 @@ function traceHtml(run: PublishRun, cspSource: string): string {
     </section>`;
   }).join("");
   const graph = run.referenceEdges.length
-    ? `<details class="graph"><summary>Show Observed Reference Graph</summary><ul>${run.referenceEdges
+    ? `<details class="graph"><summary>Show selected-scope references</summary><ul>${run.referenceEdges
         .map((edge) =>
           `<li><code>${escapeHtml(shortId(edge.sourceItemId))}</code> → <code>${escapeHtml(shortId(edge.targetItemId))}</code> via ${escapeHtml(edge.fieldName)}</li>`
         )

@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src {{cspSource}}; script-src {{cspSource}};">
+  <link rel="stylesheet" href="{{styleUri}}">
+  <title>Review Power Publish Scope</title>
+</head>
+<body>
+  <main>
+    <header>
+      <h1>Review Power Publish Scope</h1>
+      <p class="muted">Each node represents a collapsed Sitecore subtree. Select a node to scan and include it; expand it to inspect references leaving that scope.</p>
+      <div id="strategy" class="strategy"></div>
+    </header>
+
+    <section class="overview" aria-label="Power Publish plan summary">
+      <div><strong id="selected-count">0</strong><span>selected scopes</span></div>
+      <div><strong id="item-count">0</strong><span>items inspected</span></div>
+      <div><strong id="reference-count">0</strong><span>external references</span></div>
+      <div><strong id="unresolved-count">0</strong><span>unresolved</span></div>
+    </section>
+
+    <section>
+      <h2>Collapsed scope graph</h2>
+      <div id="scope-tree" class="scope-tree"></div>
+    </section>
+
+    <section class="evidence">
+      <details>
+        <summary>Show publishing summary</summary>
+        <div id="publishing-summary"></div>
+      </details>
+    </section>
+
+    <div id="error" class="error" role="alert" hidden></div>
+    <footer>
+      <div id="footer-summary" class="footer-summary"></div>
+      <div class="actions">
+        <button id="cancel" type="button" class="secondary">Cancel</button>
+        <button id="queue" type="button">Queue Power Publish</button>
+      </div>
+    </footer>
+  </main>
+  <script src="{{scriptUri}}"></script>
+</body>
+</html>

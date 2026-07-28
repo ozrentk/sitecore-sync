@@ -1,0 +1,124 @@
+:root { color-scheme: light dark; }
+* { box-sizing: border-box; }
+[hidden] { display: none !important; }
+body {
+  margin: 0;
+  color: var(--vscode-editor-foreground);
+  background: var(--vscode-editor-background);
+  font: 13px var(--vscode-font-family);
+}
+main { max-width: 1080px; margin: 0 auto; padding: 24px 28px 96px; }
+h1 { margin: 0 0 6px; font-size: 22px; }
+h2 { margin: 24px 0 10px; font-size: 16px; }
+.muted, .path, .detail, .footer-summary { color: var(--vscode-descriptionForeground); }
+.strategy {
+  margin-top: 12px;
+  padding: 9px 11px;
+  border-left: 3px solid var(--vscode-textLink-foreground);
+  background: var(--vscode-textBlockQuote-background);
+}
+.overview {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+  margin-top: 20px;
+}
+.overview div {
+  padding: 12px;
+  border: 1px solid var(--vscode-panel-border);
+  background: var(--vscode-sideBar-background);
+}
+.overview strong, .overview span { display: block; }
+.overview strong { margin-bottom: 3px; font-size: 19px; }
+.overview span { color: var(--vscode-descriptionForeground); }
+.scope-tree { border: 1px solid var(--vscode-panel-border); }
+.scope-row {
+  display: grid;
+  grid-template-columns: 24px 22px minmax(0, 1fr) auto;
+  gap: 7px;
+  align-items: center;
+  min-height: 66px;
+  padding: 9px 10px;
+  border-bottom: 1px solid var(--vscode-panel-border);
+}
+.scope-row:hover { background: var(--vscode-list-hoverBackground); }
+.scope-row.status-failed { border-left: 3px solid var(--vscode-errorForeground); }
+.scope-row.status-paused { border-left: 3px solid var(--vscode-editorWarning-foreground); }
+.scope-row.status-scanning { border-left: 3px solid var(--vscode-progressBar-background); }
+.expander, .scan {
+  min-width: 0;
+  color: var(--vscode-button-foreground);
+  background: var(--vscode-button-background);
+  border: 0;
+  cursor: pointer;
+}
+.expander {
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  color: var(--vscode-foreground);
+  background: transparent;
+}
+.expander:disabled { opacity: .5; cursor: default; }
+.scan { min-width: 92px; padding: 5px 9px; }
+input[type="checkbox"] { width: 14px; height: 14px; margin: 0; }
+.scope-content { min-width: 0; }
+.scope-heading { display: flex; gap: 7px; align-items: center; }
+.scope-heading strong, .path, .detail {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.path { margin-top: 3px; font-family: var(--vscode-editor-font-family); font-size: 12px; }
+.detail { margin-top: 3px; font-size: 12px; }
+.badge {
+  padding: 1px 5px;
+  border: 1px solid var(--vscode-badge-background);
+  border-radius: 8px;
+  color: var(--vscode-badge-foreground);
+  background: var(--vscode-badge-background);
+  font-size: 10px;
+  font-weight: normal;
+}
+.kind-configuration, .kind-unsupported { opacity: .7; }
+.children { margin-left: 31px; border-left: 1px solid var(--vscode-tree-indentGuidesStroke); }
+.children > .scope > .scope-row { padding-left: 12px; }
+.evidence { margin-top: 18px; }
+.evidence summary { color: var(--vscode-textLink-foreground); cursor: pointer; }
+.evidence ul { line-height: 1.6; }
+.error {
+  margin-top: 14px;
+  padding: 9px 11px;
+  color: var(--vscode-inputValidation-errorForeground);
+  background: var(--vscode-inputValidation-errorBackground);
+  border: 1px solid var(--vscode-inputValidation-errorBorder);
+}
+footer {
+  position: fixed;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  display: flex;
+  justify-content: space-between;
+  gap: 20px;
+  align-items: center;
+  padding: 12px max(28px, calc((100vw - 1080px) / 2 + 28px));
+  border-top: 1px solid var(--vscode-panel-border);
+  background: var(--vscode-editor-background);
+  box-shadow: 0 -5px 18px rgb(0 0 0 / 12%);
+}
+.actions { display: flex; gap: 8px; }
+button {
+  padding: 6px 13px;
+  color: var(--vscode-button-foreground);
+  background: var(--vscode-button-background);
+  border: 0;
+}
+button.secondary {
+  color: var(--vscode-button-secondaryForeground);
+  background: var(--vscode-button-secondaryBackground);
+}
+button:disabled { cursor: not-allowed; opacity: .6; }
+@media (max-width: 720px) {
+  .overview { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
