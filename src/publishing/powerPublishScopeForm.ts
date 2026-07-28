@@ -24,8 +24,8 @@ export interface PowerScopeNodeView {
   readonly required: boolean;
   readonly status: PowerScopeScanStatus;
   readonly inspectedItemCount: number;
-  readonly resolvedReferenceCount: number;
   readonly internalReferenceCount: number;
+  readonly ignoredReferenceCount: number;
   readonly outgoingReferences: readonly PowerScopeReferenceView[];
   readonly externalLinks: readonly string[];
   readonly unresolvedReferences: readonly string[];

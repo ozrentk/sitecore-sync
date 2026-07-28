@@ -55,6 +55,8 @@ interface ScopeRecord {
   readonly outgoingReferences: PowerScopeReferenceView[];
   readonly concreteEdges: ReferenceEdge[];
   readonly externalLinks: Set<string>;
+  readonly ignoredConfigurationTargetIds: Set<string>;
+  readonly ignoredUnsupportedTargetIds: Set<string>;
   readonly unresolvedReferences: Set<string>;
   pauseReason?: string;
   error?: string;
@@ -197,6 +199,12 @@ export class CollapsedScopeGraph {
         : `Execution publishes ${publishItemIds.length} inspected item(s) explicitly without Sitecore descendant expansion.`,
       ...records.flatMap((record) => [
         `${record.root.path}: ${record.inspectedItemIds.size} item(s), ${record.internalReferenceKeys.size} internal reference(s), ${uniqueTargetScopeIds(record).length} external scope(s).`,
+        ...record.ignoredConfigurationTargetIds.size
+          ? [`${record.root.path}: ignored ${record.ignoredConfigurationTargetIds.size} unique template/layout/system reference target(s).`]
+          : [],
+        ...record.ignoredUnsupportedTargetIds.size
+          ? [`${record.root.path}: ignored ${record.ignoredUnsupportedTargetIds.size} unique reference target(s) outside supported content and media roots.`]
+          : [],
         ...record.externalLinks.size
           ? [...record.externalLinks].map((link) => `External link: ${link}`)
           : [],
@@ -235,7 +243,7 @@ export class CollapsedScopeGraph {
     record.error = undefined;
     await report(this.state());
     const startingItems = record.inspectedItemIds.size;
-    const startingReferences = record.referenceKeys.size;
+    const startingExternalScopes = uniqueTargetScopeIds(record).length;
     let activeItem: AuthoringItemDetails | undefined;
     try {
       while (record.pendingItems.length) {
@@ -268,18 +276,19 @@ export class CollapsedScopeGraph {
         record.inspectedItemIds.add(currentKey);
         activeItem = undefined;
         const passItems = record.inspectedItemIds.size - startingItems;
-        const passReferences = record.referenceKeys.size - startingReferences;
+        const passExternalScopes = uniqueTargetScopeIds(record).length -
+          startingExternalScopes;
         if (
           record.pendingItems.length > 0 &&
           (
             passItems >= this.itemBudget ||
-            passReferences >= this.referenceBudget
+            passExternalScopes >= this.referenceBudget
           )
         ) {
           record.status = "paused";
           record.pauseReason = passItems >= this.itemBudget
             ? `Paused after the ${this.itemBudget}-item scan budget.`
-            : `Paused after the ${this.referenceBudget}-reference scan budget.`;
+            : `Paused after the ${this.referenceBudget}-external-scope scan budget.`;
           await report(this.state());
           return;
         }
@@ -328,6 +337,17 @@ export class CollapsedScopeGraph {
           continue;
         }
         record.referenceKeys.add(referenceKey);
+        if (resolvedTarget.toLocaleLowerCase().startsWith("/sitecore/")) {
+          const pathKind = classifyReferencePath(resolvedTarget);
+          if (pathKind === "configuration") {
+            record.ignoredConfigurationTargetIds.add(resolvedTarget.toLocaleLowerCase());
+            continue;
+          }
+          if (pathKind !== "content" && pathKind !== "media") {
+            record.ignoredUnsupportedTargetIds.add(resolvedTarget.toLocaleLowerCase());
+            continue;
+          }
+        }
         let target: AuthoringItemDetails;
         try {
           target = await this.loadReferencedItem(resolvedTarget, signal);
@@ -340,19 +360,32 @@ export class CollapsedScopeGraph {
           );
           continue;
         }
-        const edge: ReferenceEdge = {
-          sourceItemId: source.itemId,
-          targetItemId: target.itemId,
-          fieldName: field.name,
-        };
-        record.concreteEdges.push(edge);
         if (
           normalizeId(target.itemId) === normalizeId(record.root.itemId) ||
           isPathInsideScope(target.path, record.root.path)
         ) {
+          record.concreteEdges.push({
+            sourceItemId: source.itemId,
+            targetItemId: target.itemId,
+            fieldName: field.name,
+          });
           record.internalReferenceKeys.add(referenceKey);
           continue;
         }
+        const targetKind = classifyReferencePath(target.path);
+        if (targetKind === "configuration") {
+          record.ignoredConfigurationTargetIds.add(normalizeId(target.itemId));
+          continue;
+        }
+        if (targetKind !== "content" && targetKind !== "media") {
+          record.ignoredUnsupportedTargetIds.add(normalizeId(target.itemId));
+          continue;
+        }
+        record.concreteEdges.push({
+          sourceItemId: source.itemId,
+          targetItemId: target.itemId,
+          fieldName: field.name,
+        });
         const targetRecord = this.findContainingRecord(target) ?? this.createRecord(target, false);
         record.outgoingReferences.push({
           targetScopeId: targetRecord.id,
@@ -411,6 +444,8 @@ export class CollapsedScopeGraph {
       outgoingReferences: [],
       concreteEdges: [],
       externalLinks: new Set(),
+      ignoredConfigurationTargetIds: new Set(),
+      ignoredUnsupportedTargetIds: new Set(),
       unresolvedReferences: new Set(),
     };
     this.records.set(id, record);
@@ -429,18 +464,16 @@ export class CollapsedScopeGraph {
       required: record.required,
       status: record.status,
       inspectedItemCount: record.inspectedItemIds.size,
-      resolvedReferenceCount: Math.max(
-        0,
-        record.referenceKeys.size - record.unresolvedReferences.size,
-      ),
       internalReferenceCount: record.internalReferenceKeys.size,
+      ignoredReferenceCount: record.ignoredConfigurationTargetIds.size +
+        record.ignoredUnsupportedTargetIds.size,
       outgoingReferences: deduplicateScopeReferences(record.outgoingReferences),
       externalLinks: [...record.externalLinks],
       unresolvedReferences: [...record.unresolvedReferences],
       excludedReason: record.kind === "configuration"
-        ? "Configuration reference; recorded as evidence and not published by default."
+        ? "This starting item is a configuration scope and is not publishable content."
         : record.kind === "unsupported"
-          ? "Reference is outside the supported content and media roots."
+          ? "This starting item is outside the supported content and media roots."
           : undefined,
       pauseReason: record.pauseReason,
       error: record.error,

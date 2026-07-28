@@ -188,13 +188,16 @@ function statusText(node, repeated) {
   if (node.excludedReason) return node.excludedReason;
   if (node.status === "notScanned") return "Not scanned.";
   if (node.status === "scanning") {
-    return `Scanning… ${node.inspectedItemCount} item(s), ${node.resolvedReferenceCount} reference(s) resolved.`;
+    return `Scanning… ${node.inspectedItemCount} item(s), ${uniqueTargets(node).length} external scope(s) found.`;
   }
   if (node.status === "paused") {
     return `${node.pauseReason || "Safety budget reached."} ${node.inspectedItemCount} item(s) inspected.`;
   }
   if (node.status === "failed") return node.error || "Scanning failed.";
-  return `${node.inspectedItemCount} item(s) · ${node.internalReferenceCount} internal reference(s) · ${uniqueTargets(node).length} external scope(s).`;
+  const ignored = node.ignoredReferenceCount
+    ? ` · ${node.ignoredReferenceCount} configuration/unsupported target(s) ignored`
+    : "";
+  return `${node.inspectedItemCount} item(s) · ${node.internalReferenceCount} internal reference(s) · ${uniqueTargets(node).length} external scope(s)${ignored}.`;
 }
 
 function kindLabel(kind) {
@@ -240,6 +243,15 @@ function renderSummary(selectedNodes, nodes) {
     list.append(item);
   }
   const externalLinks = selectedNodes.flatMap((node) => node.externalLinks);
+  const ignoredReferences = selectedNodes.reduce(
+    (total, node) => total + node.ignoredReferenceCount,
+    0,
+  );
+  if (ignoredReferences) {
+    const item = document.createElement("li");
+    item.textContent = `${ignoredReferences} configuration or unsupported target(s) ignored across the selected scopes.`;
+    list.append(item);
+  }
   if (externalLinks.length) {
     const item = document.createElement("li");
     item.textContent = `${externalLinks.length} external URL(s) recorded as evidence.`;

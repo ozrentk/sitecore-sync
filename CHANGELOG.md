@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.9.11
+
+- Removed template, layout, system, and unsupported reference targets from the interactive Power Publish scope graph.
+- Retained non-publishable references as aggregate per-scope planning evidence instead of disabled tree nodes.
+- Changed the 200-reference scan budget to count only unique external content/media scope candidates; internal references, configuration targets, unsupported targets, and external URLs no longer consume it.
+
 ## 0.9.10
 
 - Fixed collapsed Power Publish scopes so structural descendants are always absorbed beneath their scope root instead of appearing as followable external nodes when Sitecore descendant publishing is disabled.
