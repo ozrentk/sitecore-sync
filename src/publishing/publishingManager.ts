@@ -900,6 +900,13 @@ export class PublishingManager implements vscode.Disposable {
     );
     for (let index = 0; index < run.batches.length; index += 1) {
       const batch = run.batches[index];
+      run = await this.setBatchProgress(
+        run,
+        index,
+        "running",
+        "Submitting to Sitecore.",
+        `Submitting publishing batch ${index + 1} of ${run.batches.length}.`,
+      );
       this.output.appendLine(`${batch.label}: starting ${batch.itemIds.join(", ")}.`);
       const operationId = await this.publishing.start(
         connection,
@@ -917,11 +924,40 @@ export class PublishingManager implements vscode.Disposable {
       run = {
         ...run,
         batches: run.batches.map((candidate, candidateIndex) =>
-          candidateIndex === index ? { ...candidate, operationId } : candidate
+          candidateIndex === index
+            ? {
+                ...candidate,
+                operationId,
+                checkpointStatus: "running",
+                checkpointSummary: "Submitted; waiting for Sitecore.",
+              }
+            : candidate
         ),
       };
       await this.saveRun(run);
-      const status = await this.pollPublishing(connection, clientSecret, operationId, signal);
+      this.renderIfDisplayed(run);
+      const status = await this.pollPublishing(
+        connection,
+        clientSecret,
+        operationId,
+        signal,
+        async (progress) => {
+          run = await this.setBatchProgress(
+            run,
+            index,
+            "running",
+            publishingProgressSummary(progress),
+            `Publishing batch ${index + 1} of ${run.batches.length}: ${publishingProgressSummary(progress)}`,
+          );
+        },
+      );
+      run = await this.setBatchProgress(
+        run,
+        index,
+        "matched",
+        `${status.processed} item(s) processed.`,
+        `Completed publishing batch ${index + 1} of ${run.batches.length}.`,
+      );
       this.output.appendLine(
         `${batch.label}: ${status.state}, ${status.processed} item(s) processed.`,
       );
@@ -978,6 +1014,13 @@ export class PublishingManager implements vscode.Disposable {
     for (let index = 0; index < run.batches.length; index += 1) {
       let batch = run.batches[index];
       if (!batch.operationId) {
+        run = await this.setBatchProgress(
+          run,
+          index,
+          "running",
+          "Submitting to Sitecore.",
+          `Submitting publishing batch ${index + 1} of ${run.batches.length}.`,
+        );
         const operationId = await this.publishing.start(
           connection,
           clientSecret,
@@ -994,14 +1037,50 @@ export class PublishingManager implements vscode.Disposable {
         run = {
           ...run,
           batches: run.batches.map((candidate, candidateIndex) =>
-            candidateIndex === index ? { ...candidate, operationId } : candidate
+            candidateIndex === index
+              ? {
+                  ...candidate,
+                  operationId,
+                  checkpointStatus: "running",
+                  checkpointSummary: "Submitted; waiting for Sitecore.",
+                }
+              : candidate
           ),
         };
         await this.saveRun(run);
+        this.renderIfDisplayed(run);
         batch = run.batches[index];
       }
       if (batch.operationId) {
-        await this.pollPublishing(connection, clientSecret, batch.operationId, signal);
+        run = await this.setBatchProgress(
+          run,
+          index,
+          "running",
+          batch.checkpointSummary ?? "Resuming Sitecore status tracking.",
+          `Tracking publishing batch ${index + 1} of ${run.batches.length}.`,
+        );
+        const status = await this.pollPublishing(
+          connection,
+          clientSecret,
+          batch.operationId,
+          signal,
+          async (progress) => {
+            run = await this.setBatchProgress(
+              run,
+              index,
+              "running",
+              publishingProgressSummary(progress),
+              `Publishing batch ${index + 1} of ${run.batches.length}: ${publishingProgressSummary(progress)}`,
+            );
+          },
+        );
+        run = await this.setBatchProgress(
+          run,
+          index,
+          "matched",
+          `${status.processed} item(s) processed.`,
+          `Completed publishing batch ${index + 1} of ${run.batches.length}.`,
+        );
       }
     }
     run = await this.setStage(
@@ -1046,27 +1125,19 @@ export class PublishingManager implements vscode.Disposable {
     this.output.appendLine(
       `Power Publish: all Sitecore batches completed; verifying ${snapshots.length} observed item(s) on Experience Edge.`,
     );
-    let run = await this.setStage(
+    let run = await this.setPowerEdgeVerification(
       initialRun,
-      "edgeItem",
       "running",
       `Verifying ${snapshots.length} published item(s) on Experience Edge.`,
     );
-    run = await this.setPowerEdgeVerification(
-      run,
-      "running",
-      `Waiting for ${snapshots.length} published item(s) on Experience Edge.`,
-    );
     const deadline = Date.now() + 5 * 60_000;
-    let divergences: string[] = [];
-    let evidence: string[] = [];
-    let divergentItemIds: string[] = [];
-    do {
-      divergences = [];
-      evidence = [];
-      divergentItemIds = [];
-      const observations = await mapWithConcurrency(
-        snapshots,
+    const observations = new Map<string, PowerEdgeObservation>();
+    let pendingSnapshots = snapshots;
+    let pass = 1;
+    while (pendingSnapshots.length) {
+      let progressWrites = Promise.resolve();
+      await mapWithConcurrency(
+        pendingSnapshots,
         maximumPowerEdgeVerificationConcurrency,
         async (snapshot): Promise<PowerEdgeObservation> => {
           const item = await this.edge.item(
@@ -1109,53 +1180,72 @@ export class PublishingManager implements vscode.Disposable {
             divergentItemId: itemDivergences.length ? snapshot.itemId : undefined,
           };
         },
+        (snapshot, observation, checkedThisPass) => {
+          observations.set(normalizeId(snapshot.itemId), observation);
+          if (
+            checkedThisPass % maximumPowerEdgeVerificationConcurrency !== 0 &&
+            checkedThisPass !== pendingSnapshots.length
+          ) {
+            return;
+          }
+          const matchedCount = [...observations.values()].filter((candidate) =>
+            !candidate.divergentItemId
+          ).length;
+          const summary = pass === 1
+            ? `Checked ${observations.size} of ${snapshots.length} published item(s); ${matchedCount} matched so far.`
+            : `Rechecking ${pendingSnapshots.length} unmatched item(s): ${checkedThisPass} checked; ${matchedCount} of ${snapshots.length} matched.`;
+          progressWrites = progressWrites.then(async () => {
+            run = await this.setPowerEdgeVerification(run, "running", summary);
+          });
+        },
       );
-      for (const observation of observations) {
-        evidence.push(...observation.evidence);
-        divergences.push(...observation.divergences);
-        if (observation.divergentItemId) {
-          divergentItemIds.push(observation.divergentItemId);
-        }
-      }
-      if (!divergences.length) {
+      await progressWrites;
+
+      const divergentItemIds = pendingSnapshots
+        .filter((snapshot) =>
+          observations.get(normalizeId(snapshot.itemId))?.divergentItemId
+        )
+        .map((snapshot) => snapshot.itemId);
+      if (!divergentItemIds.length) {
+        const evidence = powerEdgeEvidence(snapshots, observations, "evidence");
         this.output.appendLine(
           `Power Publish: ${snapshots.length} observed item(s) matched on Experience Edge.`,
         );
-        run = await this.setPowerEdgeVerification(
+        return this.setPowerEdgeVerification(
           run,
           "matched",
           `${snapshots.length} published item(s) matched on Experience Edge.`,
           evidence,
         );
-        return this.setStage(
+      }
+      if (Date.now() >= deadline) {
+        const divergences = powerEdgeEvidence(snapshots, observations, "divergences");
+        run = await this.setPowerEdgeVerification(
           run,
-          "edgeItem",
-          "matched",
-          `${snapshots.length} published item(s) reached Experience Edge.`,
-          evidence,
+          "diverged",
+          `${divergentItemIds.length} of ${snapshots.length} published item(s) did not match before timeout.`,
+          divergences,
+          divergentItemIds,
         );
+        this.output.appendLine(
+          `Power Publish: ${divergentItemIds.length} observed item(s) did not match on Experience Edge before timeout.`,
+        );
+        return run;
       }
-      if (Date.now() < deadline) {
-        await delay(5_000, signal);
-      }
-    } while (Date.now() < deadline);
-    run = await this.setPowerEdgeVerification(
-      run,
-      "diverged",
-      `${divergentItemIds.length} of ${snapshots.length} published item(s) did not match on Experience Edge before timeout.`,
-      divergences,
-      divergentItemIds,
-    );
-    this.output.appendLine(
-      `Power Publish: ${divergentItemIds.length} observed item(s) did not match on Experience Edge before timeout.`,
-    );
-    return this.setStage(
-      run,
-      "edgeItem",
-      "diverged",
-      `${divergentItemIds.length} of ${snapshots.length} published item(s) did not match before timeout.`,
-      divergences,
-    );
+      const matchedCount = snapshots.length - divergentItemIds.length;
+      run = await this.setPowerEdgeVerification(
+        run,
+        "running",
+        `${matchedCount} of ${snapshots.length} published item(s) matched; waiting to recheck ${divergentItemIds.length}.`,
+      );
+      await delay(5_000, signal);
+      const divergentIds = new Set(divergentItemIds.map(normalizeId));
+      pendingSnapshots = snapshots.filter((snapshot) =>
+        divergentIds.has(normalizeId(snapshot.itemId))
+      );
+      pass += 1;
+    }
+    return run;
   }
 
   private async setPowerEdgeVerification(
@@ -1165,6 +1255,7 @@ export class PublishingManager implements vscode.Disposable {
     evidence?: readonly string[],
     divergentItemIds?: readonly string[],
   ): Promise<PublishRun> {
+    const stageStatus: TraceStageStatus = status;
     const updated: PublishRun = {
       ...run,
       powerEdgeVerification: {
@@ -1173,6 +1264,45 @@ export class PublishingManager implements vscode.Disposable {
         evidence,
         divergentItemIds: divergentItemIds && deduplicateIds(divergentItemIds),
       },
+      stages: run.stages.map((stage) => stage.id === "edgeItem"
+        ? {
+            ...stage,
+            status: stageStatus,
+            summary,
+            evidence,
+            updatedAt: new Date().toISOString(),
+          }
+        : stage),
+    };
+    await this.saveRun(updated);
+    this.renderIfDisplayed(updated);
+    return updated;
+  }
+
+  private async setBatchProgress(
+    run: PublishRun,
+    batchIndex: number,
+    status: NonNullable<PublishBatch["checkpointStatus"]>,
+    batchSummary: string,
+    stageSummary: string,
+  ): Promise<PublishRun> {
+    const updated: PublishRun = {
+      ...run,
+      batches: run.batches.map((batch, index) => index === batchIndex
+        ? {
+            ...batch,
+            checkpointStatus: status,
+            checkpointSummary: batchSummary,
+          }
+        : batch),
+      stages: run.stages.map((stage) => stage.id === "publishing"
+        ? {
+            ...stage,
+            status: "running",
+            summary: stageSummary,
+            updatedAt: new Date().toISOString(),
+          }
+        : stage),
     };
     await this.saveRun(updated);
     this.renderIfDisplayed(updated);
@@ -1526,8 +1656,10 @@ export class PublishingManager implements vscode.Disposable {
     clientSecret: string,
     operationId: string,
     signal: AbortSignal,
+    report?: (status: PublishingStatus) => Promise<void>,
   ): Promise<PublishingStatus> {
     const startedAt = Date.now();
+    let previousProgress = "";
     while (Date.now() - startedAt < 30 * 60_000) {
       const status = await this.publishing.status(
         connection,
@@ -1538,6 +1670,11 @@ export class PublishingManager implements vscode.Disposable {
       this.output.appendLine(
         `Publishing ${operationId}: ${status.state}, processed=${status.processed}.`,
       );
+      const progress = `${status.state}:${status.processed}`;
+      if (report && progress !== previousProgress) {
+        previousProgress = progress;
+        await report(status);
+      }
       if (status.isFailed) {
         throw new Error(`Publishing operation ${operationId} failed (${status.state}).`);
       }
@@ -2554,15 +2691,20 @@ async function mapWithConcurrency<T, TResult>(
   values: readonly T[],
   maximumConcurrency: number,
   mapper: (value: T) => Promise<TResult>,
+  onResult?: (value: T, result: TResult, completed: number) => void,
 ): Promise<readonly TResult[]> {
   const results: TResult[] = new Array(values.length);
   let nextIndex = 0;
+  let completed = 0;
   const workerCount = Math.min(Math.max(1, maximumConcurrency), values.length);
   await Promise.all(Array.from({ length: workerCount }, async () => {
     while (nextIndex < values.length) {
       const index = nextIndex;
       nextIndex += 1;
-      results[index] = await mapper(values[index]);
+      const result = await mapper(values[index]);
+      results[index] = result;
+      completed += 1;
+      onResult?.(values[index], result, completed);
     }
   }));
   return results;
@@ -3100,11 +3242,14 @@ function traceHtml(run: PublishRun, cspSource: string): string {
           .map((line) => `<li><code>${escapeHtml(line)}</code></li>`)
           .join("")}</ul></details>`
       : "";
+    const batchDetails = stage.id === "publishing"
+      ? powerPublishBatchDetails(run, stage)
+      : "";
     return `<section class="stage ${stage.status}">
       <span class="symbol">${stageSymbol(stage.status)}</span>
       <div><strong>${escapeHtml(stage.label)}</strong>
       ${stage.summary ? `<p>${escapeHtml(stage.summary)}</p>` : ""}
-      ${evidence}</div>
+      ${evidence}${batchDetails}</div>
     </section>`;
   }).join("");
   const graph = run.referenceEdges.length
@@ -3113,27 +3258,6 @@ function traceHtml(run: PublishRun, cspSource: string): string {
           `<li><code>${escapeHtml(shortId(edge.sourceItemId))}</code> → <code>${escapeHtml(shortId(edge.targetItemId))}</code> via ${escapeHtml(edge.fieldName)}</li>`
         )
         .join("")}</ul></details>`
-    : "";
-  const batches = run.kind === "power"
-    ? `<details class="graph"><summary>Show Power Publish batches (${run.batches.length})</summary><ul>${
-        run.batches.map((batch) =>
-          `<li><strong>${escapeHtml(batch.label)}</strong> — ${escapeHtml(
-            batch.checkpointStatus ?? (
-              batch.operationId
-                ? run.stages.find((stage) => stage.id === "publishing")?.status === "matched"
-                  ? "completed"
-                  : "submitted"
-                : "not started"
-            ),
-          )}${batch.checkpointSummary ? `: ${escapeHtml(batch.checkpointSummary)}` : ""}${
-            batch.checkpointEvidence?.length
-              ? `<ul>${batch.checkpointEvidence.map((line) =>
-                  `<li><code>${escapeHtml(line)}</code></li>`
-                ).join("")}</ul>`
-              : ""
-          }</li>`
-        ).join("")
-      }</ul></details>`
     : "";
   const actions = traceActions(run);
   const actionHtml = actions.length
@@ -3176,8 +3300,43 @@ function traceHtml(run: PublishRun, cspSource: string): string {
     </style></head><body>
     <h1>${escapeHtml(run.rootPath)}</h1>
     <div class="meta">${escapeHtml(publishKindLabel(run.kind))} · ${escapeHtml(run.connectionName)} · ${escapeHtml(run.language)}</div>
-    ${conclusion}${stageHtml}${batches}${attempts}${graph}
+    ${conclusion}${stageHtml}${attempts}${graph}
   </body></html>`;
+}
+
+function powerPublishBatchDetails(run: PublishRun, stage: TraceStage): string {
+  if (run.kind !== "power") {
+    return "";
+  }
+  const expanded = stage.status === "running" ? " open" : "";
+  return `<details class="batches"${expanded}><summary>Show Power Publish batches (${run.batches.length})</summary><ul>${
+    run.batches.map((batch) =>
+      `<li><strong>${escapeHtml(batch.label)}</strong> — ${escapeHtml(
+        powerPublishBatchStatus(batch, stage),
+      )}${batch.checkpointSummary ? `: ${escapeHtml(batch.checkpointSummary)}` : ""}${
+        batch.checkpointEvidence?.length
+          ? `<ul>${batch.checkpointEvidence.map((line) =>
+              `<li><code>${escapeHtml(line)}</code></li>`
+            ).join("")}</ul>`
+          : ""
+      }</li>`
+    ).join("")
+  }</ul></details>`;
+}
+
+function powerPublishBatchStatus(batch: PublishBatch, stage: TraceStage): string {
+  switch (batch.checkpointStatus) {
+    case "pending": return "not started";
+    case "running": return batch.operationId ? "in progress" : "submitting";
+    case "matched": return "completed";
+    case "diverged": return "diverged";
+    default:
+      return batch.operationId
+        ? stage.status === "matched"
+          ? "completed"
+          : "submitted"
+        : "not started";
+  }
 }
 
 function traceActions(
@@ -3268,6 +3427,20 @@ function publishKindLabel(kind: PublishKind): string {
     case "traced": return "Traced publish";
     case "power": return "Power publish";
   }
+}
+
+function publishingProgressSummary(status: PublishingStatus): string {
+  return `${status.state.toLocaleLowerCase()} · ${status.processed} item(s) processed.`;
+}
+
+function powerEdgeEvidence(
+  snapshots: readonly PublishSnapshot[],
+  observations: ReadonlyMap<string, PowerEdgeObservation>,
+  kind: "evidence" | "divergences",
+): readonly string[] {
+  return snapshots.flatMap((snapshot) =>
+    observations.get(normalizeId(snapshot.itemId))?.[kind] ?? []
+  );
 }
 
 function normalizeId(value: string): string {

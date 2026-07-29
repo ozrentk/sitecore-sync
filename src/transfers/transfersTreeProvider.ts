@@ -224,7 +224,10 @@ function operationIcon(record: OperationRecord): vscode.ThemeIcon {
     case "preflighting": return new vscode.ThemeIcon("search");
     case "executing": return new vscode.ThemeIcon("sync~spin");
     case "waitingForSitecore": return new vscode.ThemeIcon("sync~spin");
-    case "verifying": return new vscode.ThemeIcon("pass-pending");
+    case "verifying":
+      return record.kind === "publishing"
+        ? new vscode.ThemeIcon("sync~spin")
+        : new vscode.ThemeIcon("pass-pending");
     case "failed": return new vscode.ThemeIcon("error", new vscode.ThemeColor("errorForeground"));
     case "completed": return new vscode.ThemeIcon("pass", new vscode.ThemeColor("testing.iconPassed"));
   }
