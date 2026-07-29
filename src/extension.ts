@@ -237,6 +237,11 @@ export function activate(context: vscode.ExtensionContext): void {
         await publishingManager.publishAgain(runId);
       }
     }),
+    vscode.commands.registerCommand("xmCloudSync.repairPowerPublish", async (runId: unknown) => {
+      if (typeof runId === "string") {
+        await publishingManager.repairPowerPublish(runId);
+      }
+    }),
     vscode.commands.registerCommand(
       "xmCloudSync.recheckPublishTraceStatus",
       async (runId: unknown) => {

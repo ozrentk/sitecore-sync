@@ -25,6 +25,7 @@ import type {
   PublishBatch,
   PublishFieldSelection,
   PublishMode,
+  PowerPublishEdgeVerification,
   PublishRun,
   PublishSnapshot,
   PublishTarget,
@@ -43,10 +44,12 @@ const runsKey = "sitecoreXmCloudSync.publishRuns.v1";
 const profilesKey = "sitecoreXmCloudSync.publishingProfiles.v1";
 const maximumTracedFieldItems = 200;
 const maximumPowerBatchItems = 20;
+const maximumPowerEdgeVerificationConcurrency = 8;
 const collapsedScopeItemBudget = 500;
 const collapsedScopeReferenceBudget = 200;
 const retryVerificationCommand = "xmCloudSync.retryPublishTraceVerification";
 const republishTraceCommand = "xmCloudSync.republishTrace";
+const repairPowerPublishCommand = "xmCloudSync.repairPowerPublish";
 const recheckStatusCommand = "xmCloudSync.recheckPublishTraceStatus";
 const diagnosticStageIds = ["edgeItem", "edgeLayout", "application", "browserDom"] as const;
 
@@ -506,7 +509,9 @@ export class PublishingManager implements vscode.Disposable {
           try {
             const firstIndex = diagnosticStageIds.indexOf(firstFailedStage);
             if (firstIndex <= diagnosticStageIds.indexOf("edgeItem")) {
-              run = await this.verifyEdgeItems(run, settings, controller.signal);
+              run = run.kind === "power"
+                ? await this.verifyPowerEdgeItems(run, settings, controller.signal)
+                : await this.verifyEdgeItems(run, settings, controller.signal);
             }
             if (firstIndex <= diagnosticStageIds.indexOf("edgeLayout")) {
               run = await this.verifyLayout(run, settings, controller.signal);
@@ -539,6 +544,110 @@ export class PublishingManager implements vscode.Disposable {
     } finally {
       this.controllers.delete(run.id);
     }
+  }
+
+  async repairPowerPublish(runId: string): Promise<void> {
+    const original = this.listRuns().find((run) => run.id === runId);
+    const divergentItemIds = original?.kind === "power"
+      ? original.powerEdgeVerification?.divergentItemIds ?? []
+      : [];
+    if (!original || original.kind !== "power" || divergentItemIds.length === 0) {
+      await vscode.window.showInformationMessage(
+        "This Power Publish trace has no missing or mismatched items to republish.",
+      );
+      return;
+    }
+    if (this.controllers.size > 0) {
+      await vscode.window.showInformationMessage(
+        "Wait for the current publish operation or verification retry to finish.",
+      );
+      return;
+    }
+    const connection = this.connections.get(original.connectionId);
+    const clientSecret = await this.connections.getClientSecret(original.connectionId);
+    if (!connection || !clientSecret) {
+      await vscode.window.showErrorMessage(
+        "The publishing connection or its stored secret is unavailable.",
+      );
+      return;
+    }
+    const settings = await this.loadRetrySettings(original);
+    if (!settings) {
+      return;
+    }
+    const itemIds = deduplicateIds(divergentItemIds);
+    const selected = new Set(itemIds.map(normalizeId));
+    const snapshots = deduplicateSnapshots(original.snapshots).filter((snapshot) =>
+      selected.has(normalizeId(snapshot.itemId))
+    );
+    if (!snapshots.length) {
+      await vscode.window.showErrorMessage(
+        "The saved Edge divergences do not have authoring snapshots to republish.",
+      );
+      return;
+    }
+    const confirmation = await vscode.window.showWarningMessage(
+      `Force republish ${snapshots.length} missing or mismatched item(s) to ${connection.name}? ` +
+        "Only those items will be published, using Full publish.",
+      { modal: true },
+      "Force republish items",
+    );
+    if (confirmation !== "Force republish items") {
+      return;
+    }
+    const fields = (original.fieldSelections ?? []).filter((field) =>
+      selected.has(normalizeId(field.itemId))
+    );
+    const repair: PublishRun = {
+      id: randomUUID(),
+      kind: "power",
+      connectionId: original.connectionId,
+      connectionName: original.connectionName,
+      targetHost: original.targetHost,
+      rootItemId: original.rootItemId,
+      rootPath: original.rootPath,
+      language: original.language,
+      publishMode: "FULL",
+      publishSubItems: false,
+      publishRelatedItems: false,
+      createdAt: new Date().toISOString(),
+      snapshots,
+      fieldSelections: fields.length ? fields : undefined,
+      referenceEdges: original.referenceEdges.filter((edge) =>
+        selected.has(normalizeId(edge.sourceItemId))
+      ),
+      batches: powerRepairBatches(original.batches, itemIds, maximumPowerBatchItems),
+      stages: initialStages(
+        "power",
+        settings,
+        { snapshots, fields },
+        [
+          `Repair of Power Publish ${original.id}: force publishing ${snapshots.length} item(s) that did not match Experience Edge.`,
+        ],
+      ),
+      route: original.route,
+      routeItemId: original.routeItemId,
+      siteName: original.siteName,
+      applicationUrl: original.applicationUrl,
+    };
+    await this.saveRun(repair);
+    await this.operations.enqueuePublishing({
+      kind: "publishing",
+      duplicateKey: `publishing:${repair.id}`,
+      publishRunId: repair.id,
+      publishKind: repair.kind,
+      connectionId: repair.connectionId,
+      connectionName: repair.connectionName,
+      itemId: repair.rootItemId,
+      itemPath: repair.rootPath,
+      language: repair.language,
+    });
+    this.output.appendLine(
+      `Queued Power Publish repair ${repair.id} for ${snapshots.length} item(s) from ${original.id}.`,
+    );
+    await vscode.window.showInformationMessage(
+      `Force republish of ${snapshots.length} item(s) added to Operations.`,
+    );
   }
 
   async publishAgain(runId: string): Promise<void> {
@@ -816,17 +925,6 @@ export class PublishingManager implements vscode.Disposable {
       this.output.appendLine(
         `${batch.label}: ${status.state}, ${status.processed} item(s) processed.`,
       );
-      if (run.kind === "power") {
-        if (!profileSettings) {
-          throw new Error("Experience Edge settings are unavailable for Power Publish checkpoints.");
-        }
-        run = await this.verifyPowerBatchCheckpoint(
-          run,
-          index,
-          profileSettings,
-          signal,
-        );
-      }
     }
     run = await this.setStage(
       run,
@@ -844,7 +942,7 @@ export class PublishingManager implements vscode.Disposable {
       throw new Error("Experience Edge settings are unavailable for traced publishing.");
     }
     run = run.kind === "power"
-      ? await this.summarizePowerCheckpoints(run)
+      ? await this.verifyPowerEdgeItems(run, profileSettings, signal)
       : await this.verifyEdgeItems(run, profileSettings, signal);
     run = await this.verifyLayout(run, profileSettings, signal);
     run = await this.verifyApplication(run, signal);
@@ -905,13 +1003,6 @@ export class PublishingManager implements vscode.Disposable {
       if (batch.operationId) {
         await this.pollPublishing(connection, clientSecret, batch.operationId, signal);
       }
-      if (run.kind === "power" && batch.checkpointStatus !== "matched") {
-        if (!settings) {
-          throw new Error("Saved Experience Edge settings are unavailable for Power Publish checkpoints.");
-        }
-        run = await this.verifyPowerBatchCheckpoint(run, index, settings, signal);
-        batch = run.batches[index];
-      }
     }
     run = await this.setStage(
       run,
@@ -938,7 +1029,7 @@ export class PublishingManager implements vscode.Disposable {
       applicationUrl: run.applicationUrl,
     };
     run = run.kind === "power"
-      ? await this.summarizePowerCheckpoints(run)
+      ? await this.verifyPowerEdgeItems(run, verificationSettings, signal)
       : await this.verifyEdgeItems(run, verificationSettings, signal);
     run = await this.verifyLayout(run, verificationSettings, signal);
     run = await this.verifyApplication(run, signal);
@@ -946,102 +1037,101 @@ export class PublishingManager implements vscode.Disposable {
     await this.complete(run, classify(run));
   }
 
-  private async verifyPowerBatchCheckpoint(
+  private async verifyPowerEdgeItems(
     initialRun: PublishRun,
-    batchIndex: number,
     settings: ProfileRunSettings,
     signal: AbortSignal,
   ): Promise<PublishRun> {
-    const initialBatch = initialRun.batches[batchIndex];
-    if (!initialBatch) {
-      throw new Error(`Power Publish batch ${batchIndex + 1} is unavailable.`);
-    }
-    let run = await this.setBatchCheckpoint(
+    const snapshots = deduplicateSnapshots(initialRun.snapshots);
+    this.output.appendLine(
+      `Power Publish: all Sitecore batches completed; verifying ${snapshots.length} observed item(s) on Experience Edge.`,
+    );
+    let run = await this.setStage(
       initialRun,
-      batchIndex,
+      "edgeItem",
       "running",
-      `Waiting for ${initialBatch.itemIds.length} item(s) on Experience Edge.`,
+      `Verifying ${snapshots.length} published item(s) on Experience Edge.`,
+    );
+    run = await this.setPowerEdgeVerification(
+      run,
+      "running",
+      `Waiting for ${snapshots.length} published item(s) on Experience Edge.`,
     );
     const deadline = Date.now() + 5 * 60_000;
     let divergences: string[] = [];
     let evidence: string[] = [];
+    let divergentItemIds: string[] = [];
     do {
       divergences = [];
       evidence = [];
-      const batch = run.batches[batchIndex];
-      for (const itemId of batch.itemIds) {
-        const snapshot = run.snapshots.find((candidate) =>
-          normalizeId(candidate.itemId) === normalizeId(itemId)
-        );
-        if (!snapshot) {
-          divergences.push(`${itemId}: authoring snapshot unavailable`);
-          continue;
-        }
-        let item: Awaited<ReturnType<ExperienceEdgeClient["item"]>>;
-        try {
-          item = await this.edge.item(
+      divergentItemIds = [];
+      const observations = await mapWithConcurrency(
+        snapshots,
+        maximumPowerEdgeVerificationConcurrency,
+        async (snapshot): Promise<PowerEdgeObservation> => {
+          const item = await this.edge.item(
             settings.profile.edgeEndpoint,
             settings.edgeToken,
-            itemId,
+            snapshot.itemId,
             run.language,
             signal,
           );
-        } catch (error: unknown) {
-          if (signal.aborted) {
-            throw error;
+          if (!item || normalizeId(item.id) !== normalizeId(snapshot.itemId)) {
+            return {
+              evidence: [],
+              divergences: [`${snapshot.path}: item not found`],
+              divergentItemId: snapshot.itemId,
+            };
           }
-          run = await this.setBatchCheckpoint(
-            run,
-            batchIndex,
-            "diverged",
-            "The Experience Edge checkpoint request failed.",
-            [`${snapshot.path}: ${errorMessage(error)}`],
-          );
-          throw new Error(
-            `${run.batches[batchIndex].label} checkpoint request failed: ${errorMessage(error)}`,
-          );
-        }
-        if (!item || normalizeId(item.id) !== normalizeId(itemId)) {
-          divergences.push(`${snapshot.path}: item not found`);
-          continue;
-        }
-        const fieldNames = new Set([
-          ...(run.fieldSelections ?? [])
-            .filter((selection) =>
-              normalizeId(selection.itemId) === normalizeId(itemId)
-            )
-            .map((selection) => selection.fieldName),
-          ...run.referenceEdges
-            .filter((edge) =>
-              normalizeId(edge.sourceItemId) === normalizeId(itemId)
-            )
-            .map((edge) => edge.fieldName),
-        ]);
-        for (const fieldName of fieldNames) {
-          const expected = snapshot.fields[fieldName];
-          const actual = item.fields[fieldName];
-          if (expected === undefined || actual !== expected) {
-            divergences.push(
-              `${snapshot.path} › ${fieldName}: expected ${
-                expected === undefined ? "missing authoring value" : formatFieldValue(expected)
-              }, Edge returned ${
-                actual === undefined ? "missing" : formatFieldValue(actual)
-              }`,
-            );
-          } else {
-            evidence.push(`${snapshot.path} › ${fieldName}: matched`);
+          const fields = powerExpectedFieldsForSnapshot(run, snapshot);
+          const itemEvidence: string[] = [];
+          const itemDivergences: string[] = [];
+          for (const [fieldName, expected] of fields) {
+            const actual = item.fields[fieldName];
+            if (expected === undefined || actual !== expected) {
+              itemDivergences.push(
+                `${snapshot.path} › ${fieldName}: expected ${
+                  expected === undefined ? "missing authoring value" : formatFieldValue(expected)
+                }, Edge returned ${
+                  actual === undefined ? "missing" : formatFieldValue(actual)
+                }`,
+              );
+            } else {
+              itemEvidence.push(`${snapshot.path} › ${fieldName}: matched`);
+            }
           }
-        }
-        if (!fieldNames.size) {
-          evidence.push(`${snapshot.path}: item identity matched`);
+          if (!fields.length) {
+            itemEvidence.push(`${snapshot.path}: item identity matched`);
+          }
+          return {
+            evidence: itemEvidence,
+            divergences: itemDivergences,
+            divergentItemId: itemDivergences.length ? snapshot.itemId : undefined,
+          };
+        },
+      );
+      for (const observation of observations) {
+        evidence.push(...observation.evidence);
+        divergences.push(...observation.divergences);
+        if (observation.divergentItemId) {
+          divergentItemIds.push(observation.divergentItemId);
         }
       }
       if (!divergences.length) {
-        return this.setBatchCheckpoint(
+        this.output.appendLine(
+          `Power Publish: ${snapshots.length} observed item(s) matched on Experience Edge.`,
+        );
+        run = await this.setPowerEdgeVerification(
           run,
-          batchIndex,
           "matched",
-          `${run.batches[batchIndex].itemIds.length} item(s) reached Experience Edge.`,
+          `${snapshots.length} published item(s) matched on Experience Edge.`,
+          evidence,
+        );
+        return this.setStage(
+          run,
+          "edgeItem",
+          "matched",
+          `${snapshots.length} published item(s) reached Experience Edge.`,
           evidence,
         );
       }
@@ -1049,72 +1139,44 @@ export class PublishingManager implements vscode.Disposable {
         await delay(5_000, signal);
       }
     } while (Date.now() < deadline);
-    run = await this.setBatchCheckpoint(
+    run = await this.setPowerEdgeVerification(
       run,
-      batchIndex,
       "diverged",
-      "The batch did not reach its Experience Edge checkpoint before timeout.",
+      `${divergentItemIds.length} of ${snapshots.length} published item(s) did not match on Experience Edge before timeout.`,
+      divergences,
+      divergentItemIds,
+    );
+    this.output.appendLine(
+      `Power Publish: ${divergentItemIds.length} observed item(s) did not match on Experience Edge before timeout.`,
+    );
+    return this.setStage(
+      run,
+      "edgeItem",
+      "diverged",
+      `${divergentItemIds.length} of ${snapshots.length} published item(s) did not match before timeout.`,
       divergences,
     );
-    throw new Error(`${run.batches[batchIndex].label} failed its Experience Edge checkpoint.`);
   }
 
-  private async setBatchCheckpoint(
+  private async setPowerEdgeVerification(
     run: PublishRun,
-    batchIndex: number,
-    status: NonNullable<PublishBatch["checkpointStatus"]>,
+    status: PowerPublishEdgeVerification["status"],
     summary: string,
     evidence?: readonly string[],
+    divergentItemIds?: readonly string[],
   ): Promise<PublishRun> {
-    const updated = {
+    const updated: PublishRun = {
       ...run,
-      batches: run.batches.map((batch, index) =>
-        index === batchIndex
-          ? {
-              ...batch,
-              checkpointStatus: status,
-              checkpointSummary: summary,
-              checkpointEvidence: evidence,
-            }
-          : batch
-      ),
-      stages: run.stages.map((stage) =>
-        stage.id === "publishing" && stage.status === "running"
-          ? {
-              ...stage,
-              summary: `${run.batches[batchIndex]?.label ?? `Batch ${batchIndex + 1}`}: ${summary}`,
-              updatedAt: new Date().toISOString(),
-            }
-          : stage
-      ),
+      powerEdgeVerification: {
+        status,
+        summary,
+        evidence,
+        divergentItemIds: divergentItemIds && deduplicateIds(divergentItemIds),
+      },
     };
     await this.saveRun(updated);
     this.renderIfDisplayed(updated);
     return updated;
-  }
-
-  private async summarizePowerCheckpoints(run: PublishRun): Promise<PublishRun> {
-    const unmatched = run.batches.filter((batch) => batch.checkpointStatus !== "matched");
-    if (unmatched.length) {
-      return this.setStage(
-        run,
-        "edgeItem",
-        "diverged",
-        `${unmatched.length} Power Publish batch checkpoint(s) did not match.`,
-        unmatched.map((batch) =>
-          `${batch.label}: ${batch.checkpointSummary ?? batch.checkpointStatus ?? "not started"}`
-        ),
-      );
-    }
-    return this.setStage(
-      run,
-      "edgeItem",
-      "matched",
-      `${run.batches.length} checkpointed batch(es) reached Experience Edge.`,
-      run.batches.map((batch) =>
-        `${batch.label}: ${batch.checkpointSummary ?? "matched"}`
-      ),
-    );
   }
 
   private async verifyEdgeItems(
@@ -2437,6 +2499,75 @@ function expectedFieldsForSnapshot(
     .map((field) => [field.fieldName, snapshot.fields[field.fieldName] ?? ""] as const);
 }
 
+interface PowerEdgeObservation {
+  readonly evidence: readonly string[];
+  readonly divergences: readonly string[];
+  readonly divergentItemId?: string;
+}
+
+function powerExpectedFieldsForSnapshot(
+  run: PublishRun,
+  snapshot: PublishSnapshot,
+): readonly (readonly [string, string | undefined])[] {
+  const fieldNames = new Set([
+    ...(run.fieldSelections ?? [])
+      .filter((selection) =>
+        normalizeId(selection.itemId) === normalizeId(snapshot.itemId)
+      )
+      .map((selection) => selection.fieldName),
+    ...run.referenceEdges
+      .filter((edge) =>
+        normalizeId(edge.sourceItemId) === normalizeId(snapshot.itemId)
+      )
+      .map((edge) => edge.fieldName),
+  ]);
+  return [...fieldNames].map((fieldName) => [fieldName, snapshot.fields[fieldName]] as const);
+}
+
+function deduplicateSnapshots(
+  snapshots: readonly PublishSnapshot[],
+): readonly PublishSnapshot[] {
+  const seen = new Set<string>();
+  return snapshots.filter((snapshot) => {
+    const key = normalizeId(snapshot.itemId);
+    if (seen.has(key)) {
+      return false;
+    }
+    seen.add(key);
+    return true;
+  });
+}
+
+function deduplicateIds(ids: readonly string[]): readonly string[] {
+  const seen = new Set<string>();
+  return ids.filter((id) => {
+    const key = normalizeId(id);
+    if (seen.has(key)) {
+      return false;
+    }
+    seen.add(key);
+    return true;
+  });
+}
+
+async function mapWithConcurrency<T, TResult>(
+  values: readonly T[],
+  maximumConcurrency: number,
+  mapper: (value: T) => Promise<TResult>,
+): Promise<readonly TResult[]> {
+  const results: TResult[] = new Array(values.length);
+  let nextIndex = 0;
+  const workerCount = Math.min(Math.max(1, maximumConcurrency), values.length);
+  await Promise.all(Array.from({ length: workerCount }, async () => {
+    while (nextIndex < values.length) {
+      const index = nextIndex;
+      nextIndex += 1;
+      results[index] = await mapper(values[index]);
+    }
+  }));
+  return results;
+}
+
 function summarizeFieldValue(value: string): string {
   const singleLine = value.replace(/\s+/gu, " ").trim();
   if (!singleLine) {
@@ -2539,15 +2670,47 @@ function powerPublishBatches(
     ...planned.map((batch, index) => ({
       itemIds: batch.itemIds,
       label: `Dependency layer ${batch.layer} · batch ${index + 1}/${dependencyBatchCount}`,
-      checkpointStatus: "pending" as const,
     })),
     {
       itemIds: [itemByKey.get(rootKey) ?? rootItemId],
       label: "Root batch",
-      checkpointStatus: "pending" as const,
     },
   ];
   validatePowerPublishBatches(batches, selectedItemIds, rootItemId, edges);
+  return batches;
+}
+
+function powerRepairBatches(
+  originalBatches: readonly PublishBatch[],
+  itemIds: readonly string[],
+  maximumBatchItems: number,
+): readonly PublishBatch[] {
+  const remaining = new Map(itemIds.map((itemId) => [normalizeId(itemId), itemId]));
+  const batches: PublishBatch[] = [];
+  for (const original of originalBatches) {
+    const selected = original.itemIds.flatMap((itemId) => {
+      const key = normalizeId(itemId);
+      const selectedItem = remaining.get(key);
+      if (selectedItem) {
+        remaining.delete(key);
+        return [selectedItem];
+      }
+      return [];
+    });
+    if (selected.length) {
+      batches.push({
+        itemIds: selected,
+        label: `Repair · ${original.label}`,
+      });
+    }
+  }
+  const leftovers = [...remaining.values()];
+  for (let index = 0; index < leftovers.length; index += maximumBatchItems) {
+    batches.push({
+      itemIds: leftovers.slice(index, index + maximumBatchItems),
+      label: `Repair observed items · batch ${Math.floor(index / maximumBatchItems) + 1}`,
+    });
+  }
   return batches;
 }
 
@@ -2860,7 +3023,7 @@ function initialStages(
     { id: "publishing", label: "Sitecore publishing", status: "pending" },
     {
       id: "edgeItem",
-      label: "Raw Experience Edge",
+      label: kind === "power" ? "Final Raw Experience Edge" : "Raw Experience Edge",
       status: kind === "standard" ? "skipped" : "pending",
       summary: kind === "standard" ? "Not requested for Standard publish." : undefined,
     },
@@ -2951,11 +3114,17 @@ function traceHtml(run: PublishRun, cspSource: string): string {
         )
         .join("")}</ul></details>`
     : "";
-  const checkpoints = run.kind === "power"
-    ? `<details class="graph"><summary>Show Power Publish checkpoints (${run.batches.length})</summary><ul>${
+  const batches = run.kind === "power"
+    ? `<details class="graph"><summary>Show Power Publish batches (${run.batches.length})</summary><ul>${
         run.batches.map((batch) =>
           `<li><strong>${escapeHtml(batch.label)}</strong> — ${escapeHtml(
-            batch.checkpointStatus ?? (batch.operationId ? "pending" : "not started"),
+            batch.checkpointStatus ?? (
+              batch.operationId
+                ? run.stages.find((stage) => stage.id === "publishing")?.status === "matched"
+                  ? "completed"
+                  : "submitted"
+                : "not started"
+            ),
           )}${batch.checkpointSummary ? `: ${escapeHtml(batch.checkpointSummary)}` : ""}${
             batch.checkpointEvidence?.length
               ? `<ul>${batch.checkpointEvidence.map((line) =>
@@ -2966,9 +3135,11 @@ function traceHtml(run: PublishRun, cspSource: string): string {
         ).join("")
       }</ul></details>`
     : "";
-  const action = traceAction(run);
-  const actionHtml = action
-    ? `<p class="actions"><a class="button" href="${commandHref(action.command, run.id)}">${escapeHtml(action.label)}</a></p>`
+  const actions = traceActions(run);
+  const actionHtml = actions.length
+    ? `<p class="actions">${actions.map((action) =>
+      `<a class="button" href="${commandHref(action.command, run.id)}">${escapeHtml(action.label)}</a>`
+    ).join(" ")}</p>`
     : "";
   const attempts = run.retryAttempts?.length
     ? `<details class="attempts"><summary>Show previous attempts (${run.retryAttempts.length})</summary>${
@@ -3005,17 +3176,17 @@ function traceHtml(run: PublishRun, cspSource: string): string {
     </style></head><body>
     <h1>${escapeHtml(run.rootPath)}</h1>
     <div class="meta">${escapeHtml(publishKindLabel(run.kind))} · ${escapeHtml(run.connectionName)} · ${escapeHtml(run.language)}</div>
-    ${conclusion}${stageHtml}${checkpoints}${attempts}${graph}
+    ${conclusion}${stageHtml}${batches}${attempts}${graph}
   </body></html>`;
 }
 
-function traceAction(
+function traceActions(
   run: PublishRun,
-): { readonly command: string; readonly label: string } | undefined {
+): readonly { readonly command: string; readonly label: string }[] {
   if (isAbandonedRun(run)) {
-    return run.batches.some((batch) => batch.operationId)
+    return [run.batches.some((batch) => batch.operationId)
       ? { command: recheckStatusCommand, label: "Check status again" }
-      : { command: republishTraceCommand, label: "Publish again…" };
+      : { command: republishTraceCommand, label: "Publish again…" }];
   }
   const publishingStatus = run.stages.find((stage) => stage.id === "publishing")?.status;
   if (
@@ -3026,7 +3197,7 @@ function traceAction(
       run.conclusion?.startsWith("Publishing failed:")
     )
   ) {
-    return { command: republishTraceCommand, label: "Publish again…" };
+    return [{ command: republishTraceCommand, label: "Publish again…" }];
   }
   const diagnosticStages = run.stages.filter((stage) =>
     diagnosticStageIds.includes(stage.id as typeof diagnosticStageIds[number])
@@ -3036,16 +3207,30 @@ function traceAction(
   ) ?? diagnosticStages.find((stage) =>
     stage.status === "inconclusive"
   );
-  return retryableDiagnostic
-    ? {
+  const actions: Array<{ readonly command: string; readonly label: string }> = [];
+  if (retryableDiagnostic) {
+    actions.push({
         command: retryVerificationCommand,
         label: retryableDiagnostic.id === "browserDom"
           ? "Retry Browser DOM"
+          : run.kind === "power" && retryableDiagnostic.id === "edgeItem"
+            ? "Retry final Edge verification"
           : retryableDiagnostic.status === "inconclusive"
             ? "Retry application response"
             : "Retry failed verification",
-      }
-    : undefined;
+      });
+  }
+  if (
+    run.kind === "power" &&
+    run.powerEdgeVerification?.status === "diverged" &&
+    run.powerEdgeVerification.divergentItemIds?.length
+  ) {
+    actions.push({
+      command: repairPowerPublishCommand,
+      label: "Force republish missing items",
+    });
+  }
+  return actions;
 }
 
 function commandHref(command: string, runId: string): string {
