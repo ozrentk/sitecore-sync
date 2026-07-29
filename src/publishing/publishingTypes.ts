@@ -70,6 +70,14 @@ export interface PublishBatch {
   readonly checkpointEvidence?: readonly string[];
 }
 
+export interface PowerPublishEdgeVerification {
+  readonly status: "pending" | "running" | "matched" | "diverged";
+  readonly summary?: string;
+  readonly evidence?: readonly string[];
+  /** Item IDs that remained missing or had at least one mismatched checked field. */
+  readonly divergentItemIds?: readonly string[];
+}
+
 export interface PublishRun {
   readonly id: string;
   readonly kind: PublishKind;
@@ -89,6 +97,7 @@ export interface PublishRun {
   readonly retryAttempts?: readonly PublishTraceAttempt[];
   readonly referenceEdges: readonly ReferenceEdge[];
   readonly batches: readonly PublishBatch[];
+  readonly powerEdgeVerification?: PowerPublishEdgeVerification;
   readonly stages: readonly TraceStage[];
   readonly route?: string;
   readonly routeItemId?: string;

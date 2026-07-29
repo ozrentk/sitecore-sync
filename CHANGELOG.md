@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.9.14
+
+- Changed Power Publish to submit and complete every dependency batch before beginning Raw Experience Edge verification.
+- Added one aggregate final Edge check for every observed item in the selected publish plan, with identity checks for all items plus selected and graph-forming field checks where applicable.
+- Added **Retry final Edge verification** and **Force republish missing items** recovery actions. The latter creates a new durable Full-publish operation containing only the missing or mismatched items.
+- Replaced per-batch checkpoint presentation with persisted Power Publish batch history and final Edge verification evidence.
+
 ## 0.9.13
 
 - Stopped Power Publish reference discovery from following Sitecore standard-template metadata fields such as `__Editors`.
