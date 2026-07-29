@@ -45,6 +45,7 @@ const profilesKey = "sitecoreXmCloudSync.publishingProfiles.v1";
 const maximumTracedFieldItems = 200;
 const maximumPowerBatchItems = 20;
 const maximumPowerEdgeVerificationConcurrency = 8;
+const edgePropagationTimeoutMs = 30_000;
 const collapsedScopeItemBudget = 500;
 const collapsedScopeReferenceBudget = 200;
 const retryVerificationCommand = "xmCloudSync.retryPublishTraceVerification";
@@ -1121,16 +1122,26 @@ export class PublishingManager implements vscode.Disposable {
     settings: ProfileRunSettings,
     signal: AbortSignal,
   ): Promise<PublishRun> {
-    const snapshots = deduplicateSnapshots(initialRun.snapshots);
+    const observedSnapshots = deduplicateSnapshots(initialRun.snapshots);
+    const snapshots = observedSnapshots.filter((snapshot) => snapshot.version > 0);
+    const skippedEvidence = versionlessSnapshotEvidence(observedSnapshots, initialRun.language);
     this.output.appendLine(
-      `Power Publish: all Sitecore batches completed; verifying ${snapshots.length} observed item(s) on Experience Edge.`,
+      `Power Publish: all Sitecore batches completed; verifying ${snapshots.length} language-versioned item(s) on Experience Edge and skipping ${skippedEvidence.length} version-0 item(s).`,
     );
     let run = await this.setPowerEdgeVerification(
       initialRun,
       "running",
-      `Verifying ${snapshots.length} published item(s) on Experience Edge.`,
+      `Verifying ${snapshots.length} observable item(s) on Experience Edge; ${skippedEvidence.length} version-0 item(s) skipped.`,
     );
-    const deadline = Date.now() + 5 * 60_000;
+    if (!snapshots.length) {
+      return this.setPowerEdgeVerification(
+        run,
+        "matched",
+        `No ${run.language} language-versioned items required Experience Edge verification.`,
+        skippedEvidence,
+      );
+    }
+    const deadline = Date.now() + edgePropagationTimeoutMs;
     const observations = new Map<string, PowerEdgeObservation>();
     let pendingSnapshots = snapshots;
     let pass = 1;
@@ -1192,7 +1203,7 @@ export class PublishingManager implements vscode.Disposable {
             !candidate.divergentItemId
           ).length;
           const summary = pass === 1
-            ? `Checked ${observations.size} of ${snapshots.length} published item(s); ${matchedCount} matched so far.`
+            ? `Checked ${observations.size} of ${snapshots.length} observable item(s); ${matchedCount} matched so far.`
             : `Rechecking ${pendingSnapshots.length} unmatched item(s): ${checkedThisPass} checked; ${matchedCount} of ${snapshots.length} matched.`;
           progressWrites = progressWrites.then(async () => {
             run = await this.setPowerEdgeVerification(run, "running", summary);
@@ -1207,28 +1218,34 @@ export class PublishingManager implements vscode.Disposable {
         )
         .map((snapshot) => snapshot.itemId);
       if (!divergentItemIds.length) {
-        const evidence = powerEdgeEvidence(snapshots, observations, "evidence");
+        const evidence = [
+          ...powerEdgeEvidence(snapshots, observations, "evidence"),
+          ...skippedEvidence,
+        ];
         this.output.appendLine(
-          `Power Publish: ${snapshots.length} observed item(s) matched on Experience Edge.`,
+          `Power Publish: ${snapshots.length} observable item(s) matched on Experience Edge.`,
         );
         return this.setPowerEdgeVerification(
           run,
           "matched",
-          `${snapshots.length} published item(s) matched on Experience Edge.`,
+          `${snapshots.length} observable item(s) matched on Experience Edge; ${skippedEvidence.length} version-0 item(s) skipped.`,
           evidence,
         );
       }
       if (Date.now() >= deadline) {
-        const divergences = powerEdgeEvidence(snapshots, observations, "divergences");
+        const divergences = [
+          ...powerEdgeEvidence(snapshots, observations, "divergences"),
+          ...skippedEvidence,
+        ];
         run = await this.setPowerEdgeVerification(
           run,
           "diverged",
-          `${divergentItemIds.length} of ${snapshots.length} published item(s) did not match before timeout.`,
+          `${divergentItemIds.length} of ${snapshots.length} observable item(s) did not match within the 30-second propagation window; ${skippedEvidence.length} version-0 item(s) skipped.`,
           divergences,
           divergentItemIds,
         );
         this.output.appendLine(
-          `Power Publish: ${divergentItemIds.length} observed item(s) did not match on Experience Edge before timeout.`,
+          `Power Publish: ${divergentItemIds.length} observable item(s) did not match on Experience Edge within the 30-second propagation window.`,
         );
         return run;
       }
@@ -1236,7 +1253,7 @@ export class PublishingManager implements vscode.Disposable {
       run = await this.setPowerEdgeVerification(
         run,
         "running",
-        `${matchedCount} of ${snapshots.length} published item(s) matched; waiting to recheck ${divergentItemIds.length}.`,
+        `${matchedCount} of ${snapshots.length} observable item(s) matched; waiting to recheck ${divergentItemIds.length} within 30 seconds.`,
       );
       await delay(5_000, signal);
       const divergentIds = new Set(divergentItemIds.map(normalizeId));
@@ -1314,14 +1331,30 @@ export class PublishingManager implements vscode.Disposable {
     settings: ProfileRunSettings,
     signal: AbortSignal,
   ): Promise<PublishRun> {
-    let run = await this.setStage(initialRun, "edgeItem", "running", "Waiting for Experience Edge.");
-    const deadline = Date.now() + 5 * 60_000;
+    const observableSnapshots = initialRun.snapshots.filter((snapshot) => snapshot.version > 0);
+    const skippedEvidence = versionlessSnapshotEvidence(initialRun.snapshots, initialRun.language);
+    let run = await this.setStage(
+      initialRun,
+      "edgeItem",
+      "running",
+      `Waiting up to 30 seconds for Experience Edge; ${skippedEvidence.length} version-0 item(s) skipped.`,
+    );
+    if (!observableSnapshots.length) {
+      return this.setStage(
+        run,
+        "edgeItem",
+        "matched",
+        `No ${run.language} language-versioned items required Experience Edge verification.`,
+        skippedEvidence,
+      );
+    }
+    const deadline = Date.now() + edgePropagationTimeoutMs;
     let missing: string[] = [];
     let matches: string[] = [];
     do {
       missing = [];
       matches = [];
-      for (const snapshot of run.snapshots) {
+      for (const snapshot of observableSnapshots) {
         const expectedFields = expectedFieldsForSnapshot(run, snapshot);
         if (run.fieldSelections?.length && expectedFields.length === 0) {
           continue;
@@ -1359,8 +1392,8 @@ export class PublishingManager implements vscode.Disposable {
           "matched",
           run.fieldSelections?.length
             ? `${run.fieldSelections.length} selected field value(s) reached Experience Edge.`
-            : `${run.snapshots.length} expected item snapshot(s) reached Experience Edge.`,
-          matches,
+            : `${observableSnapshots.length} observable item snapshot(s) reached Experience Edge.`,
+          [...matches, ...skippedEvidence],
         );
       }
       if (Date.now() < deadline) {
@@ -1371,8 +1404,8 @@ export class PublishingManager implements vscode.Disposable {
       run,
       "edgeItem",
       "diverged",
-      "Experience Edge did not match the authoring snapshot before timeout.",
-      missing,
+      "Experience Edge did not match the authoring snapshot within the 30-second propagation window.",
+      [...missing, ...skippedEvidence],
     );
     return run;
   }
@@ -3441,6 +3474,17 @@ function powerEdgeEvidence(
   return snapshots.flatMap((snapshot) =>
     observations.get(normalizeId(snapshot.itemId))?.[kind] ?? []
   );
+}
+
+function versionlessSnapshotEvidence(
+  snapshots: readonly PublishSnapshot[],
+  language: string,
+): readonly string[] {
+  return snapshots
+    .filter((snapshot) => snapshot.version <= 0)
+    .map((snapshot) =>
+      `${snapshot.path}: skipped Raw Experience Edge identity verification because Authoring reported no ${language} language version (version 0).`
+    );
 }
 
 function normalizeId(value: string): string {

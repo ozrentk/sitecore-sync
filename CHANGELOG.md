@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.9.16
+
+- Excluded Authoring snapshots with version `0` in the requested language from mandatory Raw Experience Edge identity verification.
+- Added explicit trace evidence for each version-0 item skipped because it has no language version that Edge can expose.
+- Reduced the Raw Experience Edge propagation retry window from five minutes to 30 seconds for Traced and Power publishing.
+
 ## 0.9.15
 
 - Moved the expandable Power Publish batch list into the **Sitecore publishing** stage and kept it expanded while publishing is active.
