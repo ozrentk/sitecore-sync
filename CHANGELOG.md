@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.9.15
+
+- Moved the expandable Power Publish batch list into the **Sitecore publishing** stage and kept it expanded while publishing is active.
+- Added persisted per-batch submission, Sitecore state, processed-item, and completion progress so Operation Details advances throughout the batch sequence.
+- Added incremental aggregate Experience Edge progress in bounded groups and changed subsequent polling passes to recheck only items that have not matched yet.
+- Restored the rotating activity indicator on an Operations row while a publishing operation is running diagnostic verification.
+
 ## 0.9.14
 
 - Changed Power Publish to submit and complete every dependency batch before beginning Raw Experience Edge verification.
