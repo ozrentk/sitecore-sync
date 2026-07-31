@@ -26,6 +26,9 @@ window.addEventListener("message", (event) => {
     if (!state.initialized) {
       state.initialized = true;
       state.selected.add(message.state.rootScopeId);
+      for (const scopeId of message.initialSelectedScopeIds ?? []) {
+        state.selected.add(scopeId);
+      }
       state.expanded.add(message.state.rootScopeId);
     }
     render();

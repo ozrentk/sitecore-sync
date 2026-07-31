@@ -1,5 +1,13 @@
 import * as vscode from "vscode";
 import type { ConnectionStore } from "../connections/connectionStore";
+import type { OperationSequenceStore } from "../operations/operationSequenceStore";
+import {
+  operationIntentLabel,
+  type OperationIntent,
+  type OperationSequenceRun,
+  type SavedOperationSequence,
+  type SequenceOperationResult,
+} from "../operations/operationTypes";
 import type { TransferQueueStore } from "./transferQueueStore";
 import {
   subtreeTransferMode,
@@ -24,25 +32,105 @@ export class TransferTreeItem extends vscode.TreeItem {
 
 class OperationGroupItem extends vscode.TreeItem {
   constructor(
-    readonly group: "queue" | "recent",
+    readonly group: "queue" | "recent" | "sequences" | "sequenceHistory",
     count: number,
   ) {
     super(
-      group === "queue" ? "Queue" : "Recent Operations",
-      vscode.TreeItemCollapsibleState.Expanded,
+      group === "queue"
+        ? "Queue"
+        : group === "recent"
+          ? "Recent Operations"
+          : group === "sequences"
+            ? "Operation Sequences"
+            : "Recent Sequence Runs",
+      group === "sequenceHistory"
+        ? vscode.TreeItemCollapsibleState.Collapsed
+        : vscode.TreeItemCollapsibleState.Expanded,
     );
     this.description = String(count);
     this.contextValue = `xmCloudOperationGroup.${group}`;
-    this.iconPath = new vscode.ThemeIcon(group === "queue" ? "list-ordered" : "history");
+    this.iconPath = new vscode.ThemeIcon(
+      group === "queue"
+        ? "list-ordered"
+        : group === "recent" || group === "sequenceHistory"
+          ? "history"
+          : "list-tree",
+    );
   }
 }
 
-type OperationTreeElement = TransferTreeItem | OperationGroupItem;
+export class OperationSequenceTreeItem extends vscode.TreeItem {
+  constructor(
+    readonly sequence: SavedOperationSequence,
+    readonly activeRun: OperationSequenceRun | undefined,
+  ) {
+    super(sequence.name, vscode.TreeItemCollapsibleState.Collapsed);
+    this.description = activeRun
+      ? sequenceRunStatusLabel(activeRun)
+      : `${sequence.operations.length} operation(s)`;
+    this.contextValue = activeRun
+      ? `xmCloudSequence.${activeRun.status}`
+      : "xmCloudSequence.ready";
+    this.iconPath = sequenceRunIcon(activeRun);
+    this.tooltip = new vscode.MarkdownString([
+      sequence.description ?? "No description.",
+      "",
+      `${sequence.operations.length} operation(s)`,
+      activeRun ? `Active run: ${sequenceRunStatusLabel(activeRun)}` : "Ready to run",
+    ].join("  \n"));
+    this.command = {
+      command: "xmCloudSync.openSequence",
+      title: "Open Operation Sequence",
+      arguments: [this],
+    };
+  }
+}
+
+export class SequenceOperationTreeItem extends vscode.TreeItem {
+  constructor(
+    readonly sequence: SavedOperationSequence,
+    readonly operationIndex: number,
+    readonly intent: OperationIntent,
+    readonly locked: boolean,
+    readonly result?: SequenceOperationResult,
+  ) {
+    super(`${operationIndex + 1}. ${operationIntentLabel(intent)}`);
+    this.description = result
+      ? `${sequenceOperationStatusLabel(result)} · ${operationIntentDescription(intent)}`
+      : operationIntentDescription(intent);
+    this.contextValue = locked
+      ? "xmCloudSequenceOperation.locked"
+      : "xmCloudSequenceOperation.editable";
+    this.iconPath = result ? sequenceOperationIcon(result) : new vscode.ThemeIcon(operationIntentIcon(intent));
+  }
+}
+
+export class SequenceRunTreeItem extends vscode.TreeItem {
+  constructor(readonly run: OperationSequenceRun) {
+    super(run.definitionSnapshot.name);
+    this.description = sequenceRunStatusLabel(run);
+    this.contextValue = "xmCloudSequenceRun.history";
+    this.iconPath = sequenceRunIcon(run);
+    this.command = {
+      command: "xmCloudSync.openSequenceRun",
+      title: "Open Sequence Run",
+      arguments: [this],
+    };
+  }
+}
+
+type OperationTreeElement =
+  | TransferTreeItem
+  | OperationGroupItem
+  | OperationSequenceTreeItem
+  | SequenceOperationTreeItem
+  | SequenceRunTreeItem;
 
 export class TransfersTreeProvider
 implements vscode.TreeDataProvider<OperationTreeElement>, vscode.Disposable {
   private readonly changeEmitter = new vscode.EventEmitter<OperationTreeElement | undefined>();
   private readonly storeSubscription: vscode.Disposable;
+  private readonly sequenceSubscription: vscode.Disposable;
   private readonly durationRefresh: ReturnType<typeof setInterval>;
   private showAllRecent = false;
 
@@ -51,8 +139,10 @@ implements vscode.TreeDataProvider<OperationTreeElement>, vscode.Disposable {
   constructor(
     private readonly store: TransferQueueStore,
     private readonly connections: ConnectionStore,
+    private readonly sequences: OperationSequenceStore,
   ) {
     this.storeSubscription = store.onDidChange(() => this.changeEmitter.fire(undefined));
+    this.sequenceSubscription = sequences.onDidChange(() => this.changeEmitter.fire(undefined));
     this.durationRefresh = setInterval(() => {
       if (store.list().some((record) =>
         record.kind === "subtree" &&
@@ -74,11 +164,43 @@ implements vscode.TreeDataProvider<OperationTreeElement>, vscode.Disposable {
       const recent = this.store.listRecent();
       return [
         new OperationGroupItem("queue", queue.length),
+        new OperationGroupItem("sequences", this.sequences.listDefinitions().length),
         new OperationGroupItem("recent", recent.length),
+        new OperationGroupItem("sequenceHistory", this.sequences.listRecentRuns().length),
       ];
     }
-    if (element instanceof TransferTreeItem) {
+    if (
+      element instanceof TransferTreeItem ||
+      element instanceof SequenceOperationTreeItem ||
+      element instanceof SequenceRunTreeItem
+    ) {
       return [];
+    }
+    if (element instanceof OperationSequenceTreeItem) {
+      const locked = this.sequences.isDefinitionLocked(element.sequence.id);
+      const results = new Map(
+        element.activeRun?.operationResults.map((result) => [result.index, result]) ?? [],
+      );
+      return element.sequence.operations.map((intent, index) =>
+        new SequenceOperationTreeItem(
+          element.sequence,
+          index,
+          intent,
+          locked,
+          results.get(index),
+        )
+      );
+    }
+    if (element.group === "sequences") {
+      return this.sequences.listDefinitions().map((sequence) =>
+        new OperationSequenceTreeItem(
+          sequence,
+          this.sequences.activeRunForDefinition(sequence.id),
+        )
+      );
+    }
+    if (element.group === "sequenceHistory") {
+      return this.sequences.listRecentRuns().map((run) => new SequenceRunTreeItem(run));
     }
     const records = element.group === "queue"
       ? this.store.list()
@@ -120,12 +242,13 @@ implements vscode.TreeDataProvider<OperationTreeElement>, vscode.Disposable {
     const source = this.connections.get(sourceId)?.name ?? sourceFallback;
     const target = this.connections.get(targetId)?.name ?? targetFallback;
     const status = record.status === "completed" ? "" : ` · ${statusLabel(record)}`;
-    return `${source} → ${target}${status}`;
+    return `${source} > ${target}${status}`;
   }
 
   dispose(): void {
     clearInterval(this.durationRefresh);
     this.storeSubscription.dispose();
+    this.sequenceSubscription.dispose();
     this.changeEmitter.dispose();
   }
 }
@@ -156,7 +279,82 @@ function publishKindLabel(kind: Extract<OperationRecord, { readonly kind: "publi
 function fieldName(record: Extract<OperationRecord, { readonly kind: "fieldValue" }>): string {
   return record.source.fieldName === record.target.fieldName
     ? record.source.fieldName
-    : `${record.source.fieldName} → ${record.target.fieldName}`;
+    : `${record.source.fieldName} > ${record.target.fieldName}`;
+}
+
+function sequenceRunStatusLabel(run: OperationSequenceRun): string {
+  switch (run.status) {
+    case "running":
+      return run.stopRequested
+        ? "Stopping after current operation"
+        : run.pauseRequested
+          ? "Pausing after current operation"
+          : `Running operation ${Math.min(run.currentOperationIndex + 1, run.definitionSnapshot.operations.length)}/${run.definitionSnapshot.operations.length}`;
+    case "paused": return "Paused";
+    case "pausedOnOperation": return "Paused on operation";
+    case "pausedByOperations": return "Paused by Operations";
+    case "completed": return "Completed";
+    case "stopped": return "Stopped";
+    case "failed": return "Failed";
+  }
+}
+
+function sequenceRunIcon(run: OperationSequenceRun | undefined): vscode.ThemeIcon {
+  if (!run) {
+    return new vscode.ThemeIcon("list-tree");
+  }
+  switch (run.status) {
+    case "running": return new vscode.ThemeIcon("sync~spin");
+    case "paused":
+    case "pausedOnOperation":
+    case "pausedByOperations": return new vscode.ThemeIcon("debug-pause");
+    case "completed": return new vscode.ThemeIcon("pass", new vscode.ThemeColor("testing.iconPassed"));
+    case "stopped": return new vscode.ThemeIcon("debug-stop");
+    case "failed": return new vscode.ThemeIcon("error", new vscode.ThemeColor("testing.iconFailed"));
+  }
+}
+
+function operationIntentIcon(intent: OperationIntent): string {
+  switch (intent.kind) {
+    case "fieldValue": return "symbol-field";
+    case "subtree": return "type-hierarchy-sub";
+    case "publishing": return "cloud-upload";
+  }
+}
+
+function operationIntentDescription(intent: OperationIntent): string {
+  switch (intent.kind) {
+    case "fieldValue":
+      return `${intent.source.language} > ${intent.destination.language}`;
+    case "subtree":
+      return intent.mode === "addMissing"
+        ? "Add missing"
+        : intent.mode === "exactMirror"
+          ? "Exact mirror"
+          : "Synchronize";
+    case "publishing":
+      return `${intent.language} · ${intent.publishMode === "FULL" ? "Full" : "Smart"}`;
+  }
+}
+
+function sequenceOperationStatusLabel(result: SequenceOperationResult): string {
+  switch (result.status) {
+    case "pending": return "pending";
+    case "running": return "running";
+    case "completed": return "completed";
+    case "failed": return "failed";
+    case "skipped": return "skipped";
+  }
+}
+
+function sequenceOperationIcon(result: SequenceOperationResult): vscode.ThemeIcon {
+  switch (result.status) {
+    case "pending": return new vscode.ThemeIcon("circle-outline");
+    case "running": return new vscode.ThemeIcon("sync~spin");
+    case "completed": return new vscode.ThemeIcon("pass", new vscode.ThemeColor("testing.iconPassed"));
+    case "failed": return new vscode.ThemeIcon("error", new vscode.ThemeColor("testing.iconFailed"));
+    case "skipped": return new vscode.ThemeIcon("circle-slash");
+  }
 }
 
 function fieldPath(itemPath: string, name: string): string {

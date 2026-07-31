@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.10.0
+
+- Added safe operation replay from completed or failed Operations records. Replay persists semantic input while rebuilding current field fingerprints, subtree inspection context, Authoring snapshots, descendants, publishing batches, route identity, and Power Publish reference graphs.
+- Added reusable, versioned Operation Sequences containing ordered field transfer, subtree transfer, Standard Publish, Traced Publish, and Power Publish intents without credentials or runtime checkpoints.
+- Added sequence creation from an existing operation, adding operations to editable sequences, reordering and removing operations, editing and duplicating definitions, and shared Operation Details evidence.
+- Added explicit sequence execution without a sequence queue. Only one sequence runs at a time; paused sequences release Operations so standalone work or another sequence can run on demand.
+- Added immutable running and paused definitions, **Paused on operation** recovery with Retry/Skip/Stop actions, graceful stopping after an already-started operation, global Operations Play/Pause integration, restart recovery, and the latest ten sequence-run history records.
+- Added Power Publish replay safety based on selected and previously observed collapsed-scope identities. A newly observed external scope pauses a sequence before publishing, while standalone replay can reopen interactive Power Publish review.
+
 ## 0.9.16
 
 - Excluded Authoring snapshots with version `0` in the requested language from mandatory Raw Experience Edge identity verification.

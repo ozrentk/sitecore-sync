@@ -2,7 +2,7 @@
   "name": "sitecore-xm-cloud-sync",
   "displayName": "XM Cloud Sync",
   "description": "Compare and synchronize Sitecore XM Cloud authoring content from VS Code.",
-  "version": "0.9.16",
+  "version": "0.10.0",
   "publisher": "OzrenTK",
   "license": "MIT",
   "engines": {
@@ -163,6 +163,84 @@
         "command": "xmCloudSync.toggleAllRecentOperations",
         "title": "Show More/Fewer Recent Operations",
         "icon": "$(list-selection)"
+      },
+      {
+        "command": "xmCloudSync.replayOperation",
+        "title": "Replay Operation",
+        "icon": "$(debug-rerun)"
+      },
+      {
+        "command": "xmCloudSync.createSequenceFromOperation",
+        "title": "Create Sequence from Operation"
+      },
+      {
+        "command": "xmCloudSync.addOperationToSequence",
+        "title": "Add Operation to Sequence"
+      },
+      {
+        "command": "xmCloudSync.runSequence",
+        "title": "Run Sequence",
+        "icon": "$(play)"
+      },
+      {
+        "command": "xmCloudSync.pauseSequence",
+        "title": "Pause Sequence",
+        "icon": "$(debug-pause)"
+      },
+      {
+        "command": "xmCloudSync.resumeSequence",
+        "title": "Resume Sequence",
+        "icon": "$(play)"
+      },
+      {
+        "command": "xmCloudSync.retrySequenceOperation",
+        "title": "Retry Operation",
+        "icon": "$(debug-rerun)"
+      },
+      {
+        "command": "xmCloudSync.skipSequenceOperation",
+        "title": "Skip Operation"
+      },
+      {
+        "command": "xmCloudSync.stopSequence",
+        "title": "Stop Sequence",
+        "icon": "$(debug-stop)"
+      },
+      {
+        "command": "xmCloudSync.editSequence",
+        "title": "Edit Sequence"
+      },
+      {
+        "command": "xmCloudSync.duplicateSequence",
+        "title": "Duplicate Sequence"
+      },
+      {
+        "command": "xmCloudSync.deleteSequence",
+        "title": "Delete Sequence",
+        "icon": "$(trash)"
+      },
+      {
+        "command": "xmCloudSync.moveSequenceOperationUp",
+        "title": "Move Operation Up",
+        "icon": "$(arrow-up)"
+      },
+      {
+        "command": "xmCloudSync.moveSequenceOperationDown",
+        "title": "Move Operation Down",
+        "icon": "$(arrow-down)"
+      },
+      {
+        "command": "xmCloudSync.removeSequenceOperation",
+        "title": "Remove Operation",
+        "icon": "$(trash)"
+      },
+      {
+        "command": "xmCloudSync.openSequence",
+        "title": "Open Operation Sequence"
+      },
+      {
+        "command": "xmCloudSync.openSequenceRun",
+        "title": "Open Sequence Run"
       }
     ],
     "viewsContainers": {
@@ -320,6 +398,81 @@
           "command": "xmCloudSync.moveOperationDown",
           "when": "view == xmCloudSync.operations && viewItem =~ /xmCloudOperation\\.(fieldValue|subtree|publishing)\\.queued/",
           "group": "1_order"
+        },
+        {
+          "command": "xmCloudSync.replayOperation",
+          "when": "view == xmCloudSync.operations && viewItem =~ /xmCloudOperation\\.(fieldValue|subtree|publishing)\\.(completed|failed)/",
+          "group": "3_reuse@1"
+        },
+        {
+          "command": "xmCloudSync.createSequenceFromOperation",
+          "when": "view == xmCloudSync.operations && viewItem =~ /xmCloudOperation\\.(fieldValue|subtree|publishing)\\.(completed|failed)/",
+          "group": "3_reuse@2"
+        },
+        {
+          "command": "xmCloudSync.addOperationToSequence",
+          "when": "view == xmCloudSync.operations && viewItem =~ /xmCloudOperation\\.(fieldValue|subtree|publishing)\\.(completed|failed)/",
+          "group": "3_reuse@3"
+        },
+        {
+          "command": "xmCloudSync.runSequence",
+          "when": "view == xmCloudSync.operations && viewItem == xmCloudSequence.ready",
+          "group": "inline"
+        },
+        {
+          "command": "xmCloudSync.pauseSequence",
+          "when": "view == xmCloudSync.operations && viewItem == xmCloudSequence.running",
+          "group": "inline"
+        },
+        {
+          "command": "xmCloudSync.resumeSequence",
+          "when": "view == xmCloudSync.operations && (viewItem == xmCloudSequence.paused || viewItem == xmCloudSequence.pausedByOperations)",
+          "group": "inline"
+        },
+        {
+          "command": "xmCloudSync.retrySequenceOperation",
+          "when": "view == xmCloudSync.operations && viewItem == xmCloudSequence.pausedOnOperation",
+          "group": "inline@1"
+        },
+        {
+          "command": "xmCloudSync.skipSequenceOperation",
+          "when": "view == xmCloudSync.operations && viewItem == xmCloudSequence.pausedOnOperation",
+          "group": "1_run@2"
+        },
+        {
+          "command": "xmCloudSync.stopSequence",
+          "when": "view == xmCloudSync.operations && viewItem =~ /xmCloudSequence\\.(running|paused|pausedOnOperation|pausedByOperations)/",
+          "group": "1_run@3"
+        },
+        {
+          "command": "xmCloudSync.editSequence",
+          "when": "view == xmCloudSync.operations && viewItem == xmCloudSequence.ready",
+          "group": "2_manage@1"
+        },
+        {
+          "command": "xmCloudSync.duplicateSequence",
+          "when": "view == xmCloudSync.operations && viewItem =~ /xmCloudSequence\\.(ready|running|paused|pausedOnOperation|pausedByOperations)/",
+          "group": "2_manage@2"
+        },
+        {
+          "command": "xmCloudSync.deleteSequence",
+          "when": "view == xmCloudSync.operations && viewItem == xmCloudSequence.ready",
+          "group": "2_manage@3"
+        },
+        {
+          "command": "xmCloudSync.moveSequenceOperationUp",
+          "when": "view == xmCloudSync.operations && viewItem == xmCloudSequenceOperation.editable",
+          "group": "inline@1"
+        },
+        {
+          "command": "xmCloudSync.moveSequenceOperationDown",
+          "when": "view == xmCloudSync.operations && viewItem == xmCloudSequenceOperation.editable",
+          "group": "inline@2"
+        },
+        {
+          "command": "xmCloudSync.removeSequenceOperation",
+          "when": "view == xmCloudSync.operations && viewItem == xmCloudSequenceOperation.editable",
+          "group": "2_manage"
         }
       ],
       "commandPalette": [
@@ -361,6 +514,74 @@
         },
         {
           "command": "xmCloudSync.moveOperationDown",
+          "when": "false"
+        },
+        {
+          "command": "xmCloudSync.openSequence",
+          "when": "false"
+        },
+        {
+          "command": "xmCloudSync.openSequenceRun",
+          "when": "false"
+        },
+        {
+          "command": "xmCloudSync.replayOperation",
+          "when": "false"
+        },
+        {
+          "command": "xmCloudSync.createSequenceFromOperation",
+          "when": "false"
+        },
+        {
+          "command": "xmCloudSync.addOperationToSequence",
+          "when": "false"
+        },
+        {
+          "command": "xmCloudSync.runSequence",
+          "when": "false"
+        },
+        {
+          "command": "xmCloudSync.pauseSequence",
+          "when": "false"
+        },
+        {
+          "command": "xmCloudSync.resumeSequence",
+          "when": "false"
+        },
+        {
+          "command": "xmCloudSync.retrySequenceOperation",
+          "when": "false"
+        },
+        {
+          "command": "xmCloudSync.skipSequenceOperation",
+          "when": "false"
+        },
+        {
+          "command": "xmCloudSync.stopSequence",
+          "when": "false"
+        },
+        {
+          "command": "xmCloudSync.editSequence",
+          "when": "false"
+        },
+        {
+          "command": "xmCloudSync.duplicateSequence",
+          "when": "false"
+        },
+        {
+          "command": "xmCloudSync.deleteSequence",
+          "when": "false"
+        },
+        {
+          "command": "xmCloudSync.moveSequenceOperationUp",
+          "when": "false"
+        },
+        {
+          "command": "xmCloudSync.moveSequenceOperationDown",
+          "when": "false"
+        },
+        {
+          "command": "xmCloudSync.removeSequenceOperation",
           "when": "false"
         }
       ]

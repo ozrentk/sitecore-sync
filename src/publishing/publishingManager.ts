@@ -3,6 +3,10 @@ import * as vscode from "vscode";
 import type { ConnectionStore } from "../connections/connectionStore";
 import type { OperationDetailsPanel } from "../operations/operationDetailsPanel";
 import type {
+  PublishingIntent,
+  SequenceOperationContext,
+} from "../operations/operationTypes";
+import type {
   AuthoringContentClient,
   AuthoringItemDetails,
   AuthoringSite,
@@ -78,6 +82,13 @@ interface DiagnosticPublishSetup {
   readonly profileSettings: ProfileRunSettings;
   readonly tracedFields: TracedFieldSelectionResult;
   readonly structuralDetails: readonly AuthoringItemDetails[];
+}
+
+export class PowerPublishReviewRequiredError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "PowerPublishReviewRequiredError";
+  }
 }
 
 export class PublishingManager implements vscode.Disposable {
@@ -256,6 +267,23 @@ export class PublishingManager implements vscode.Disposable {
         routeItemId: profileSettings?.routeItemId,
         siteName: profileSettings?.profile.siteName,
         applicationUrl: profileSettings?.applicationUrl,
+        intent: {
+          kind: "publishing",
+          publishKind: kind,
+          connectionId: connection.id,
+          rootItemId: rootDetails.itemId,
+          rootPath: rootDetails.path,
+          language: target.language,
+          publishMode: options.mode,
+          publishSubItems: options.publishSubItems,
+          publishRelatedItems: kind === "power" ? false : options.publishRelatedItems,
+          siteName: profileSettings?.profile.siteName,
+          route: profileSettings?.route,
+          applicationUrl: profileSettings?.applicationUrl,
+          fieldAssertions: tracedFields.fields.length ? tracedFields.fields : undefined,
+          selectedCollapsedScopeIds: powerPlan?.selectedScopeIds,
+          observedCollapsedScopeIds: powerPlan?.observedScopeIds,
+        },
       };
       await this.saveRun(run);
       this.controllers.delete(preparationId);
@@ -269,6 +297,7 @@ export class PublishingManager implements vscode.Disposable {
         itemId: rootDetails.itemId,
         itemPath: rootDetails.path,
         language: target.language,
+        intent: run.intent,
       });
       await vscode.window.showInformationMessage(
         `${publishKindLabel(kind)} added to Operations${
@@ -294,6 +323,242 @@ export class PublishingManager implements vscode.Disposable {
         this.controllers.delete(run.id);
       }
     }
+  }
+
+  intentForRun(runId: string): PublishingIntent | undefined {
+    const run = this.listRuns().find((candidate) => candidate.id === runId);
+    if (!run) {
+      return undefined;
+    }
+    if (run.intent) {
+      return run.intent;
+    }
+    if (run.kind === "power") {
+      return undefined;
+    }
+    return {
+      kind: "publishing",
+      publishKind: run.kind,
+      connectionId: run.connectionId,
+      rootItemId: run.rootItemId,
+      rootPath: run.rootPath,
+      language: run.language,
+      publishMode: run.publishMode,
+      publishSubItems: run.publishSubItems,
+      publishRelatedItems: run.publishRelatedItems,
+      siteName: run.siteName,
+      route: run.route,
+      applicationUrl: run.applicationUrl,
+      fieldAssertions: run.fieldSelections,
+    };
+  }
+
+  hasSavedProfile(connectionId: string): boolean {
+    return this.listProfiles().some((profile) => profile.connectionId === connectionId);
+  }
+
+  async enqueueIntent(
+    intent: PublishingIntent,
+    context?: SequenceOperationContext,
+  ): Promise<Extract<ReturnType<TransferQueueStore["get"]>, { readonly kind: "publishing" }>> {
+    const run = await vscode.window.withProgress(
+      {
+        location: vscode.ProgressLocation.Notification,
+        title: `Preparing replay of ${publishKindLabel(intent.publishKind).toLowerCase()}`,
+        cancellable: false,
+      },
+      () => this.prepareIntentRun(intent, !context),
+    );
+    await this.saveRun(run);
+    const queued = await this.operations.enqueuePublishing({
+      kind: "publishing",
+      duplicateKey: context
+        ? `publishing-sequence:${context.sequenceRunId}:${context.sequenceOperationIndex}`
+        : `publishing:${run.id}`,
+      publishRunId: run.id,
+      publishKind: run.kind,
+      connectionId: run.connectionId,
+      connectionName: run.connectionName,
+      itemId: run.rootItemId,
+      itemPath: run.rootPath,
+      language: run.language,
+      intent,
+      ...context,
+    });
+    if (queued.record.kind !== "publishing") {
+      throw new Error("The prepared publishing operation has an invalid queue record.");
+    }
+    return queued.record;
+  }
+
+  private async prepareIntentRun(
+    intent: PublishingIntent,
+    allowPowerReview: boolean,
+  ): Promise<PublishRun> {
+    const connection = this.connections.get(intent.connectionId);
+    const clientSecret = await this.connections.getClientSecret(intent.connectionId);
+    if (!connection || !clientSecret) {
+      throw new Error("The publishing connection or its credentials are unavailable.");
+    }
+    const controller = new AbortController();
+    const root = await this.authoring.loadItemDetails(
+      connection,
+      clientSecret,
+      intent.rootItemId,
+      intent.language,
+      controller.signal,
+    );
+    const options: PublishOptions = {
+      mode: intent.publishMode,
+      publishSubItems: intent.publishSubItems,
+      publishRelatedItems: intent.publishKind === "power" ? false : intent.publishRelatedItems,
+    };
+    let profileSettings: ProfileRunSettings | undefined;
+    let tracedFields: TracedFieldSelectionResult = {
+      snapshots: [snapshotFromDetails(root)],
+      fields: [],
+    };
+    let structuralDetails: readonly AuthoringItemDetails[] = [root];
+    if (intent.publishKind !== "standard") {
+      const profile = this.listProfiles().find((candidate) =>
+        candidate.connectionId === intent.connectionId
+      );
+      const edgeToken = await this.connections.getEdgeToken(intent.connectionId);
+      if (!profile || !edgeToken) {
+        throw new Error("Saved Experience Edge settings are unavailable.");
+      }
+      if (!intent.siteName || !intent.route) {
+        throw new Error("The saved diagnostic publish has no Sitecore site or route.");
+      }
+      if (intent.publishSubItems || intent.publishKind === "power") {
+        structuralDetails = (await this.loadStructuralDescendants(
+          connection,
+          clientSecret,
+          root,
+          controller.signal,
+        )).details;
+      }
+      const assertionDetails = new Map<string, AuthoringItemDetails>(
+        structuralDetails.map((details) => [normalizeId(details.itemId), details]),
+      );
+      const selections = intent.fieldAssertions ?? [];
+      for (const selection of selections) {
+        const key = normalizeId(selection.itemId);
+        if (!assertionDetails.has(key)) {
+          try {
+            assertionDetails.set(key, await this.authoring.loadItemDetails(
+              connection,
+              clientSecret,
+              selection.itemId,
+              intent.language,
+              controller.signal,
+            ));
+          } catch (error: unknown) {
+            throw new Error(
+              `Saved field assertion item ${selection.itemId} requires review: ${errorMessage(error)}`,
+            );
+          }
+        }
+      }
+      for (const selection of selections) {
+        const owner = assertionDetails.get(normalizeId(selection.itemId));
+        if (!owner || !Object.prototype.hasOwnProperty.call(
+          snapshotFromDetails(owner).fields,
+          selection.fieldName,
+        )) {
+          throw new Error(
+            `Saved field assertion ${selection.itemId} › ${selection.fieldName} requires review.`,
+          );
+        }
+      }
+      tracedFields = {
+        fields: selections,
+        snapshots: deduplicateSnapshots([
+          snapshotFromDetails(root),
+          ...selections.map((selection) =>
+            snapshotFromDetails(assertionDetails.get(normalizeId(selection.itemId))!)
+          ),
+        ]),
+      };
+      profileSettings = {
+        profile: { ...profile, siteName: intent.siteName },
+        edgeToken,
+        route: normalizeRoute(intent.route),
+        applicationUrl: intent.applicationUrl,
+      };
+      try {
+        const baseline = await this.edge.renderedLayout(
+          profile.edgeEndpoint,
+          edgeToken,
+          intent.siteName,
+          normalizeRoute(intent.route),
+          intent.language,
+          controller.signal,
+        );
+        profileSettings = { ...profileSettings, routeItemId: baseline?.itemId };
+      } catch (error: unknown) {
+        this.output.appendLine(
+          `Unable to recapture the replay route identity: ${errorMessage(error)}`,
+        );
+      }
+    }
+
+    const powerPlan = intent.publishKind === "power"
+      ? await this.prepareSavedPowerPlan(
+          connection,
+          clientSecret,
+          root,
+          intent,
+          tracedFields.fields.map((field) => field.itemId),
+          structuralDetails,
+          controller.signal,
+          allowPowerReview,
+        )
+      : undefined;
+    const selectedIds = powerPlan?.publishItemIds ?? [root.itemId];
+    const batches = intent.publishKind === "power"
+      ? powerPublishBatches(
+          selectedIds,
+          root.itemId,
+          powerPlan?.planningEdges ?? [],
+          maximumPowerBatchItems,
+        )
+      : [{ itemIds: [root.itemId], label: publishKindLabel(intent.publishKind) }];
+    const scopeEvidence = intent.publishKind === "traced"
+      ? externalScopeReferenceEvidence(structuralDetails)
+      : powerPlan?.evidence ?? [];
+    const refreshedIntent: PublishingIntent = {
+      ...intent,
+      rootPath: root.path,
+      selectedCollapsedScopeIds: powerPlan?.selectedScopeIds ?? intent.selectedCollapsedScopeIds,
+      observedCollapsedScopeIds: powerPlan?.observedScopeIds ?? intent.observedCollapsedScopeIds,
+    };
+    return {
+      id: randomUUID(),
+      kind: intent.publishKind,
+      connectionId: connection.id,
+      connectionName: connection.name,
+      targetHost: new URL(connection.serverUrl).hostname,
+      rootItemId: root.itemId,
+      rootPath: root.path,
+      language: intent.language,
+      publishMode: options.mode,
+      publishSubItems: options.publishSubItems,
+      publishRelatedItems: options.publishRelatedItems,
+      createdAt: new Date().toISOString(),
+      snapshots: intent.publishKind === "power"
+        ? powerPlan?.snapshots ?? [snapshotFromDetails(root)]
+        : tracedFields.snapshots,
+      fieldSelections: tracedFields.fields.length ? tracedFields.fields : undefined,
+      referenceEdges: powerPlan?.concreteEdges ?? [],
+      batches,
+      stages: initialStages(intent.publishKind, profileSettings, tracedFields, scopeEvidence),
+      route: profileSettings?.route,
+      routeItemId: profileSettings?.routeItemId,
+      siteName: profileSettings?.profile.siteName,
+      applicationUrl: profileSettings?.applicationUrl,
+      intent: refreshedIntent,
+    };
   }
 
   async executeQueued(runId: string): Promise<void> {
@@ -1917,12 +2182,52 @@ export class PublishingManager implements vscode.Disposable {
     knownStructuralDetails: readonly AuthoringItemDetails[],
     signal: AbortSignal,
   ): Promise<CollapsedScopeGraphPlan | undefined> {
+    const graph = this.createCollapsedScopeGraph(
+      connection,
+      clientSecret,
+      root,
+      publishSubItemsThroughSitecore,
+      knownStructuralDetails,
+    );
+    const result = await showPowerPublishScopeForm(
+      this.extensionUri,
+      graph.state(),
+      (scopeId, scanSignal, report) => graph.scan(scopeId, scanSignal, report),
+      (selectedScopeIds) => {
+        const validation = graph.validate(selectedScopeIds);
+        if (validation) {
+          return validation;
+        }
+        const plan = graph.plan(selectedScopeIds);
+        const snapshotIds = new Set(plan.snapshots.map((snapshot) => normalizeId(snapshot.itemId)));
+        const missingAssertionOwner = requiredItemIds.find((itemId) =>
+          !snapshotIds.has(normalizeId(itemId))
+        );
+        return missingAssertionOwner
+          ? "A selected field assertion belongs to an item outside the selected collapsed scopes."
+          : { selectedScopeIds };
+      },
+      signal,
+    );
+    if (!result) {
+      return undefined;
+    }
+    return graph.plan(result.selectedScopeIds);
+  }
+
+  private createCollapsedScopeGraph(
+    connection: NonNullable<ReturnType<ConnectionStore["get"]>>,
+    clientSecret: string,
+    root: AuthoringItemDetails,
+    publishSubItemsThroughSitecore: boolean,
+    knownStructuralDetails: readonly AuthoringItemDetails[],
+  ): CollapsedScopeGraph {
     const knownDetails = new Map<string, AuthoringItemDetails>();
     for (const details of knownStructuralDetails) {
       knownDetails.set(normalizeId(details.itemId), details);
       knownDetails.set(details.path.toLocaleLowerCase(), details);
     }
-    const graph = new CollapsedScopeGraph(
+    return new CollapsedScopeGraph(
       root,
       publishSubItemsThroughSitecore,
       {
@@ -1970,30 +2275,103 @@ export class PublishingManager implements vscode.Disposable {
       collapsedScopeItemBudget,
       collapsedScopeReferenceBudget,
     );
-    const result = await showPowerPublishScopeForm(
-      this.extensionUri,
-      graph.state(),
-      (scopeId, scanSignal, report) => graph.scan(scopeId, scanSignal, report),
-      (selectedScopeIds) => {
-        const validation = graph.validate(selectedScopeIds);
-        if (validation) {
-          return validation;
-        }
-        const plan = graph.plan(selectedScopeIds);
-        const snapshotIds = new Set(plan.snapshots.map((snapshot) => normalizeId(snapshot.itemId)));
-        const missingAssertionOwner = requiredItemIds.find((itemId) =>
-          !snapshotIds.has(normalizeId(itemId))
-        );
-        return missingAssertionOwner
-          ? "A selected field assertion belongs to an item outside the selected collapsed scopes."
-          : { selectedScopeIds };
-      },
-      signal,
+  }
+
+  private async prepareSavedPowerPlan(
+    connection: NonNullable<ReturnType<ConnectionStore["get"]>>,
+    clientSecret: string,
+    root: AuthoringItemDetails,
+    intent: PublishingIntent,
+    requiredItemIds: readonly string[],
+    knownStructuralDetails: readonly AuthoringItemDetails[],
+    signal: AbortSignal,
+    allowReview: boolean,
+  ): Promise<CollapsedScopeGraphPlan> {
+    const selectedScopeIds = intent.selectedCollapsedScopeIds?.map(normalizeId);
+    const observedScopeIds = new Set(
+      intent.observedCollapsedScopeIds?.map(normalizeId) ?? [],
     );
-    if (!result) {
-      return undefined;
+    if (!selectedScopeIds?.length || !observedScopeIds.size) {
+      throw new PowerPublishReviewRequiredError(
+        "The saved Power Publish predates reusable collapsed-scope identities.",
+      );
     }
-    return graph.plan(result.selectedScopeIds);
+    const graph = this.createCollapsedScopeGraph(
+      connection,
+      clientSecret,
+      root,
+      intent.publishSubItems,
+      knownStructuralDetails,
+    );
+    const report = async (): Promise<void> => undefined;
+    await graph.scan(normalizeId(root.itemId), signal, report);
+    const remaining = new Set(selectedScopeIds);
+    remaining.delete(normalizeId(root.itemId));
+    while (remaining.size) {
+      const state = graph.state();
+      const available = state.nodes.find((node) => remaining.has(normalizeId(node.id)));
+      if (!available) {
+        throw new PowerPublishReviewRequiredError(
+          `Saved collapsed scope ${[...remaining][0]} is no longer reachable from the selected content.`,
+        );
+      }
+      await graph.scan(available.id, signal, report);
+      remaining.delete(normalizeId(available.id));
+    }
+    const state = graph.state();
+    const newlyObserved = state.nodes.filter((node) =>
+      (node.kind === "content" || node.kind === "media") &&
+      !observedScopeIds.has(normalizeId(node.id))
+    );
+    if (newlyObserved.length && !allowReview) {
+      throw new PowerPublishReviewRequiredError(
+        `New external collapsed scope requires review: ${newlyObserved[0]!.path}`,
+      );
+    }
+    if (newlyObserved.length) {
+      const result = await showPowerPublishScopeForm(
+        this.extensionUri,
+        state,
+        (scopeId, scanSignal, reportState) => graph.scan(scopeId, scanSignal, reportState),
+        (reviewedScopeIds) => {
+          const reviewedValidation = graph.validate(reviewedScopeIds);
+          if (reviewedValidation) {
+            return reviewedValidation;
+          }
+          const reviewedPlan = graph.plan(reviewedScopeIds);
+          const reviewedSnapshotIds = new Set(
+            reviewedPlan.snapshots.map((snapshot) => normalizeId(snapshot.itemId)),
+          );
+          const missingOwner = requiredItemIds.find((itemId) =>
+            !reviewedSnapshotIds.has(normalizeId(itemId))
+          );
+          return missingOwner
+            ? "A selected field assertion belongs to an item outside the selected collapsed scopes."
+            : { selectedScopeIds: reviewedScopeIds };
+        },
+        signal,
+        selectedScopeIds,
+      );
+      if (!result) {
+        throw new DOMException("Power Publish scope review was cancelled.", "AbortError");
+      }
+      return graph.plan(result.selectedScopeIds);
+    }
+    const validation = graph.validate(selectedScopeIds);
+    if (validation) {
+      throw new PowerPublishReviewRequiredError(validation);
+    }
+    const plan = graph.plan(selectedScopeIds);
+    const snapshotIds = new Set(plan.snapshots.map((snapshot) => normalizeId(snapshot.itemId)));
+    const missingAssertionOwner = requiredItemIds.find((itemId) =>
+      !snapshotIds.has(normalizeId(itemId))
+    );
+    if (missingAssertionOwner) {
+      throw new PowerPublishReviewRequiredError(
+        `Field assertion owner ${missingAssertionOwner} is outside the saved collapsed scopes.`,
+      );
+    }
+    return plan;
   }
 
   private async collectPublishOptions(kind: PublishKind): Promise<PublishOptions | undefined> {

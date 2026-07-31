@@ -26,6 +26,7 @@ export class TransferQueueStore implements vscode.Disposable {
   private readonly changeEmitter = new vscode.EventEmitter<void>();
   private state: StoredQueueState;
   private pendingWrite: Promise<void> = Promise.resolve();
+  private standaloneEnqueueAllowed: (() => boolean) | undefined;
 
   readonly onDidChange = this.changeEmitter.event;
 
@@ -35,6 +36,10 @@ export class TransferQueueStore implements vscode.Disposable {
 
   get processorState(): TransferProcessorState {
     return this.state.processorState;
+  }
+
+  setStandaloneEnqueueGuard(allowed: () => boolean): void {
+    this.standaloneEnqueueAllowed = allowed;
   }
 
   list(): readonly OperationRecord[] {
@@ -68,6 +73,7 @@ export class TransferQueueStore implements vscode.Disposable {
   async enqueuePublishing(
     draft: PublishingOperationDraft,
   ): Promise<{ readonly record: OperationRecord; readonly added: boolean }> {
+    this.assertEnqueueAllowed(draft.sequenceRunId);
     let result: { readonly record: OperationRecord; readonly added: boolean } | undefined;
     await this.commit(() => {
       const duplicate = this.state.records.find(
@@ -98,6 +104,7 @@ export class TransferQueueStore implements vscode.Disposable {
   }
 
   async enqueue(draft: TransferDraft): Promise<{ readonly record: TransferRecord; readonly added: boolean }> {
+    this.assertEnqueueAllowed(draft.sequenceRunId);
     let result: { readonly record: TransferRecord; readonly added: boolean } | undefined;
     await this.commit(() => {
       const duplicate = this.state.records.find(
@@ -198,6 +205,22 @@ export class TransferQueueStore implements vscode.Disposable {
     return removed;
   }
 
+  async archive(recordId: string): Promise<OperationRecord | undefined> {
+    let archived: OperationRecord | undefined;
+    await this.commit(() => {
+      archived = this.state.records.find((record) => record.id === recordId);
+      if (!archived) {
+        return;
+      }
+      this.state = {
+        ...this.state,
+        records: this.state.records.filter((record) => record.id !== recordId),
+        history: [archived, ...this.state.history].slice(0, 30),
+      };
+    });
+    return archived;
+  }
+
   async retry(recordId: string): Promise<void> {
     await this.update(recordId, (record) => {
       if (record.kind === "subtree" && record.failureKind === "deploymentChanged") {
@@ -288,6 +311,12 @@ export class TransferQueueStore implements vscode.Disposable {
     });
     this.pendingWrite = write.catch(() => undefined);
     await write;
+  }
+
+  private assertEnqueueAllowed(sequenceRunId: string | undefined): void {
+    if (!sequenceRunId && this.standaloneEnqueueAllowed && !this.standaloneEnqueueAllowed()) {
+      throw new Error("Pause the running operation sequence before starting a standalone operation.");
+    }
   }
 
   dispose(): void {
