@@ -22,9 +22,9 @@ import {
 } from "./transferTypes";
 
 export class TransferProcessor implements vscode.Disposable {
-  private readonly startEmitter = new vscode.EventEmitter<TransferRecord>();
-  private readonly completeEmitter = new vscode.EventEmitter<TransferRecord>();
-  private readonly failureEmitter = new vscode.EventEmitter<TransferRecord>();
+  private readonly startEmitter = new vscode.EventEmitter<OperationRecord>();
+  private readonly completeEmitter = new vscode.EventEmitter<OperationRecord>();
+  private readonly failureEmitter = new vscode.EventEmitter<OperationRecord>();
   private readonly disposables: vscode.Disposable[] = [];
   private pumping: Promise<void> | undefined;
 
@@ -116,9 +116,7 @@ export class TransferProcessor implements vscode.Disposable {
     if (!active) {
       return true;
     }
-    if (active.kind !== "publishing") {
-      this.startEmitter.fire(active);
-    }
+    this.startEmitter.fire(active);
     this.log.info(`Processing operation ${active.id} (${active.kind}).`);
     try {
       const completed = active.kind === "publishing"
@@ -133,9 +131,9 @@ export class TransferProcessor implements vscode.Disposable {
       if (latest.kind !== "publishing") {
         const journalPath = await this.writeJournal(latest, "succeeded");
         await this.store.update(latest.id, (record) => ({ ...record, journalPath }));
-        this.completeEmitter.fire(latest);
       }
-      await this.store.complete(active.id);
+      const completedRecord = await this.store.complete(active.id);
+      this.completeEmitter.fire(completedRecord ?? latest);
       this.log.info(`Completed operation ${active.id}.`);
       return true;
     } catch (error: unknown) {
@@ -155,7 +153,7 @@ export class TransferProcessor implements vscode.Disposable {
           : {}),
       }));
       await this.store.setProcessorState("paused");
-      if (failed && failed.kind !== "publishing") {
+      if (failed) {
         this.failureEmitter.fire(failed);
       }
       await vscode.window.showErrorMessage(

@@ -27,6 +27,8 @@ export interface CollapsedScopeGraphLoader {
 }
 
 export interface CollapsedScopeGraphPlan {
+  readonly selectedScopeIds: readonly string[];
+  readonly observedScopeIds: readonly string[];
   readonly publishItemIds: readonly string[];
   readonly snapshots: readonly PublishSnapshot[];
   readonly concreteEdges: readonly ReferenceEdge[];
@@ -222,6 +224,8 @@ export class CollapsedScopeGraph {
       ]),
     ];
     return {
+      selectedScopeIds: [...selectedScopeIds],
+      observedScopeIds: [...this.records.keys()],
       publishItemIds,
       snapshots,
       concreteEdges: deduplicateEdges(concreteEdges),

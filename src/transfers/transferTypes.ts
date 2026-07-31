@@ -5,6 +5,10 @@ import type {
   ContentTransferResult,
 } from "../sitecore/authoringClient";
 import type { DeploymentBaseline } from "../sitecore/deploymentClient";
+import type {
+  OperationIntent,
+  SequenceOperationContext,
+} from "../operations/operationTypes";
 
 export type TransferProcessorState = "paused" | "running" | "pausing";
 export type SubtreeTransferMode = "addMissing" | "synchronize" | "exactMirror";
@@ -54,6 +58,9 @@ interface TransferRecordBase {
   readonly error?: string;
   readonly journalPath?: string;
   readonly completedAt?: string;
+  readonly intent?: OperationIntent;
+  readonly sequenceRunId?: string;
+  readonly sequenceOperationIndex?: number;
 }
 
 export interface FieldTransferEndpoint {
@@ -121,6 +128,9 @@ export interface PublishingOperationRecord {
   readonly itemPath: string;
   readonly language: string;
   readonly progressSummary?: string;
+  readonly intent?: OperationIntent;
+  readonly sequenceRunId?: string;
+  readonly sequenceOperationIndex?: number;
 }
 
 export type OperationRecord = TransferRecord | PublishingOperationRecord;
@@ -135,6 +145,9 @@ export interface PublishingOperationDraft {
   readonly itemId: string;
   readonly itemPath: string;
   readonly language: string;
+  readonly intent?: OperationIntent;
+  readonly sequenceRunId?: string;
+  readonly sequenceOperationIndex?: number;
 }
 
 export type FieldValueTransferDraft = Omit<
@@ -143,7 +156,7 @@ export type FieldValueTransferDraft = Omit<
 > & {
   readonly kind: "fieldValue";
   readonly duplicateKey: string;
-};
+} & Partial<SequenceOperationContext> & { readonly intent?: OperationIntent };
 
 export type SubtreeTransferDraft = Omit<
   SubtreeTransferRecord,
@@ -151,7 +164,7 @@ export type SubtreeTransferDraft = Omit<
 > & {
   readonly kind: "subtree";
   readonly duplicateKey: string;
-};
+} & Partial<SequenceOperationContext> & { readonly intent?: OperationIntent };
 
 export type TransferDraft = FieldValueTransferDraft | SubtreeTransferDraft;
 

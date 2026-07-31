@@ -105,6 +105,7 @@ export interface PublishRun {
   readonly applicationUrl?: string;
   readonly conclusion?: string;
   readonly journalPath?: string;
+  readonly intent?: PublishingIntent;
 }
 
 export interface PublishingSiteProfile {
@@ -113,3 +114,4 @@ export interface PublishingSiteProfile {
   readonly siteName?: string;
   readonly applicationBaseUrl?: string;
 }
+import type { PublishingIntent } from "../operations/operationTypes";

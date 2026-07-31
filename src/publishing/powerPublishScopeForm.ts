@@ -64,6 +64,7 @@ export async function showPowerPublishScopeForm(
     selectedScopeIds: readonly string[],
   ) => PowerScopeReviewResult | string,
   signal: AbortSignal,
+  initialSelectedScopeIds: readonly string[] = [],
 ): Promise<PowerScopeReviewResult | undefined> {
   const mediaUri = vscode.Uri.joinPath(extensionUri, "media", "publishing");
   const panel = vscode.window.createWebviewPanel(
@@ -93,7 +94,11 @@ export async function showPowerPublishScopeForm(
     let subscription: vscode.Disposable | undefined;
     const postState = async (state: PowerScopeReviewState): Promise<void> => {
       latest = state;
-      await panel.webview.postMessage({ type: "scopeState", state });
+      await panel.webview.postMessage({
+        type: "scopeState",
+        state,
+        initialSelectedScopeIds,
+      });
     };
     const finish = (
       value: PowerScopeReviewResult | undefined,

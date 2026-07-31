@@ -830,6 +830,16 @@ export class ComparisonPanelManager implements vscode.Disposable {
     const queued = await this.transferQueue.enqueue({
       kind: "subtree",
       mode,
+      intent: {
+        kind: "subtree",
+        source: {
+          connectionId: sourceConnection.id,
+          rootItemId: sourceItemId,
+          rootPath: sourcePath,
+        },
+        destination: { connectionId: targetConnection.id },
+        mode,
+      },
       preflight,
       duplicateKey,
       direction,
@@ -1968,6 +1978,27 @@ export class ComparisonPanelManager implements vscode.Disposable {
       ].join(":");
       const enqueueResult = await this.transferQueue.enqueue({
         kind: "fieldValue",
+        intent: {
+          kind: "fieldValue",
+          source: {
+            connectionId: sourceConnectionId,
+            itemId: sourceDetails.itemId,
+            itemPath: sourceDetails.path,
+            language: sourceDetails.language,
+            fieldId: sourceField.fieldId,
+            fieldName: sourceField.name,
+            fieldLabel,
+          },
+          destination: {
+            connectionId: targetConnectionId,
+            itemId: targetDetails.itemId,
+            itemPath: targetDetails.path,
+            language: targetDetails.language,
+            fieldId: targetField.fieldId,
+            fieldName: targetField.name,
+            fieldLabel,
+          },
+        },
         duplicateKey,
         direction,
         source: {
