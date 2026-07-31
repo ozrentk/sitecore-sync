@@ -105,6 +105,12 @@ The **Transfers** view is collapsed by default. Selecting a connection exposes a
 
 The comparison tab's sticky top bar contains independent left and right connection and language selectors plus a swap action. The comparison tab remembers its selections per workspace and updates when connections are added or removed.
 
+TODO: Add comparison navigation and presentation improvements:
+
+- Add search across comparison items, including direct lookup by normalized Sitecore item ID. Search should reveal a match by loading only the ancestor path required to display it rather than expanding the complete tree.
+- Display Sitecore item icons in the comparison tree. Icon loading should be cached, use the item's configured Sitecore icon when available, and retain a lightweight fallback when an icon cannot be resolved.
+- Add a **Lock languages** control between the left and right language selectors. While enabled, changing either selector should select the same language on the other side when that language exists there; unavailable languages must be explained without silently changing to an unrelated language.
+
 Later enhancement: double-clicking a configured site beneath a connection in the Connections pane should open or reveal the comparison tab and use that site's root as the relevant comparison-side starting point. The exact side-selection behavior and handling when the other connection has not yet been chosen remain to be designed.
 
 The comparison tab contains the synchronized content tree and sync-operation controls. Detailed field rows and text-diff launch actions live in the **Field Diff** bottom-panel tab. Connection secrets and access tokens are never sent into either webview; API operations remain in the extension host.
