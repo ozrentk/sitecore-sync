@@ -34,6 +34,8 @@ Stdout and stderr stream to a dedicated **XM Cloud Tasks** output channel. Exit 
 
 TODO: Add connection-scoped task plug-ins alongside item-scoped tasks. A connection context action should discover manifests explicitly declared for a connection scope and run them without requiring a selected Sitecore item. This supports administrative operations such as rebuilding indexes or rebuilding the link database. Connection tasks must remain explicit trusted-workspace actions, receive only the selected non-secret connection context, use the existing credential boundaries, and clearly confirm potentially disruptive server-wide work before execution.
 
+TODO: Treat item- and connection-scoped plug-in runs as Operations. A plug-in Operation should use the common Operations lifecycle and evidence view, support **Run Again** with its saved secret-free inputs, and be eligible for inclusion as an Operation Sequence entry. The saved intent must identify the plug-in manifest and target connection or item without persisting credentials or transient runtime state; missing or materially changed plug-ins must pause execution for review rather than running a different command silently.
+
 Experience Edge tracing remains separate from the authoring diff and sync engine because Edge contains a published, flattened representation rather than the complete authoring item representation.
 
 ## Publishing and propagation tracing
