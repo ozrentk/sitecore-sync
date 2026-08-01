@@ -32,6 +32,8 @@ Existing local PowerShell execution remains supported and receives context and r
 
 Stdout and stderr stream to a dedicated **XM Cloud Tasks** output channel. Exit code zero is success unless a declared result reports error; non-zero is failure. A result supplies `status` and a user-facing `message`. JavaScript and local PowerShell tasks support process cancellation; SPE tasks are not exposed as cancellable because terminating the local client cannot guarantee that Sitecore stops the remote script. Completion produces an OK or error notification, and temporary files are deleted afterward. Task runs remain separate from the Transfers FIFO.
 
+TODO: Add connection-scoped task plug-ins alongside item-scoped tasks. A connection context action should discover manifests explicitly declared for a connection scope and run them without requiring a selected Sitecore item. This supports administrative operations such as rebuilding indexes or rebuilding the link database. Connection tasks must remain explicit trusted-workspace actions, receive only the selected non-secret connection context, use the existing credential boundaries, and clearly confirm potentially disruptive server-wide work before execution.
+
 Experience Edge tracing remains separate from the authoring diff and sync engine because Edge contains a published, flattened representation rather than the complete authoring item representation.
 
 ## Publishing and propagation tracing
@@ -79,6 +81,8 @@ Each connection contains:
 - Default language: `en`, configurable per connection.
 
 The extension exchanges the automation client credentials for a short-lived JWT at Sitecore's OAuth endpoint. Access tokens remain in memory and are never persisted. Non-secret connection metadata is stored in VS Code global state.
+
+TODO: Allow a connection to store an optional public-site URL template, for example `https://staging.ineosgrenadier.com/{lang}/{region}/`. Supported placeholders and their required values must be validated explicitly. Publishing diagnostics should use the resolved template to prefill the exact application URL while keeping it editable, and must not guess or silently retain unresolved placeholders.
 
 Connections can be tested after creation or from their context menu. A test obtains a JWT and executes a harmless query for configured sites against the Authoring and Management GraphQL endpoint. The exact returned site names, root paths, and root item IDs are shown beneath the tested connection and in a searchable list; this helps explain differences from the sites visible to a user in Channels.
 
