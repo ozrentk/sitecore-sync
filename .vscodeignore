@@ -3,10 +3,12 @@
 .xm-cloud-sync/**
 .gitignore
 src/**
+test/**
 scripts/**
 node_modules/**
 !node_modules/playwright-core/**
 dist/**
 tsconfig.json
+tsconfig.test.json
 package-lock.json
 *.vsix

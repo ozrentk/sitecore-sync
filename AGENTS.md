@@ -35,6 +35,9 @@ Do not assume the compiled bundle describes intended behavior; TypeScript source
 Use the checked-in lockfile and install dependencies with `npm ci` when a clean install is required.
 
 - `npm run check` — strict TypeScript validation without emitting files.
+- `npm run check:extension` — type-check only the extension source.
+- `npm run check:tests` — type-check the unit-test suite.
+- `npm test` — type-check and run the TypeScript unit-test suite.
 - `npm run compile` — run the type check and build `out/extension.js` with the project build script.
 - `npm run watch` — continuously compile TypeScript during development.
 - `npm run clean` — remove generated build output through the project script.
@@ -101,9 +104,9 @@ Prefer repository scripts over ad hoc compiler, bundler, or packaging commands. 
 
 ### Current state
 
-The repository currently has no configured `npm test` script, test framework, test directory, or committed automated tests. `npm run check` is a type check, not a test suite. Do not report that tests passed when only type checking or packaging was run.
+The repository has a TypeScript unit-test harness under `test/unit/`. It uses Node's built-in test runner, Node's strict assertion API, and `tsx`, and runs through `npm test`. The initial suite contains only a harness check and provides no application-behavior coverage yet. Extension-host integration testing is not configured.
 
-Until a test suite is introduced, verify changes with the available automated commands plus focused manual checks in a VS Code Extension Development Host. Record exactly what was and was not exercised.
+Run `npm test` for unit-test changes. Continue to verify VS Code integration changes with focused manual checks in an Extension Development Host until an extension-host suite is introduced. Record exactly what was and was not exercised.
 
 ### Expectations for changed behavior
 
@@ -116,18 +119,18 @@ Until a test suite is introduced, verify changes with the available automated co
 - Keep tests deterministic, isolated, and safe to run in parallel. Do not rely on execution order, developer credentials, global machine state, or external services.
 - Use temporary directories and disposable fixtures. Tests must not modify a developer's real VS Code profile, workspace content, Sitecore environment, or persisted extension data.
 
-### Introducing the test infrastructure
+### Extending the test infrastructure
 
-When a task adds the first automated tests:
+When adding application tests or additional test layers:
 
-1. Prefer the smallest maintained stack that fits the need: Node's built-in test runner for isolated domain code and `@vscode/test-electron` for extension-host integration tests.
-2. Add explicit scripts such as `test`, `test:unit`, and `test:integration` to `package.json` as applicable.
-3. Put unit tests in a clear convention such as `src/**/*.test.ts` or `test/unit/`, and extension-host tests under `test/integration/`.
+1. Continue using Node's built-in test runner for isolated domain code and prefer `@vscode/test-electron` for extension-host integration tests.
+2. Add explicit scripts such as `test:unit` and `test:integration` to `package.json` when separate test layers exist.
+3. Keep unit tests under `test/unit/` and extension-host tests under `test/integration/`.
 4. Ensure test compilation does not leak test code into the shipped extension bundle or VSIX.
 5. Document local prerequisites and commands in `README.md`.
 6. Add the suite to CI if CI exists or is introduced by the task.
 
-Do not add a framework speculatively during an unrelated change. If meaningful testing is blocked by the absent infrastructure, explain the gap and propose the smallest follow-up.
+Do not add another framework speculatively during an unrelated change. If meaningful testing is blocked by missing infrastructure, explain the gap and propose the smallest follow-up.
 
 ### Verification matrix
 

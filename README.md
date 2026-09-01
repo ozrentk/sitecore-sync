@@ -213,6 +213,16 @@ Set breakpoints in `src/extension.ts`; VS Code uses the generated source maps wh
 
 For continuous compilation, run `npm run watch` in a terminal. You still reload the Extension Development Host after compiled code changes.
 
+## Run tests
+
+```powershell
+npm test
+```
+
+The unit-test harness uses Node's built-in test runner with `tsx` for TypeScript execution. Tests live under `test/unit/`. The initial suite contains only a harness check; application behavior tests have not been added yet.
+
+Run `npm run check` to type-check both the extension source and the test suite.
+
 ## Build an installable extension
 
 ```powershell

@@ -609,7 +609,10 @@
     "clean": "node ./scripts/clean.mjs",
     "compile": "npm run check && node ./scripts/build.mjs",
     "watch": "tsc -watch -p ./",
-    "check": "tsc --noEmit -p ./",
+    "check": "npm run check:extension && npm run check:tests",
+    "check:extension": "tsc --noEmit -p ./",
+    "check:tests": "tsc --noEmit -p ./tsconfig.test.json",
+    "test": "npm run check:tests && tsx --test \"test/unit/**/*.test.ts\"",
     "vscode:prepublish": "npm run clean && npm run compile",
     "prepackage": "node ./scripts/prepare-package.mjs",
     "package": "vsce package --allow-missing-repository --out ./dist/sitecore-xm-cloud-sync.vsix"
@@ -619,6 +622,7 @@
     "@types/vscode": "^1.100.0",
     "@vscode/vsce": "^3.6.0",
     "esbuild": "^0.25.0",
+    "tsx": "^4.23.13",
     "typescript": "^5.9.0"
   },
   "dependencies": {
