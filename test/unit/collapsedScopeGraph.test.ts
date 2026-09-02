@@ -141,6 +141,73 @@ test("delegates descendants and plans edges between selected scope roots", async
   );
 });
 
+test("deduplicates repeated children, edges, snapshots, and scope references", async () => {
+  const root = item(
+    rootId,
+    "/sitecore/content/Tenant/Home",
+    true,
+    [
+      field("Related", "Multilist", childId, false, "related-one"),
+      field("Related", "Multilist", childId, false, "related-two"),
+      field(
+        "Hero Image",
+        "Image",
+        `<image mediaid="${mediaId}" />`,
+        false,
+        "image-one",
+      ),
+      field(
+        "Hero Image",
+        "Image",
+        `<image mediaid="${mediaId}" />`,
+        false,
+        "image-two",
+      ),
+    ],
+  );
+  const child = item(
+    childId,
+    "/sitecore/content/Tenant/Home/Child",
+  );
+  const media = item(
+    mediaId,
+    "/sitecore/media library/Images/Hero",
+  );
+  const loader = new MemoryGraphLoader(
+    [root, child, media],
+    new Map([[normalizedId(rootId), [child, child]]]),
+  );
+  const graph = new CollapsedScopeGraph(root, true, loader);
+  const rootScopeId = graph.state().rootScopeId;
+
+  await graph.scan(rootScopeId, new AbortController().signal, ignoreReport);
+  const rootNode = graph.state().nodes[0];
+  strictEqual(rootNode?.inspectedItemCount, 2);
+  strictEqual(rootNode?.outgoingReferences.length, 1);
+  strictEqual(graph.state().nodes.length, 2);
+
+  await graph.scan(
+    normalizedId(mediaId),
+    new AbortController().signal,
+    ignoreReport,
+  );
+  const plan = graph.plan([rootScopeId, normalizedId(mediaId)]);
+
+  deepStrictEqual(
+    plan.snapshots.map((snapshot) => snapshot.itemId),
+    [rootId, childId, mediaId],
+  );
+  deepStrictEqual(plan.concreteEdges, [
+    { sourceItemId: rootId, targetItemId: childId, fieldName: "Related" },
+    { sourceItemId: rootId, targetItemId: mediaId, fieldName: "Hero Image" },
+  ]);
+  deepStrictEqual(plan.planningEdges, [{
+    sourceItemId: rootId,
+    targetItemId: mediaId,
+    fieldName: "Hero Image",
+  }]);
+});
+
 test("pauses at the item budget and resumes from pending descendants", async () => {
   const root = item(
     rootId,
@@ -409,9 +476,10 @@ function field(
   type: string,
   value: string,
   isStandardTemplate = false,
+  fieldId = name,
 ): AuthoringItemField {
   return {
-    fieldId: name,
+    fieldId,
     name,
     label: name,
     value,
