@@ -612,7 +612,10 @@
     "check": "npm run check:extension && npm run check:tests",
     "check:extension": "tsc --noEmit -p ./",
     "check:tests": "tsc --noEmit -p ./tsconfig.test.json",
-    "test": "npm run check:tests && tsx --test \"test/unit/**/*.test.ts\"",
+    "test": "npm run test:unit",
+    "test:unit": "npm run check:tests && tsx --test \"test/unit/**/*.test.ts\"",
+    "test:integration": "npm run compile && node ./scripts/run-extension-tests.mjs",
+    "test:all": "npm run test:unit && npm run test:integration",
     "vscode:prepublish": "npm run clean && npm run compile",
     "prepackage": "node ./scripts/prepare-package.mjs",
     "package": "vsce package --allow-missing-repository --out ./dist/sitecore-xm-cloud-sync.vsix"
@@ -620,6 +623,7 @@
   "devDependencies": {
     "@types/node": "^24.0.0",
     "@types/vscode": "^1.100.0",
+    "@vscode/test-electron": "^2.5.2",
     "@vscode/vsce": "^3.6.0",
     "esbuild": "^0.25.0",
     "tsx": "^4.23.13",

@@ -1,6 +1,8 @@
 .vscode/**
 .agents/**
 .xm-cloud-sync/**
+.test-out/**
+.vscode-test/**
 .gitignore
 src/**
 test/**

@@ -36,8 +36,10 @@ Use the checked-in lockfile and install dependencies with `npm ci` when a clean 
 
 - `npm run check` — strict TypeScript validation without emitting files.
 - `npm run check:extension` — type-check only the extension source.
-- `npm run check:tests` — type-check the unit-test suite.
-- `npm test` — type-check and run the TypeScript unit-test suite.
+- `npm run check:tests` — type-check the unit and extension-host test sources.
+- `npm test` or `npm run test:unit` — type-check and run the TypeScript unit-test suite.
+- `npm run test:integration` — compile the extension and run smoke tests in VS Code 1.100.0.
+- `npm run test:all` — run both unit and extension-host suites.
 - `npm run compile` — run the type check and build `out/extension.js` with the project build script.
 - `npm run watch` — continuously compile TypeScript during development.
 - `npm run clean` — remove generated build output through the project script.
@@ -104,9 +106,9 @@ Prefer repository scripts over ad hoc compiler, bundler, or packaging commands. 
 
 ### Current state
 
-The repository has a TypeScript unit-test suite under `test/unit/`. It uses Node's built-in test runner, Node's strict assertion API, and `tsx`, and runs through `npm test`. Initial coverage includes XM Cloud server URL normalization, Sitecore reference discovery, and collapsed Power Publish scope graph planning. Extension-host integration testing is not configured.
+The repository has a TypeScript unit-test suite under `test/unit/`. It uses Node's built-in test runner, Node's strict assertion API, and `tsx`, and runs through `npm test`. Initial coverage includes XM Cloud server URL normalization, Sitecore reference discovery, and collapsed Power Publish scope graph planning. The extension-host smoke suite under `test/integration/` uses `@vscode/test-electron` and covers activation, contributed-command registration, and configuration defaults through `npm run test:integration`.
 
-Run `npm test` for unit-test changes. Continue to verify VS Code integration changes with focused manual checks in an Extension Development Host until an extension-host suite is introduced. Record exactly what was and was not exercised.
+Run `npm test` for unit-test changes and `npm run test:integration` for extension activation, manifest wiring, or configuration changes. Continue to perform focused manual Extension Development Host checks for UI behavior that the smoke suite does not exercise. Record exactly what was and was not exercised.
 
 ### Expectations for changed behavior
 
