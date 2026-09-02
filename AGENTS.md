@@ -104,7 +104,7 @@ Prefer repository scripts over ad hoc compiler, bundler, or packaging commands. 
 
 ### Current state
 
-The repository has a TypeScript unit-test suite under `test/unit/`. It uses Node's built-in test runner, Node's strict assertion API, and `tsx`, and runs through `npm test`. Initial coverage includes XM Cloud server URL normalization and Sitecore reference discovery. Extension-host integration testing is not configured.
+The repository has a TypeScript unit-test suite under `test/unit/`. It uses Node's built-in test runner, Node's strict assertion API, and `tsx`, and runs through `npm test`. Initial coverage includes XM Cloud server URL normalization, Sitecore reference discovery, and collapsed Power Publish scope graph planning. Extension-host integration testing is not configured.
 
 Run `npm test` for unit-test changes. Continue to verify VS Code integration changes with focused manual checks in an Extension Development Host until an extension-host suite is introduced. Record exactly what was and was not exercised.
 
