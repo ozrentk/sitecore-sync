@@ -213,6 +213,24 @@ Set breakpoints in `src/extension.ts`; VS Code uses the generated source maps wh
 
 For continuous compilation, run `npm run watch` in a terminal. You still reload the Extension Development Host after compiled code changes.
 
+## Run tests
+
+```powershell
+npm test
+```
+
+The unit-test harness uses Node's built-in test runner with `tsx` for TypeScript execution. Tests live under `test/unit/`. Initial coverage exercises XM Cloud server URL normalization, Sitecore reference discovery, and collapsed Power Publish scope graph planning.
+
+Run `npm run check` to type-check both the extension source and the test suite.
+
+Run the extension-host smoke suite separately:
+
+```powershell
+npm run test:integration
+```
+
+The first integration run downloads VS Code 1.100.0 into `.vscode-test/`, then launches an isolated Extension Development Host against an empty temporary workspace. It verifies activation, contributed-command registration, and the default extension configuration without contacting Sitecore. Run `npm run test:all` to execute both unit and extension-host suites.
+
 ## Build an installable extension
 
 ```powershell
