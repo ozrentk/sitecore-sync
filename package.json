@@ -613,7 +613,7 @@
     "check:extension": "tsc --noEmit -p ./",
     "check:tests": "tsc --noEmit -p ./tsconfig.test.json",
     "test": "npm run test:unit",
-    "test:unit": "npm run check:tests && tsx --test \"test/unit/**/*.test.ts\"",
+    "test:unit": "npm run check:tests && node ./scripts/run-unit-tests.mjs",
     "test:integration": "npm run compile && node ./scripts/run-extension-tests.mjs",
     "test:all": "npm run test:unit && npm run test:integration",
     "vscode:prepublish": "npm run clean && npm run compile",
