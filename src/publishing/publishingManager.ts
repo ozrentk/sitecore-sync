@@ -18,6 +18,7 @@ import {
   verifyBrowserDom,
   type BrowserDomAssertion,
 } from "./browserDomVerifier";
+import { evaluateApplicationResponse } from "./applicationVerification";
 import {
   CollapsedScopeGraph,
   type CollapsedScopeGraphPlan,
@@ -1728,59 +1729,17 @@ export class PublishingManager implements vscode.Disposable {
     );
     try {
       const result = await this.edge.probeApplication(initialRun.applicationUrl, signal);
-      const evidence = [
-        `URL: ${initialRun.applicationUrl}`,
-        `HTTP ${result.status}`,
-        ...Object.entries(result.headers).map(([name, value]) => `${name}: ${value}`),
-      ];
-      const explicitFieldSelection = Boolean(run.fieldSelections?.length);
-      const candidateValues = run.snapshots.flatMap((snapshot) =>
-        expectedFieldsForSnapshot(run, snapshot)
-          .filter(([, value]) => value.trim().length >= 3)
-          .map(([name, value]) => ({ path: snapshot.path, name, value }))
+      const outcome = evaluateApplicationResponse(
+        run,
+        initialRun.applicationUrl,
+        result,
       );
-      const matchedValues = candidateValues.filter((candidate) =>
-        result.body.includes(candidate.value)
-      );
-      const healthyStatus = result.status >= 200 && result.status < 400;
-      const contentMatched = candidateValues.length === 0 ||
-        (explicitFieldSelection
-          ? matchedValues.length === candidateValues.length
-          : matchedValues.length > 0);
-      const stageStatus: TraceStageStatus = !healthyStatus
-        ? "diverged"
-        : contentMatched
-          ? "matched"
-          : "inconclusive";
       run = await this.setStage(
         run,
         "application",
-        stageStatus,
-        stageStatus === "matched"
-          ? matchedValues.length
-            ? explicitFieldSelection
-              ? `The public application response contains all ${matchedValues.length} selected textual value(s).`
-              : `The public application response contains ${matchedValues.length} expected value(s).`
-            : "The public application response was successful; no textual assertions were available."
-          : stageStatus === "inconclusive"
-            ? matchedValues.length
-              ? `The response was successful but exposed only ${matchedValues.length}/${candidateValues.length} selected textual value(s). Browser-rendered DOM was not evaluated.`
-              : "The response was successful but did not expose the expected text in its server response. Browser-rendered DOM was not evaluated."
-            : `The application returned HTTP ${result.status}.`,
-        [
-          ...evidence,
-          ...matchedValues.slice(0, 20).map((candidate) =>
-            `Matched ${candidate.path}: ${candidate.name}`
-          ),
-          ...(explicitFieldSelection
-            ? candidateValues
-                .filter((candidate) => !matchedValues.includes(candidate))
-                .slice(0, 20)
-                .map((candidate) =>
-                  `Missing ${candidate.path} › ${candidate.name}: ${formatFieldValue(candidate.value)}`
-                )
-            : []),
-        ],
+        outcome.status,
+        outcome.summary,
+        outcome.evidence,
       );
     } catch (error: unknown) {
       run = await this.setStage(
