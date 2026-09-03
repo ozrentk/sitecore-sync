@@ -32,6 +32,13 @@ import {
   prepareDiagnosticRetry,
   prepareStatusRecheck,
 } from "./publishingRunTransitions";
+import {
+  deduplicateIds,
+  deduplicateSnapshots,
+  expectedFieldsForSnapshot,
+  powerExpectedFieldsForSnapshot,
+  versionlessSnapshotEvidence,
+} from "./publishingVerification";
 import type {
   PublishKind,
   PublishBatch,
@@ -2877,67 +2884,10 @@ function canonicalSiteName(
   )?.name;
 }
 
-function expectedFieldsForSnapshot(
-  run: PublishRun,
-  snapshot: PublishSnapshot,
-): readonly (readonly [string, string])[] {
-  if (!run.fieldSelections?.length) {
-    return Object.entries(snapshot.fields).filter(([, expected]) => expected.length > 0);
-  }
-  return run.fieldSelections
-    .filter((field) => normalizeId(field.itemId) === normalizeId(snapshot.itemId))
-    .map((field) => [field.fieldName, snapshot.fields[field.fieldName] ?? ""] as const);
-}
-
 interface PowerEdgeObservation {
   readonly evidence: readonly string[];
   readonly divergences: readonly string[];
   readonly divergentItemId?: string;
-}
-
-function powerExpectedFieldsForSnapshot(
-  run: PublishRun,
-  snapshot: PublishSnapshot,
-): readonly (readonly [string, string | undefined])[] {
-  const fieldNames = new Set([
-    ...(run.fieldSelections ?? [])
-      .filter((selection) =>
-        normalizeId(selection.itemId) === normalizeId(snapshot.itemId)
-      )
-      .map((selection) => selection.fieldName),
-    ...run.referenceEdges
-      .filter((edge) =>
-        normalizeId(edge.sourceItemId) === normalizeId(snapshot.itemId)
-      )
-      .map((edge) => edge.fieldName),
-  ]);
-  return [...fieldNames].map((fieldName) => [fieldName, snapshot.fields[fieldName]] as const);
-}
-
-function deduplicateSnapshots(
-  snapshots: readonly PublishSnapshot[],
-): readonly PublishSnapshot[] {
-  const seen = new Set<string>();
-  return snapshots.filter((snapshot) => {
-    const key = normalizeId(snapshot.itemId);
-    if (seen.has(key)) {
-      return false;
-    }
-    seen.add(key);
-    return true;
-  });
-}
-
-function deduplicateIds(ids: readonly string[]): readonly string[] {
-  const seen = new Set<string>();
-  return ids.filter((id) => {
-    const key = normalizeId(id);
-    if (seen.has(key)) {
-      return false;
-    }
-    seen.add(key);
-    return true;
-  });
 }
 
 async function mapWithConcurrency<T, TResult>(
@@ -3474,17 +3424,6 @@ function powerEdgeEvidence(
   return snapshots.flatMap((snapshot) =>
     observations.get(normalizeId(snapshot.itemId))?.[kind] ?? []
   );
-}
-
-function versionlessSnapshotEvidence(
-  snapshots: readonly PublishSnapshot[],
-  language: string,
-): readonly string[] {
-  return snapshots
-    .filter((snapshot) => snapshot.version <= 0)
-    .map((snapshot) =>
-      `${snapshot.path}: skipped Raw Experience Edge identity verification because Authoring reported no ${language} language version (version 0).`
-    );
 }
 
 function normalizeId(value: string): string {
