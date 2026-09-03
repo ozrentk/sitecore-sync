@@ -24,6 +24,7 @@ import {
 } from "./collapsedScopeGraph";
 import { showPowerPublishScopeForm } from "./powerPublishScopeForm";
 import { parseReferenceField } from "./referenceDiscovery";
+import { readPublishingProfiles, readPublishRuns } from "./publishingRunState";
 import type {
   PublishKind,
   PublishBatch,
@@ -2749,20 +2750,11 @@ export class PublishingManager implements vscode.Disposable {
   }
 
   private listRuns(): readonly PublishRun[] {
-    const value = this.workspaceState.get<unknown>(runsKey, []);
-    if (!Array.isArray(value)) {
-      return [];
-    }
-    return value.filter(isPublishRun).sort((left, right) =>
-      right.createdAt.localeCompare(left.createdAt)
-    );
+    return readPublishRuns(this.workspaceState.get<unknown>(runsKey, []));
   }
 
   private listProfiles(): readonly PublishingSiteProfile[] {
-    const value = this.globalState.get<unknown>(profilesKey, []);
-    return Array.isArray(value)
-      ? value.filter(isPublishingProfile)
-      : [];
+    return readPublishingProfiles(this.globalState.get<unknown>(profilesKey, []));
   }
 
   private async saveProfile(profile: PublishingSiteProfile, token: string): Promise<void> {
@@ -3933,26 +3925,6 @@ function validateHttpsUrl(value: string): string | undefined {
   } catch {
     return "Enter a valid HTTPS URL.";
   }
-}
-
-function isPublishRun(value: unknown): value is PublishRun {
-  if (!value || typeof value !== "object") {
-    return false;
-  }
-  const candidate = value as Partial<PublishRun>;
-  return typeof candidate.id === "string" &&
-    typeof candidate.kind === "string" &&
-    typeof candidate.connectionId === "string" &&
-    typeof candidate.createdAt === "string" &&
-    Array.isArray(candidate.stages);
-}
-
-function isPublishingProfile(value: unknown): value is PublishingSiteProfile {
-  if (!value || typeof value !== "object") {
-    return false;
-  }
-  const candidate = value as Partial<PublishingSiteProfile>;
-  return typeof candidate.connectionId === "string" && typeof candidate.edgeEndpoint === "string";
 }
 
 function escapeHtml(value: string): string {
