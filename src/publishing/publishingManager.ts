@@ -25,6 +25,7 @@ import {
 import { powerPublishBatches, powerRepairBatches } from "./powerPublishPlanning";
 import { showPowerPublishScopeForm } from "./powerPublishScopeForm";
 import { parseReferenceField } from "./referenceDiscovery";
+import { evaluateRenderedLayout } from "./renderedLayoutVerification";
 import { readPublishingProfiles, readPublishRuns } from "./publishingRunState";
 import {
   diagnosticStageIds,
@@ -55,7 +56,6 @@ import type {
   PublishTarget,
   PublishTraceAttempt,
   PublishingSiteProfile,
-  ReferenceEdge,
   TraceStage,
   TraceStageStatus,
 } from "./publishingTypes";
@@ -1697,66 +1697,13 @@ export class PublishingManager implements vscode.Disposable {
         "Experience Edge did not resolve a rendered layout for the route.",
       );
     }
-    const selectedFieldCount = run.fieldSelections?.length ?? 0;
-    const snapshotsToInspect = selectedFieldCount
-      ? run.snapshots.filter((snapshot) =>
-          expectedFieldsForSnapshot(run, snapshot).length > 0
-        )
-      : run.snapshots;
-    const layoutEvidence = snapshotsToInspect.map((snapshot) => {
-      const selectedFieldNames = selectedFieldCount
-        ? expectedFieldsForSnapshot(run, snapshot).map(([name]) => name)
-        : undefined;
-      if (
-        !selectedFieldNames &&
-        normalizeId(snapshot.itemId) === normalizeId(run.rootItemId) &&
-        layout.itemId &&
-        normalizeId(layout.itemId) === normalizeId(snapshot.itemId)
-      ) {
-        return {
-          path: snapshot.path,
-          itemId: snapshot.itemId,
-          found: true,
-          fieldMismatches: [] as readonly string[],
-          fieldMatches: [] as readonly string[],
-        };
-      }
-      return inspectRenderedSnapshot(layout.rendered, snapshot, selectedFieldNames);
-    });
-    const missingIds = layoutEvidence
-      .filter((evidence) => !evidence.found)
-      .map((evidence) => `${evidence.path}: item ${evidence.itemId} was not exposed in rendered data`);
-    const fieldMismatches = layoutEvidence.flatMap((evidence) => evidence.fieldMismatches);
-    const fieldMatches = layoutEvidence.flatMap((evidence) => evidence.fieldMatches);
-    const rootMismatch = !layout.itemId
-      ? ["Rendered layout did not identify its route item."]
-      : settings.routeItemId && normalizeId(layout.itemId) !== normalizeId(settings.routeItemId)
-        ? [`Route resolved to ${layout.itemId}, expected pre-publish route item ${settings.routeItemId}`]
-        : [];
-    const referenceMismatches = run.referenceEdges.flatMap((edge) => {
-      const inspection = inspectRenderedReference(layout.rendered, edge);
-      return inspection.sourceFound && !inspection.targetFound
-        ? [`${shortId(edge.sourceItemId)} did not reference ${shortId(edge.targetItemId)} through ${edge.fieldName}`]
-        : [];
-    });
-    const divergences = [
-      ...rootMismatch,
-      ...fieldMismatches,
-      ...referenceMismatches,
-      ...(selectedFieldCount ? missingIds : []),
-    ];
+    const outcome = evaluateRenderedLayout(run, layout, settings.routeItemId);
     run = await this.setStage(
       run,
       "edgeLayout",
-      divergences.length ? "diverged" : "matched",
-      divergences.length
-        ? selectedFieldCount
-          ? "The rendered layout did not expose every selected field value."
-          : "The rendered layout did not match every observed item and scoped field value."
-        : selectedFieldCount
-          ? `${selectedFieldCount} selected field value(s) matched in the rendered layout.`
-          : "The rendered route identity and observable reference chains matched.",
-      [...divergences, ...fieldMatches, ...(selectedFieldCount ? [] : missingIds)],
+      outcome.status,
+      outcome.summary,
+      outcome.evidence,
     );
     return run;
   }
@@ -2899,170 +2846,6 @@ function externalScopeReferenceEvidence(
         `${evidence.length - maximumEvidence} additional outside-scope reference(s) omitted.`,
       ]
     : evidence;
-}
-
-function inspectRenderedSnapshot(
-  rendered: string,
-  snapshot: PublishSnapshot,
-  selectedFieldNames?: readonly string[],
-): {
-  readonly path: string;
-  readonly itemId: string;
-  readonly found: boolean;
-  readonly fieldMismatches: readonly string[];
-  readonly fieldMatches: readonly string[];
-} {
-  let root: unknown;
-  try {
-    root = JSON.parse(rendered) as unknown;
-  } catch {
-    const found = normalizeId(rendered).includes(normalizeId(snapshot.itemId));
-    return {
-      path: snapshot.path,
-      itemId: snapshot.itemId,
-      found,
-      fieldMismatches: selectedFieldNames?.map((name) =>
-        `${snapshot.path} › ${name}: rendered layout data could not be inspected`
-      ) ?? [],
-      fieldMatches: [],
-    };
-  }
-  const candidates: unknown[] = [];
-  walkObjects(root, (value) => {
-    if (Object.values(value).some((candidate) =>
-      typeof candidate === "string" &&
-      normalizeId(candidate) === normalizeId(snapshot.itemId)
-    )) {
-      candidates.push(value);
-    }
-  });
-  if (candidates.length === 0) {
-    return {
-      path: snapshot.path,
-      itemId: snapshot.itemId,
-      found: false,
-      fieldMismatches: [],
-      fieldMatches: [],
-    };
-  }
-  const actualFields = new Map<string, Set<string>>();
-  for (const candidate of candidates) {
-    collectNamedFieldValues(candidate, actualFields);
-  }
-  const expectedFields = selectedFieldNames
-    ? selectedFieldNames.map((name) => [name, snapshot.fields[name]] as const)
-    : Object.entries(snapshot.fields).filter(([name]) => actualFields.has(name));
-  const fieldMismatches: string[] = [];
-  const fieldMatches: string[] = [];
-  for (const [name, expected] of expectedFields) {
-    const expectedValue = expected ?? "";
-    const observedValues = actualFields.get(name);
-    if (!observedValues || observedValues.size === 0) {
-      fieldMismatches.push(
-        `${snapshot.path} › ${name}: not observable in rendered layout; expected ${formatFieldValue(expectedValue)}`,
-      );
-    } else if (!observedValues.has(expectedValue)) {
-      const renderedValues = [...observedValues].map(formatFieldValue).join(", ");
-      fieldMismatches.push(
-        `${snapshot.path} › ${name}: expected ${formatFieldValue(expectedValue)}, ` +
-        `rendered layout exposed ${renderedValues} across ${candidates.length} matching object(s)`,
-      );
-    } else if (selectedFieldNames) {
-      const observation = observedValues.size > 1
-        ? ` matched among ${observedValues.size} observed values`
-        : " matched";
-      fieldMatches.push(
-        `${snapshot.path} › ${name}: ${formatFieldValue(expectedValue)}${observation} ` +
-        `across ${candidates.length} matching object(s)`,
-      );
-    }
-  }
-  return {
-    path: snapshot.path,
-    itemId: snapshot.itemId,
-    found: candidates.length > 0,
-    fieldMismatches,
-    fieldMatches,
-  };
-}
-
-function inspectRenderedReference(
-  rendered: string,
-  edge: ReferenceEdge,
-): { readonly sourceFound: boolean; readonly targetFound: boolean } {
-  let root: unknown;
-  try {
-    root = JSON.parse(rendered) as unknown;
-  } catch {
-    return { sourceFound: false, targetFound: false };
-  }
-  const sourceCandidates: Readonly<Record<string, unknown>>[] = [];
-  walkObjects(root, (value) => {
-    if (Object.values(value).some((candidate) =>
-      typeof candidate === "string" &&
-      normalizeId(candidate) === normalizeId(edge.sourceItemId)
-    )) {
-      sourceCandidates.push(value);
-    }
-  });
-  return {
-    sourceFound: sourceCandidates.length > 0,
-    targetFound: sourceCandidates.some((candidate) =>
-      normalizeId(JSON.stringify(candidate)).includes(normalizeId(edge.targetItemId))
-    ),
-  };
-}
-
-function walkObjects(
-  value: unknown,
-  visitor: (value: Readonly<Record<string, unknown>>) => void,
-): void {
-  if (!value || typeof value !== "object") {
-    return;
-  }
-  if (Array.isArray(value)) {
-    for (const entry of value) {
-      walkObjects(entry, visitor);
-    }
-    return;
-  }
-  const record = value as Readonly<Record<string, unknown>>;
-  visitor(record);
-  for (const entry of Object.values(record)) {
-    walkObjects(entry, visitor);
-  }
-}
-
-function collectNamedFieldValues(
-  value: unknown,
-  target: Map<string, Set<string>>,
-): void {
-  const add = (name: string, fieldValue: string): void => {
-    const values = target.get(name) ?? new Set<string>();
-    values.add(fieldValue);
-    target.set(name, values);
-  };
-  walkObjects(value, (record) => {
-    if (typeof record.name === "string" && typeof record.value === "string") {
-      add(record.name, record.value);
-    }
-    const fields = record.fields;
-    if (!fields || typeof fields !== "object" || Array.isArray(fields)) {
-      return;
-    }
-    for (const [name, field] of Object.entries(fields)) {
-      if (typeof field === "string") {
-        add(name, field);
-      } else if (
-        field &&
-        typeof field === "object" &&
-        !Array.isArray(field) &&
-        typeof (field as Readonly<Record<string, unknown>>).value === "string"
-      ) {
-        add(name, (field as Readonly<Record<string, string>>).value);
-      }
-    }
-  });
 }
 
 function initialStages(
