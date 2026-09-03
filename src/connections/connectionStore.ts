@@ -186,6 +186,7 @@ export class ConnectionStore implements vscode.Disposable {
     if (!connection) {
       throw new Error("The XM Cloud connection no longer exists.");
     }
+    const previousSecret = await this.secrets.get(deploymentSecretKey(connectionId));
     await this.secrets.store(deploymentSecretKey(connectionId), clientSecret);
     try {
       await this.globalState.update(
@@ -199,7 +200,11 @@ export class ConnectionStore implements vscode.Disposable {
           : candidate),
       );
     } catch (error: unknown) {
-      await this.secrets.delete(deploymentSecretKey(connectionId));
+      if (previousSecret === undefined) {
+        await this.secrets.delete(deploymentSecretKey(connectionId));
+      } else {
+        await this.secrets.store(deploymentSecretKey(connectionId), previousSecret);
+      }
       throw error;
     }
     this.changeEmitter.fire();
