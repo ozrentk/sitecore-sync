@@ -1,10 +1,10 @@
 import { randomUUID } from "node:crypto";
-import * as vscode from "vscode";
+import type * as vscode from "vscode";
 import type { TransferProcessor } from "../transfers/transferProcessor";
 import type { TransferQueueStore } from "../transfers/transferQueueStore";
 import type { OperationRecord } from "../transfers/transferTypes";
-import { OperationIntentService } from "./operationIntentService";
-import { OperationSequenceStore } from "./operationSequenceStore";
+import type { OperationIntentService } from "./operationIntentService";
+import type { OperationSequenceStore } from "./operationSequenceStore";
 import type {
   OperationSequenceRun,
   SavedOperationSequence,
