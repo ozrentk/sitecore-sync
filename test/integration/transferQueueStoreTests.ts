@@ -23,7 +23,7 @@ interface IntegrationTest {
   readonly execute: () => Promise<void>;
 }
 
-class MemoryMemento implements vscode.Memento {
+export class MemoryMemento implements vscode.Memento {
   readonly writes: unknown[] = [];
   updateCalls = 0;
   updateOverride:
@@ -463,7 +463,7 @@ export const transferQueueStoreTests: readonly IntegrationTest[] = [
   },
 ];
 
-function fieldDraft(
+export function fieldDraft(
   duplicateKey: string,
   sourceConnectionId = "source-connection",
   targetConnectionId = "target-connection",
@@ -492,7 +492,7 @@ function fieldEndpoint(connectionId: string, side: string) {
   };
 }
 
-function subtreeDraft(
+export function subtreeDraft(
   duplicateKey: string,
   sourceConnectionId = "source-connection",
   targetConnectionId = "target-connection",
@@ -515,7 +515,7 @@ function subtreeDraft(
   };
 }
 
-function publishingDraft(duplicateKey: string): PublishingOperationDraft {
+export function publishingDraft(duplicateKey: string): PublishingOperationDraft {
   return {
     kind: "publishing",
     duplicateKey,
@@ -571,7 +571,7 @@ function publishingRecord(
   };
 }
 
-function pendingCheckpoint(): NonNullable<SubtreeTransferRecord["checkpoint"]> {
+export function pendingCheckpoint(): NonNullable<SubtreeTransferRecord["checkpoint"]> {
   return {
     state: "Pending",
     transferId: "transfer-id",
