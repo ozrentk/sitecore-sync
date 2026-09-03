@@ -40,23 +40,35 @@ export const operationSequenceStoreTests: readonly IntegrationTest[] = [
   {
     name: "OperationSequenceStore filters malformed state and recovers interrupted runs",
     async execute(): Promise<void> {
-      const saved = definition("saved", "Saved", [fieldIntent()]);
-      const interrupted = sequenceRun(
-        "interrupted",
-        saved,
-        "running",
-        "2026-04-01T00:00:00.000Z",
-        [
-          operationResult(0, "completed"),
-          operationResult(1, "running"),
-          operationResult(2, "pending"),
-        ],
-      );
+      const saved = definition("saved", "Saved", [
+        fieldIntent(),
+        fieldIntent(),
+        fieldIntent(),
+      ]);
+      const interrupted = {
+        ...sequenceRun(
+          "interrupted",
+          saved,
+          "running",
+          "2026-04-01T00:00:00.000Z",
+          [
+            operationResult(0, "completed"),
+            operationResult(1, "running"),
+            operationResult(2, "pending"),
+          ],
+        ),
+        currentOperationIndex: 1,
+      };
       const paused = sequenceRun(
         "paused",
         saved,
         "paused",
         "2026-04-02T00:00:00.000Z",
+        [
+          operationResult(0, "pending"),
+          operationResult(1, "pending"),
+          operationResult(2, "pending"),
+        ],
       );
       const runtime = new TestRuntime();
       const store = new OperationSequenceStore(new MemoryMemento({

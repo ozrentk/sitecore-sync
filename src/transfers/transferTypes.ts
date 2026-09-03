@@ -5,9 +5,10 @@ import type {
   ContentTransferResult,
 } from "../sitecore/authoringClient";
 import type { DeploymentBaseline } from "../sitecore/deploymentClient";
-import type {
-  OperationIntent,
-  SequenceOperationContext,
+import {
+  isOperationIntent,
+  type OperationIntent,
+  type SequenceOperationContext,
 } from "../operations/operationTypes";
 
 export type TransferProcessorState = "paused" | "running" | "pausing";
@@ -213,53 +214,198 @@ function normalizeId(value: string): string {
 }
 
 export function isTransferRecord(value: unknown): value is TransferRecord {
-  if (!value || typeof value !== "object") {
+  if (!isRecord(value) || !isRecordBase(value)) {
     return false;
   }
-  const candidate = value as Partial<TransferRecord>;
-  return (
-    typeof candidate.id === "string" &&
-    typeof candidate.sequence === "number" &&
-    typeof candidate.duplicateKey === "string" &&
-    typeof candidate.enqueuedAt === "string" &&
-    (candidate.kind === "fieldValue" || candidate.kind === "subtree") &&
-    [
-      "queued",
-      "preflighting",
-      "executing",
-      "waitingForSitecore",
-      "verifying",
-      "failed",
-      "completed",
-    ].includes(String(candidate.status))
-  );
+  if (value.kind === "fieldValue") {
+    return (value.direction === "leftToRight" || value.direction === "rightToLeft") &&
+      isFieldTransferEndpoint(value.source) &&
+      isFieldTransferEndpoint(value.target);
+  }
+  if (value.kind === "subtree") {
+    return (value.mode === undefined || isSubtreeTransferMode(value.mode)) &&
+      (value.direction === "leftToRight" || value.direction === "rightToLeft") &&
+      typeof value.sourceConnectionId === "string" &&
+      typeof value.sourceConnectionName === "string" &&
+      typeof value.targetConnectionId === "string" &&
+      typeof value.targetConnectionName === "string" &&
+      typeof value.sourceItemId === "string" &&
+      typeof value.sourcePath === "string" &&
+      typeof value.sourceLanguage === "string" &&
+      typeof value.targetLanguage === "string" &&
+      typeof value.comparisonRowKey === "string" &&
+      (value.targetSide === "left" || value.targetSide === "right") &&
+      Array.isArray(value.targetRefreshPlan) &&
+      value.targetRefreshPlan.every(isTransferRefreshPlanEntry) &&
+      (value.preflight === undefined || isSubtreeTransferPreflight(value.preflight)) &&
+      (value.checkpoint === undefined || isContentTransferResult(value.checkpoint)) &&
+      (value.progress === undefined || isSubtreeProgress(value.progress)) &&
+      (value.deploymentBaselines === undefined ||
+        isDeploymentBaselines(value.deploymentBaselines)) &&
+      (value.failureKind === undefined || value.failureKind === "deploymentChanged");
+  }
+  return false;
 }
 
 export function isOperationRecord(value: unknown): value is OperationRecord {
-  if (!value || typeof value !== "object") {
+  if (!isRecord(value)) {
     return false;
   }
-  const candidate = value as Partial<OperationRecord>;
-  if (candidate.kind !== "publishing") {
+  if (value.kind !== "publishing") {
     return isTransferRecord(value);
   }
-  return (
-    typeof candidate.id === "string" &&
-    typeof candidate.sequence === "number" &&
-    typeof candidate.duplicateKey === "string" &&
-    typeof candidate.enqueuedAt === "string" &&
-    typeof candidate.publishRunId === "string" &&
-    typeof candidate.connectionId === "string" &&
-    typeof candidate.itemPath === "string" &&
-    ["standard", "traced", "power"].includes(String(candidate.publishKind)) &&
-    [
-      "queued",
-      "preflighting",
-      "executing",
-      "waitingForSitecore",
-      "verifying",
-      "failed",
-      "completed",
-    ].includes(String(candidate.status))
-  );
+  return isRecordBase(value) &&
+    typeof value.publishRunId === "string" &&
+    typeof value.connectionId === "string" &&
+    typeof value.connectionName === "string" &&
+    typeof value.itemId === "string" &&
+    typeof value.itemPath === "string" &&
+    typeof value.language === "string" &&
+    (value.publishKind === "standard" ||
+      value.publishKind === "traced" ||
+      value.publishKind === "power") &&
+    (value.progressSummary === undefined || typeof value.progressSummary === "string");
+}
+
+function isRecordBase(value: Readonly<Record<string, unknown>>): boolean {
+  const hasSequenceRunId = value.sequenceRunId !== undefined;
+  const hasSequenceOperationIndex = value.sequenceOperationIndex !== undefined;
+  return typeof value.id === "string" &&
+    isNonNegativeInteger(value.sequence) &&
+    typeof value.duplicateKey === "string" &&
+    typeof value.enqueuedAt === "string" &&
+    isTransferRecordStatus(value.status) &&
+    optionalString(value.startedAt) &&
+    optionalString(value.completedAt) &&
+    optionalString(value.error) &&
+    optionalString(value.journalPath) &&
+    (
+      value.intent === undefined ||
+      isOperationIntent(value.intent) && value.intent.kind === value.kind
+    ) &&
+    hasSequenceRunId === hasSequenceOperationIndex &&
+    (!hasSequenceRunId ||
+      typeof value.sequenceRunId === "string" &&
+      isNonNegativeInteger(value.sequenceOperationIndex));
+}
+
+function isFieldTransferEndpoint(value: unknown): value is FieldTransferEndpoint {
+  return isRecord(value) &&
+    typeof value.connectionId === "string" &&
+    typeof value.connectionName === "string" &&
+    typeof value.itemId === "string" &&
+    typeof value.itemPath === "string" &&
+    typeof value.language === "string" &&
+    isNonNegativeInteger(value.version) &&
+    typeof value.fieldId === "string" &&
+    typeof value.fieldName === "string" &&
+    typeof value.fieldLabel === "string" &&
+    typeof value.fingerprint === "string";
+}
+
+function isTransferRefreshPlanEntry(value: unknown): value is TransferRefreshPlanEntry {
+  return isRecord(value) &&
+    typeof value.itemId === "string" &&
+    typeof value.path === "string" &&
+    isNonNegativeInteger(value.depth) &&
+    typeof value.loadLevel === "boolean";
+}
+
+function isSubtreeTransferPreflight(value: unknown): value is SubtreeTransferPreflight {
+  return isRecord(value) && [
+    value.sourceItems,
+    value.targetItems,
+    value.addItems,
+    value.updateItems,
+    value.removeItems,
+  ].every(isNonNegativeInteger);
+}
+
+function isContentTransferResult(value: unknown): value is ContentTransferResult {
+  return isRecord(value) &&
+    (value.state === "Finished" || value.state === "Pending") &&
+    typeof value.transferId === "string" &&
+    typeof value.sourceItemId === "string" &&
+    isStringArray(value.sourceChildIds) &&
+    Array.isArray(value.chunkSets) &&
+    value.chunkSets.every((chunkSet) => isRecord(chunkSet) &&
+      typeof chunkSet.chunkSetId === "string" &&
+      isNonNegativeInteger(chunkSet.chunkCount) &&
+      typeof chunkSet.contentTransferFileName === "string") &&
+    isStringArray(value.itemTransferIds) &&
+    optionalString(value.destinationItemId) &&
+    (value.destinationChildIds === undefined || isStringArray(value.destinationChildIds)) &&
+    (value.destinationVersions === undefined ||
+      Array.isArray(value.destinationVersions) &&
+      value.destinationVersions.every((version) => isRecord(version) &&
+        typeof version.language === "string" &&
+        isNonNegativeInteger(version.version)));
+}
+
+function isSubtreeProgress(value: unknown): boolean {
+  if (!isRecord(value)) {
+    return false;
+  }
+  if (value.stage === "exportingContent" || value.stage === "verifying") {
+    return true;
+  }
+  if (value.stage === "copyingChunks") {
+    return isBoundedProgress(value.current, value.total);
+  }
+  if (value.stage === "sitecore") {
+    const completed = value.completed ?? value.current;
+    return isBoundedProgress(completed, value.total) && optionalString(value.startedAt);
+  }
+  return false;
+}
+
+function isBoundedProgress(current: unknown, total: unknown): boolean {
+  return isNonNegativeInteger(current) &&
+    isNonNegativeInteger(total) &&
+    current <= total;
+}
+
+function isDeploymentBaselines(value: unknown): boolean {
+  return isRecord(value) &&
+    isDeploymentBaseline(value.source) &&
+    isDeploymentBaseline(value.target);
+}
+
+function isDeploymentBaseline(value: unknown): value is DeploymentBaseline {
+  return isRecord(value) &&
+    typeof value.environmentId === "string" &&
+    optionalString(value.deploymentId) &&
+    optionalString(value.createdAt) &&
+    optionalString(value.startedAt) &&
+    optionalString(value.deploymentStartedAt);
+}
+
+function isTransferRecordStatus(value: unknown): value is TransferRecordStatus {
+  return value === "queued" ||
+    value === "preflighting" ||
+    value === "executing" ||
+    value === "waitingForSitecore" ||
+    value === "verifying" ||
+    value === "failed" ||
+    value === "completed";
+}
+
+function isSubtreeTransferMode(value: unknown): value is SubtreeTransferMode {
+  return value === "addMissing" || value === "synchronize" || value === "exactMirror";
+}
+
+function optionalString(value: unknown): boolean {
+  return value === undefined || typeof value === "string";
+}
+
+function isStringArray(value: unknown): value is readonly string[] {
+  return Array.isArray(value) && value.every((entry) => typeof entry === "string");
+}
+
+function isNonNegativeInteger(value: unknown): value is number {
+  return typeof value === "number" && Number.isInteger(value) && value >= 0;
+}
+
+function isRecord(value: unknown): value is Readonly<Record<string, unknown>> {
+  return Boolean(value && typeof value === "object" && !Array.isArray(value));
 }
