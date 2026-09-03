@@ -1,7 +1,11 @@
 import { print } from "graphql";
 import type { XmCloudConnection } from "../connections/connection";
 import type { PublishMode } from "../publishing/publishingTypes";
-import { SitecoreHttpClient, type SitecoreHttpLogger } from "./sitecoreHttpClient";
+import {
+  SitecoreHttpClient,
+  type SitecoreHttpLogger,
+  type SitecoreHttpRuntime,
+} from "./sitecoreHttpClient";
 import { publishItemsMutation, publishingStatusQuery } from "./graphql/publishingQueries";
 
 const tokenEndpoint = "https://auth.sitecorecloud.io/oauth/token";
@@ -57,8 +61,8 @@ export class PublishingClient {
   private readonly tokens = new Map<string, CachedToken>();
   private readonly http: SitecoreHttpClient;
 
-  constructor(log: SitecoreHttpLogger) {
-    this.http = new SitecoreHttpClient(log);
+  constructor(log: SitecoreHttpLogger, httpRuntime?: SitecoreHttpRuntime) {
+    this.http = new SitecoreHttpClient(log, httpRuntime);
   }
 
   async start(
@@ -115,17 +119,34 @@ export class PublishingClient {
     if (!status) {
       throw new Error("Authoring API did not return publishing status.");
     }
+    if (
+      typeof status.state !== "string" ||
+      status.state.length === 0 ||
+      typeof status.isDone !== "boolean" ||
+      typeof status.isFailed !== "boolean" ||
+      typeof status.processed !== "number" ||
+      !Number.isInteger(status.processed) ||
+      status.processed < 0 ||
+      !Array.isArray(status.languages) ||
+      status.languages.some(
+        (language) => typeof language?.name !== "string" || language.name.length === 0,
+      ) ||
+      (status.targetDatabase !== null &&
+        (typeof status.targetDatabase !== "object" ||
+          typeof status.targetDatabase.name !== "string" ||
+          status.targetDatabase.name.length === 0))
+    ) {
+      throw new Error("Authoring API returned invalid publishing status.");
+    }
     return {
-      state: typeof status.state === "string" ? status.state : "UNKNOWN",
-      isDone: status.isDone === true,
-      isFailed: status.isFailed === true,
-      processed: typeof status.processed === "number" ? status.processed : 0,
-      languages: (status.languages ?? [])
-        .map((language) => language.name)
-        .filter((name): name is string => typeof name === "string"),
-      targetDatabase: typeof status.targetDatabase?.name === "string"
-        ? status.targetDatabase.name
-        : undefined,
+      state: status.state,
+      isDone: status.isDone,
+      isFailed: status.isFailed,
+      processed: status.processed,
+      languages: status.languages.map((language) => language.name as string),
+      ...(status.targetDatabase === null
+        ? {}
+        : { targetDatabase: status.targetDatabase.name as string }),
     };
   }
 
@@ -217,9 +238,12 @@ function throwForErrors(errors: readonly GraphQlError[] | undefined): void {
 }
 
 async function readJson<T>(response: Response, name: string): Promise<T> {
-  const text = await response.text();
+  const contentType = response.headers.get("content-type") ?? "";
+  if (!contentType.toLowerCase().includes("application/json")) {
+    throw new Error(`${name} returned an unexpected content type (${contentType || "unknown"}).`);
+  }
   try {
-    return JSON.parse(text) as T;
+    return (await response.json()) as T;
   } catch {
     throw new Error(`${name} returned invalid JSON.`);
   }

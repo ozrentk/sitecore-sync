@@ -219,7 +219,7 @@ For continuous compilation, run `npm run watch` in a terminal. You still reload 
 npm test
 ```
 
-The unit-test harness uses Node's built-in test runner with `tsx` for TypeScript execution. Tests live under `test/unit/`. Current coverage exercises XM Cloud server URL normalization, Sitecore reference discovery, collapsed Power Publish scope graph planning, and Sitecore HTTP transport retry, cooldown, cancellation, and log-redaction behavior.
+The unit-test harness uses Node's built-in test runner with `tsx` for TypeScript execution. Tests live under `test/unit/`. Current coverage exercises XM Cloud server URL normalization, Sitecore reference discovery, collapsed Power Publish scope graph planning, Sitecore HTTP transport behavior, and Authoring and publishing response parsing and validation.
 
 Run `npm run check` to type-check both the extension source and the test suite.
 

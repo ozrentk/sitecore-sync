@@ -235,6 +235,8 @@ export class OperationSequenceStore implements vscode.Disposable {
   private async commit(mutator: () => void): Promise<void> {
     const write = this.pendingWrite.then(async () => {
       mutator();
+      // TODO: Migrate definitions and runs to one versioned state object so a process exit
+      // between these independent Memento writes cannot persist a partial snapshot.
       await Promise.all([
         this.workspaceState.update(definitionsKey, this.definitions),
         this.workspaceState.update(runsKey, this.runs),
