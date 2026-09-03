@@ -193,8 +193,42 @@ export function isOperationSequenceRun(value: unknown): value is OperationSequen
     typeof candidate.startedAt === "string" &&
     typeof candidate.updatedAt === "string" &&
     typeof candidate.currentOperationIndex === "number" &&
+    Number.isInteger(candidate.currentOperationIndex) &&
+    candidate.currentOperationIndex >= 0 &&
+    new Set([
+      "running",
+      "paused",
+      "pausedOnOperation",
+      "pausedByOperations",
+      "completed",
+      "stopped",
+      "failed",
+    ]).has(String(candidate.status)) &&
     Array.isArray(candidate.operationResults) &&
+    candidate.operationResults.every(isSequenceOperationResult) &&
+    (candidate.completedAt === undefined || typeof candidate.completedAt === "string") &&
+    (candidate.pauseRequested === undefined || typeof candidate.pauseRequested === "boolean") &&
+    (candidate.stopRequested === undefined || typeof candidate.stopRequested === "boolean") &&
+    (candidate.statusDetail === undefined || typeof candidate.statusDetail === "string") &&
     isSavedOperationSequence(candidate.definitionSnapshot);
+}
+
+function isSequenceOperationResult(value: unknown): value is SequenceOperationResult {
+  if (!value || typeof value !== "object") {
+    return false;
+  }
+  const candidate = value as Partial<SequenceOperationResult>;
+  return typeof candidate.index === "number" &&
+    Number.isInteger(candidate.index) &&
+    candidate.index >= 0 &&
+    new Set(["pending", "running", "completed", "failed", "skipped"]).has(
+      String(candidate.status),
+    ) &&
+    (candidate.operationRecordId === undefined ||
+      typeof candidate.operationRecordId === "string") &&
+    (candidate.startedAt === undefined || typeof candidate.startedAt === "string") &&
+    (candidate.completedAt === undefined || typeof candidate.completedAt === "string") &&
+    (candidate.error === undefined || typeof candidate.error === "string");
 }
 
 function itemName(path: string): string {

@@ -17,6 +17,16 @@ const terminalStatuses = new Set<OperationSequenceRun["status"]>([
   "failed",
 ]);
 
+export interface OperationSequenceStoreRuntime {
+  createId(): string;
+  now(): string;
+}
+
+const defaultRuntime: OperationSequenceStoreRuntime = {
+  createId: () => randomUUID(),
+  now: () => new Date().toISOString(),
+};
+
 export class OperationSequenceStore implements vscode.Disposable {
   private readonly changeEmitter = new vscode.EventEmitter<void>();
   private definitions: readonly SavedOperationSequence[];
@@ -25,14 +35,19 @@ export class OperationSequenceStore implements vscode.Disposable {
 
   readonly onDidChange = this.changeEmitter.event;
 
-  constructor(private readonly workspaceState: vscode.Memento) {
+  constructor(
+    private readonly workspaceState: vscode.Memento,
+    private readonly runtime: OperationSequenceStoreRuntime = defaultRuntime,
+  ) {
     const definitions = workspaceState.get<unknown>(definitionsKey, []);
     const runs = workspaceState.get<unknown>(runsKey, []);
     this.definitions = Array.isArray(definitions)
       ? definitions.filter(isSavedOperationSequence)
       : [];
     this.runs = Array.isArray(runs)
-      ? runs.filter(isOperationSequenceRun).map(recoverInterruptedRun)
+      ? runs.filter(isOperationSequenceRun).map((run) =>
+          recoverInterruptedRun(run, this.runtime.now())
+        )
       : [];
   }
 
@@ -97,9 +112,9 @@ export class OperationSequenceStore implements vscode.Disposable {
     description: string | undefined,
     operations: readonly OperationIntent[],
   ): Promise<SavedOperationSequence> {
-    const now = new Date().toISOString();
+    const now = this.runtime.now();
     const sequence: SavedOperationSequence = {
-      id: randomUUID(),
+      id: this.runtime.createId(),
       definitionVersion: operationDefinitionVersion,
       name: name.trim(),
       description: description?.trim() || undefined,
@@ -125,7 +140,7 @@ export class OperationSequenceStore implements vscode.Disposable {
             ...sequence,
             name: name.trim(),
             description: description?.trim() || undefined,
-            updatedAt: new Date().toISOString(),
+            updatedAt: this.runtime.now(),
           }
         : sequence);
     });
@@ -138,7 +153,7 @@ export class OperationSequenceStore implements vscode.Disposable {
         ? {
             ...sequence,
             operations: [...sequence.operations, intent],
-            updatedAt: new Date().toISOString(),
+            updatedAt: this.runtime.now(),
           }
         : sequence);
     });
@@ -160,7 +175,7 @@ export class OperationSequenceStore implements vscode.Disposable {
           operations[destination]!,
           operations[index]!,
         ];
-        return { ...sequence, operations, updatedAt: new Date().toISOString() };
+        return { ...sequence, operations, updatedAt: this.runtime.now() };
       });
     });
   }
@@ -174,7 +189,7 @@ export class OperationSequenceStore implements vscode.Disposable {
             operations: sequence.operations.filter((_operation, operationIndex) =>
               operationIndex !== index
             ),
-            updatedAt: new Date().toISOString(),
+            updatedAt: this.runtime.now(),
           }
         : sequence);
     });
@@ -235,7 +250,10 @@ export class OperationSequenceStore implements vscode.Disposable {
   }
 }
 
-function recoverInterruptedRun(run: OperationSequenceRun): OperationSequenceRun {
+function recoverInterruptedRun(
+  run: OperationSequenceRun,
+  recoveredAt: string,
+): OperationSequenceRun {
   if (run.status !== "running") {
     return run;
   }
@@ -244,7 +262,7 @@ function recoverInterruptedRun(run: OperationSequenceRun): OperationSequenceRun 
     status: "pausedOnOperation",
     statusDetail: "Extension execution was interrupted while an operation was active.",
     pauseRequested: undefined,
-    updatedAt: new Date().toISOString(),
+    updatedAt: recoveredAt,
     operationResults: run.operationResults.map((result) =>
       result.status === "running"
         ? { ...result, status: "failed", error: "Execution was interrupted." }
