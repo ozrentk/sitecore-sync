@@ -1,5 +1,6 @@
 import { strictEqual } from "node:assert/strict";
 import * as vscode from "vscode";
+import { connectionStoreTests } from "./connectionStoreTests";
 import { operationSequenceStoreTests } from "./operationSequenceStoreTests";
 import { transferProcessorTests } from "./transferProcessorTests";
 import { transferQueueStoreTests } from "./transferQueueStoreTests";
@@ -56,6 +57,7 @@ const integrationTests: readonly IntegrationTest[] = [
       strictEqual(configuration.get("textNormalization"), "none");
     },
   },
+  ...connectionStoreTests,
   ...operationSequenceStoreTests,
   ...transferProcessorTests,
   ...transferQueueStoreTests,

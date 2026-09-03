@@ -40,3 +40,54 @@ export class MemoryMemento implements vscode.Memento {
     return [...this.values.keys()];
   }
 }
+
+export class MemorySecretStorage implements vscode.SecretStorage, vscode.Disposable {
+  readonly stores: { readonly key: string; readonly value: string }[] = [];
+  readonly deletes: string[] = [];
+  storeCalls = 0;
+  deleteCalls = 0;
+  storeOverride:
+    | ((key: string, value: string, call: number) => Promise<void>)
+    | undefined;
+  deleteOverride:
+    | ((key: string, call: number) => Promise<void>)
+    | undefined;
+  private readonly values = new Map<string, string>();
+  private readonly changeEmitter = new vscode.EventEmitter<vscode.SecretStorageChangeEvent>();
+
+  readonly onDidChange = this.changeEmitter.event;
+
+  constructor(initialValues: Readonly<Record<string, string>> = {}) {
+    for (const [key, value] of Object.entries(initialValues)) {
+      this.values.set(key, value);
+    }
+  }
+
+  async keys(): Promise<string[]> {
+    return [...this.values.keys()];
+  }
+
+  async get(key: string): Promise<string | undefined> {
+    return this.values.get(key);
+  }
+
+  async store(key: string, value: string): Promise<void> {
+    this.storeCalls += 1;
+    await this.storeOverride?.(key, value, this.storeCalls);
+    this.values.set(key, value);
+    this.stores.push({ key, value });
+    this.changeEmitter.fire({ key });
+  }
+
+  async delete(key: string): Promise<void> {
+    this.deleteCalls += 1;
+    await this.deleteOverride?.(key, this.deleteCalls);
+    this.values.delete(key);
+    this.deletes.push(key);
+    this.changeEmitter.fire({ key });
+  }
+
+  dispose(): void {
+    this.changeEmitter.dispose();
+  }
+}
