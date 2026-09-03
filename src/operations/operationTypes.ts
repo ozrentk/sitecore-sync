@@ -164,7 +164,17 @@ export function isOperationIntent(value: unknown): value is OperationIntent {
       new Set(["standard", "traced", "power"]).has(String(candidate.publishKind)) &&
       new Set(["SMART", "FULL"]).has(String(candidate.publishMode)) &&
       typeof candidate.publishSubItems === "boolean" &&
-      typeof candidate.publishRelatedItems === "boolean";
+      typeof candidate.publishRelatedItems === "boolean" &&
+      optionalString(candidate.siteName) &&
+      optionalString(candidate.route) &&
+      optionalString(candidate.applicationUrl) &&
+      optionalStringArray(candidate.selectedCollapsedScopeIds) &&
+      optionalStringArray(candidate.observedCollapsedScopeIds) &&
+      (
+        candidate.fieldAssertions === undefined ||
+        Array.isArray(candidate.fieldAssertions) &&
+        candidate.fieldAssertions.every(isPublishingFieldAssertion)
+      );
   }
   return false;
 }
@@ -177,6 +187,7 @@ export function isSavedOperationSequence(value: unknown): value is SavedOperatio
   return candidate.definitionVersion === operationDefinitionVersion &&
     typeof candidate.id === "string" &&
     typeof candidate.name === "string" &&
+    optionalString(candidate.description) &&
     typeof candidate.createdAt === "string" &&
     typeof candidate.updatedAt === "string" &&
     Array.isArray(candidate.operations) &&
@@ -188,6 +199,12 @@ export function isOperationSequenceRun(value: unknown): value is OperationSequen
     return false;
   }
   const candidate = value as Partial<OperationSequenceRun>;
+  if (
+    !isSavedOperationSequence(candidate.definitionSnapshot) ||
+    !Array.isArray(candidate.operationResults)
+  ) {
+    return false;
+  }
   return typeof candidate.id === "string" &&
     typeof candidate.sequenceId === "string" &&
     typeof candidate.startedAt === "string" &&
@@ -195,6 +212,7 @@ export function isOperationSequenceRun(value: unknown): value is OperationSequen
     typeof candidate.currentOperationIndex === "number" &&
     Number.isInteger(candidate.currentOperationIndex) &&
     candidate.currentOperationIndex >= 0 &&
+    candidate.currentOperationIndex <= candidate.definitionSnapshot.operations.length &&
     new Set([
       "running",
       "paused",
@@ -204,13 +222,14 @@ export function isOperationSequenceRun(value: unknown): value is OperationSequen
       "stopped",
       "failed",
     ]).has(String(candidate.status)) &&
-    Array.isArray(candidate.operationResults) &&
-    candidate.operationResults.every(isSequenceOperationResult) &&
+    candidate.operationResults.length === candidate.definitionSnapshot.operations.length &&
+    candidate.operationResults.every(
+      (result, index) => isSequenceOperationResult(result) && result.index === index,
+    ) &&
     (candidate.completedAt === undefined || typeof candidate.completedAt === "string") &&
     (candidate.pauseRequested === undefined || typeof candidate.pauseRequested === "boolean") &&
     (candidate.stopRequested === undefined || typeof candidate.stopRequested === "boolean") &&
-    (candidate.statusDetail === undefined || typeof candidate.statusDetail === "string") &&
-    isSavedOperationSequence(candidate.definitionSnapshot);
+    (candidate.statusDetail === undefined || typeof candidate.statusDetail === "string");
 }
 
 function isSequenceOperationResult(value: unknown): value is SequenceOperationResult {
@@ -246,8 +265,26 @@ function isFieldEndpoint(value: unknown): value is FieldTransferEndpointIntent {
     typeof value.fieldLabel === "string";
 }
 
+function isPublishingFieldAssertion(value: unknown): value is PublishingFieldAssertionIntent {
+  if (!isRecord(value)) {
+    return false;
+  }
+  return typeof value.itemId === "string" &&
+    typeof value.fieldName === "string" &&
+    optionalString(value.browserSelector);
+}
+
+function optionalString(value: unknown): boolean {
+  return value === undefined || typeof value === "string";
+}
+
+function optionalStringArray(value: unknown): boolean {
+  return value === undefined ||
+    Array.isArray(value) && value.every((entry) => typeof entry === "string");
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
-  return Boolean(value && typeof value === "object");
+  return Boolean(value && typeof value === "object" && !Array.isArray(value));
 }
 
 function publishKindLabel(kind: PublishingIntent["publishKind"]): string {
