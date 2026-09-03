@@ -11,7 +11,11 @@ import {
   treeLevelQuery,
   updateItemMutation,
 } from "./graphql/authoringQueries";
-import { SitecoreHttpClient, type SitecoreHttpLogger } from "./sitecoreHttpClient";
+import {
+  SitecoreHttpClient,
+  type SitecoreHttpLogger,
+  type SitecoreHttpRuntime,
+} from "./sitecoreHttpClient";
 
 const tokenEndpoint = "https://auth.sitecorecloud.io/oauth/token";
 const audience = "https://api.sitecorecloud.io";
@@ -254,8 +258,8 @@ export class AuthoringContentClient {
   private readonly tokens = new Map<string, CachedToken>();
   private readonly http: SitecoreHttpClient;
 
-  constructor(log: SitecoreHttpLogger) {
-    this.http = new SitecoreHttpClient(log);
+  constructor(log: SitecoreHttpLogger, httpRuntime?: SitecoreHttpRuntime) {
+    this.http = new SitecoreHttpClient(log, httpRuntime);
   }
 
   async transferSubtree(
