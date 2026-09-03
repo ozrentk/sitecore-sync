@@ -1,5 +1,6 @@
 import { strictEqual } from "node:assert/strict";
 import * as vscode from "vscode";
+import { transferQueueStoreTests } from "./transferQueueStoreTests";
 
 const extensionId = "OzrenTK.sitecore-xm-cloud-sync";
 
@@ -11,12 +12,12 @@ interface ExtensionManifest {
   };
 }
 
-interface SmokeTest {
+interface IntegrationTest {
   readonly name: string;
   readonly execute: () => Promise<void>;
 }
 
-const smokeTests: readonly SmokeTest[] = [
+const integrationTests: readonly IntegrationTest[] = [
   {
     name: "activates the extension in an empty workspace",
     async execute(): Promise<void> {
@@ -53,22 +54,23 @@ const smokeTests: readonly SmokeTest[] = [
       strictEqual(configuration.get("textNormalization"), "none");
     },
   },
+  ...transferQueueStoreTests,
 ];
 
 export async function run(): Promise<void> {
   const failures: string[] = [];
-  for (const smokeTest of smokeTests) {
+  for (const integrationTest of integrationTests) {
     try {
-      await smokeTest.execute();
-      console.log(`PASS ${smokeTest.name}`);
+      await integrationTest.execute();
+      console.log(`PASS ${integrationTest.name}`);
     } catch (error: unknown) {
-      failures.push(smokeTest.name);
-      console.error(`FAIL ${smokeTest.name}`, error);
+      failures.push(integrationTest.name);
+      console.error(`FAIL ${integrationTest.name}`, error);
     }
   }
   if (failures.length) {
     throw new Error(
-      `${failures.length} extension-host smoke test(s) failed: ${failures.join(", ")}`,
+      `${failures.length} extension-host test(s) failed: ${failures.join(", ")}`,
     );
   }
 }
