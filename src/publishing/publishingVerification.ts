@@ -7,6 +7,24 @@ import type {
 type FieldSelectionContext = Pick<PublishRun, "fieldSelections">;
 type PowerFieldSelectionContext = FieldSelectionContext & Pick<PublishRun, "referenceEdges">;
 
+export interface EdgeItemObservation {
+  readonly evidence: readonly string[];
+  readonly divergences: readonly string[];
+  readonly divergentItemId?: string;
+}
+
+export interface RawEdgeItem {
+  readonly id: string;
+  readonly fields: Readonly<Record<string, string>>;
+}
+
+export interface PowerEdgeObservationSummary {
+  readonly matchedCount: number;
+  readonly divergentItemIds: readonly string[];
+  readonly evidence: readonly string[];
+  readonly divergences: readonly string[];
+}
+
 export function expectedFieldsForSnapshot(
   context: FieldSelectionContext,
   snapshot: PublishSnapshot,
@@ -32,6 +50,94 @@ export function powerExpectedFieldsForSnapshot(
   return [...fieldNames].map((fieldName) => [fieldName, snapshot.fields[fieldName]] as const);
 }
 
+export function inspectTracedEdgeItem(
+  snapshot: PublishSnapshot,
+  item: RawEdgeItem | undefined,
+  expectedFields: readonly (readonly [string, string])[],
+  includeMatchEvidence: boolean,
+): EdgeItemObservation {
+  if (!item || !sameId(item.id, snapshot.itemId)) {
+    return missingItemObservation(snapshot);
+  }
+  const evidence: string[] = [];
+  const divergences: string[] = [];
+  for (const [fieldName, expected] of expectedFields) {
+    const actual = item.fields[fieldName];
+    if (actual !== expected) {
+      divergences.push(
+        `${snapshot.path} › ${fieldName}: expected ${formatFieldValue(expected)}, Edge returned ${
+          actual === undefined ? "missing" : formatFieldValue(actual)
+        }`,
+      );
+    } else if (includeMatchEvidence) {
+      evidence.push(
+        `${snapshot.path} › ${fieldName}: ${formatFieldValue(expected)} matched`,
+      );
+    }
+  }
+  return {
+    evidence,
+    divergences,
+    divergentItemId: divergences.length ? snapshot.itemId : undefined,
+  };
+}
+
+export function inspectPowerEdgeItem(
+  snapshot: PublishSnapshot,
+  item: RawEdgeItem | undefined,
+  expectedFields: readonly (readonly [string, string | undefined])[],
+): EdgeItemObservation {
+  if (!item || !sameId(item.id, snapshot.itemId)) {
+    return missingItemObservation(snapshot);
+  }
+  const evidence: string[] = [];
+  const divergences: string[] = [];
+  for (const [fieldName, expected] of expectedFields) {
+    const actual = item.fields[fieldName];
+    if (expected === undefined || actual !== expected) {
+      divergences.push(
+        `${snapshot.path} › ${fieldName}: expected ${
+          expected === undefined ? "missing authoring value" : formatFieldValue(expected)
+        }, Edge returned ${
+          actual === undefined ? "missing" : formatFieldValue(actual)
+        }`,
+      );
+    } else {
+      evidence.push(`${snapshot.path} › ${fieldName}: matched`);
+    }
+  }
+  if (!expectedFields.length) {
+    evidence.push(`${snapshot.path}: item identity matched`);
+  }
+  return {
+    evidence,
+    divergences,
+    divergentItemId: divergences.length ? snapshot.itemId : undefined,
+  };
+}
+
+export function summarizePowerEdgeObservations(
+  snapshots: readonly PublishSnapshot[],
+  observations: ReadonlyMap<string, EdgeItemObservation>,
+): PowerEdgeObservationSummary {
+  const orderedObservations = snapshots.flatMap((snapshot) => {
+    const observation = observations.get(normalizeId(snapshot.itemId));
+    return observation ? [observation] : [];
+  });
+  return {
+    matchedCount: orderedObservations.filter((observation) =>
+      !observation.divergentItemId
+    ).length,
+    divergentItemIds: snapshots.flatMap((snapshot) =>
+      observations.get(normalizeId(snapshot.itemId))?.divergentItemId
+        ? [snapshot.itemId]
+        : []
+    ),
+    evidence: orderedObservations.flatMap((observation) => observation.evidence),
+    divergences: orderedObservations.flatMap((observation) => observation.divergences),
+  };
+}
+
 export function deduplicateSnapshots(
   snapshots: readonly PublishSnapshot[],
 ): readonly PublishSnapshot[] {
@@ -51,6 +157,20 @@ export function versionlessSnapshotEvidence(
     .map((snapshot) =>
       `${snapshot.path}: skipped Raw Experience Edge identity verification because Authoring reported no ${language} language version (version 0).`
     );
+}
+
+export function formatFieldValue(value: string): string {
+  return JSON.stringify(
+    value.length > 160 ? `${value.slice(0, 157)}…` : value,
+  );
+}
+
+function missingItemObservation(snapshot: PublishSnapshot): EdgeItemObservation {
+  return {
+    evidence: [],
+    divergences: [`${snapshot.path}: item not found`],
+    divergentItemId: snapshot.itemId,
+  };
 }
 
 function selectionsForSnapshot(

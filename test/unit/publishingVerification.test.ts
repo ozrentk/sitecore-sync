@@ -4,8 +4,13 @@ import {
   deduplicateIds,
   deduplicateSnapshots,
   expectedFieldsForSnapshot,
+  inspectPowerEdgeItem,
+  inspectTracedEdgeItem,
   powerExpectedFieldsForSnapshot,
+  summarizePowerEdgeObservations,
   versionlessSnapshotEvidence,
+  type EdgeItemObservation,
+  type RawEdgeItem,
 } from "../../src/publishing/publishingVerification";
 import type {
   PublishFieldSelection,
@@ -94,6 +99,128 @@ test("publishing verification records only non-observable version-zero snapshots
   ]);
 });
 
+test("traced Edge inspection rejects missing and mismatched item identities", () => {
+  const snapshot = publishSnapshot();
+  const expected = [["Title", "Welcome"]] as const;
+  const missing = {
+    evidence: [],
+    divergences: ["/sitecore/content/Home: item not found"],
+    divergentItemId: "{ABC-DEF}",
+  };
+
+  deepStrictEqual(inspectTracedEdgeItem(snapshot, undefined, expected, true), missing);
+  deepStrictEqual(
+    inspectTracedEdgeItem(snapshot, edgeItem({ id: "other" }), expected, true),
+    missing,
+  );
+});
+
+test("traced Edge inspection reports selected matches and every field divergence", () => {
+  const snapshot = publishSnapshot();
+  const expected = [
+    ["Title", "Welcome"],
+    ["Summary", "Expected summary"],
+    ["Missing", ""],
+  ] as const;
+
+  deepStrictEqual(
+    inspectTracedEdgeItem(
+      snapshot,
+      edgeItem({ fields: { Title: "Welcome", Summary: "Different" } }),
+      expected,
+      true,
+    ),
+    {
+      evidence: ["/sitecore/content/Home › Title: \"Welcome\" matched"],
+      divergences: [
+        "/sitecore/content/Home › Summary: expected \"Expected summary\", Edge returned \"Different\"",
+        "/sitecore/content/Home › Missing: expected \"\", Edge returned missing",
+      ],
+      divergentItemId: "{ABC-DEF}",
+    },
+  );
+  deepStrictEqual(
+    inspectTracedEdgeItem(
+      snapshot,
+      edgeItem({ fields: { Title: "Welcome" } }),
+      [["Title", "Welcome"]],
+      false,
+    ).evidence,
+    [],
+  );
+});
+
+test("Power Edge inspection validates identity and records identity-only matches", () => {
+  const snapshot = publishSnapshot();
+  deepStrictEqual(
+    inspectPowerEdgeItem(snapshot, undefined, []),
+    {
+      evidence: [],
+      divergences: ["/sitecore/content/Home: item not found"],
+      divergentItemId: "{ABC-DEF}",
+    },
+  );
+  deepStrictEqual(
+    inspectPowerEdgeItem(snapshot, edgeItem(), []),
+    {
+      evidence: ["/sitecore/content/Home: item identity matched"],
+      divergences: [],
+      divergentItemId: undefined,
+    },
+  );
+});
+
+test("Power Edge inspection distinguishes missing Authoring values from Edge values", () => {
+  deepStrictEqual(
+    inspectPowerEdgeItem(
+      publishSnapshot(),
+      edgeItem({ fields: { Title: "Welcome", Related: "different" } }),
+      [
+        ["Title", "Welcome"],
+        ["Related", "expected"],
+        ["MissingAuthoring", undefined],
+      ],
+    ),
+    {
+      evidence: ["/sitecore/content/Home › Title: matched"],
+      divergences: [
+        "/sitecore/content/Home › Related: expected \"expected\", Edge returned \"different\"",
+        "/sitecore/content/Home › MissingAuthoring: expected missing authoring value, Edge returned missing",
+      ],
+      divergentItemId: "{ABC-DEF}",
+    },
+  );
+});
+
+test("Power Edge aggregation preserves snapshot order and summarizes partial observations", () => {
+  const alpha = publishSnapshot({ itemId: "alpha", path: "/alpha" });
+  const beta = publishSnapshot({ itemId: "{B-E-T-A}", path: "/beta" });
+  const gamma = publishSnapshot({ itemId: "gamma", path: "/gamma" });
+  const matched: EdgeItemObservation = {
+    evidence: ["alpha matched"],
+    divergences: [],
+  };
+  const diverged: EdgeItemObservation = {
+    evidence: ["beta field matched"],
+    divergences: ["beta field diverged"],
+    divergentItemId: "beta",
+  };
+  const observations = new Map<string, EdgeItemObservation>([
+    ["beta", diverged],
+    ["alpha", matched],
+  ]);
+
+  deepStrictEqual(
+    summarizePowerEdgeObservations([alpha, beta, gamma], observations),
+    {
+      matchedCount: 1,
+      divergentItemIds: ["{B-E-T-A}"],
+      evidence: ["alpha matched", "beta field matched"],
+      divergences: ["beta field diverged"],
+    },
+  );
+});
+
 function publishSnapshot(
   overrides: Partial<PublishSnapshot> = {},
 ): PublishSnapshot {
@@ -115,4 +242,12 @@ function edge(
   fieldName: string,
 ): ReferenceEdge {
   return { sourceItemId, targetItemId, fieldName };
+}
+
+function edgeItem(overrides: Partial<RawEdgeItem> = {}): RawEdgeItem {
+  return {
+    id: "abcdef",
+    fields: {},
+    ...overrides,
+  };
 }
