@@ -229,7 +229,7 @@ Run the extension-host suite separately:
 npm run test:integration
 ```
 
-The first integration run downloads VS Code 1.100.0 into `.vscode-test/`, then launches an isolated Extension Development Host against an empty temporary workspace. It verifies activation, contributed-command registration, the default extension configuration, and `TransferQueueStore` persistence and recovery behavior without contacting Sitecore. Run `npm run test:all` to execute both unit and extension-host suites.
+The first integration run downloads VS Code 1.100.0 into `.vscode-test/`, then launches an isolated Extension Development Host against an empty temporary workspace. It verifies activation, contributed-command registration, the default extension configuration, `TransferQueueStore` persistence and recovery, and `TransferProcessor` lifecycle, field-transfer, subtree-checkpoint, and deployment-monitoring behavior without contacting Sitecore. Run `npm run test:all` to execute both unit and extension-host suites.
 
 ## Build an installable extension
 

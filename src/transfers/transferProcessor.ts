@@ -1,12 +1,12 @@
 import * as vscode from "vscode";
 import type { ConnectionStore } from "../connections/connectionStore";
 import {
-  AuthoringContentClient,
+  type AuthoringContentClient,
   type AuthoringItemField,
   type ContentTransferProgress,
 } from "../sitecore/authoringClient";
 import {
-  DeploymentClient,
+  type DeploymentClient,
   type DeploymentBaseline,
   type DeploymentCredentials,
 } from "../sitecore/deploymentClient";
@@ -21,6 +21,51 @@ import {
   type TransferRecord,
 } from "./transferTypes";
 
+export type TransferProcessorConnectionStore = Pick<
+  ConnectionStore,
+  "get" | "getClientSecret" | "getDeploymentClientSecret"
+>;
+
+export type TransferProcessorAuthoringClient = Pick<
+  AuthoringContentClient,
+  "loadItemDetails" | "updateFieldValue" | "transferSubtree" | "resumeSubtreeTransfer"
+>;
+
+export type TransferProcessorDeploymentClient = Pick<
+  DeploymentClient,
+  "getLatestDeployment" | "resolveEnvironment"
+>;
+
+export interface TransferProcessorLogger {
+  info(message: string): void;
+  warn(message: string): void;
+  error(message: string, error?: unknown): void;
+}
+
+export interface TransferProcessorRuntime {
+  now(): Date;
+  createDirectory(uri: vscode.Uri): Promise<void>;
+  writeFile(uri: vscode.Uri, content: Uint8Array): Promise<void>;
+  showErrorMessage(message: string): Promise<void>;
+  setContext(key: string, value: unknown): Promise<void>;
+}
+
+const defaultRuntime: TransferProcessorRuntime = {
+  now: () => new Date(),
+  async createDirectory(uri): Promise<void> {
+    await vscode.workspace.fs.createDirectory(uri);
+  },
+  async writeFile(uri, content): Promise<void> {
+    await vscode.workspace.fs.writeFile(uri, content);
+  },
+  async showErrorMessage(message): Promise<void> {
+    await vscode.window.showErrorMessage(message);
+  },
+  async setContext(key, value): Promise<void> {
+    await vscode.commands.executeCommand("setContext", key, value);
+  },
+};
+
 export class TransferProcessor implements vscode.Disposable {
   private readonly startEmitter = new vscode.EventEmitter<OperationRecord>();
   private readonly completeEmitter = new vscode.EventEmitter<OperationRecord>();
@@ -34,13 +79,14 @@ export class TransferProcessor implements vscode.Disposable {
 
   constructor(
     private readonly store: TransferQueueStore,
-    private readonly connectionStore: ConnectionStore,
-    private readonly authoringClient: AuthoringContentClient,
-    private readonly deploymentClient: DeploymentClient,
+    private readonly connectionStore: TransferProcessorConnectionStore,
+    private readonly authoringClient: TransferProcessorAuthoringClient,
+    private readonly deploymentClient: TransferProcessorDeploymentClient,
     private readonly journalStorageUri: vscode.Uri,
     private readonly extensionVersion: string,
-    private readonly log: vscode.LogOutputChannel,
+    private readonly log: TransferProcessorLogger,
     private readonly executePublishing?: (publishRunId: string) => Promise<void>,
+    private readonly runtime: TransferProcessorRuntime = defaultRuntime,
   ) {
     this.disposables.push(store.onDidChange(() => {
       if (store.processorState === "running") {
@@ -104,7 +150,7 @@ export class TransferProcessor implements vscode.Disposable {
   }
 
   private async processRecord(original: OperationRecord): Promise<boolean> {
-    const startedAt = original.startedAt ?? new Date().toISOString();
+    const startedAt = original.startedAt ?? this.runtime.now().toISOString();
     const active = await this.store.update(original.id, (record) => ({
       ...record,
       status: record.kind === "subtree" && record.checkpoint?.state === "Pending"
@@ -156,7 +202,7 @@ export class TransferProcessor implements vscode.Disposable {
       if (failed) {
         this.failureEmitter.fire(failed);
       }
-      await vscode.window.showErrorMessage(
+      await this.runtime.showErrorMessage(
         `Operation failed and the queue was paused: ${message}`,
       );
       return false;
@@ -265,12 +311,15 @@ export class TransferProcessor implements vscode.Disposable {
     }
     const controller = new AbortController();
     const monitoring = await this.deploymentMonitoring(record, controller.signal);
-    let lastDeploymentCheck = Date.now();
+    let lastDeploymentCheck = this.runtime.now().getTime();
     const checkDeployments = async (force = false): Promise<void> => {
-      if (!monitoring || (!force && Date.now() - lastDeploymentCheck < 15_000)) {
+      if (
+        !monitoring ||
+        (!force && this.runtime.now().getTime() - lastDeploymentCheck < 15_000)
+      ) {
         return;
       }
-      lastDeploymentCheck = Date.now();
+      lastDeploymentCheck = this.runtime.now().getTime();
       await this.assertDeploymentBaselines(monitoring, controller.signal);
     };
     let checkpoint = record.checkpoint;
@@ -315,14 +364,16 @@ export class TransferProcessor implements vscode.Disposable {
       const sitecorePhaseStartedAt = latest?.kind === "subtree" &&
           latest.progress?.stage === "sitecore"
         ? Date.parse(latest.progress.startedAt)
-        : Date.now();
+        : this.runtime.now().getTime();
       checkpoint = await this.authoringClient.resumeSubtreeTransfer(
         targetConnection,
         targetSecret,
         record.targetLanguage,
         checkpoint,
         controller.signal,
-        Number.isFinite(sitecorePhaseStartedAt) ? sitecorePhaseStartedAt : Date.now(),
+        Number.isFinite(sitecorePhaseStartedAt)
+          ? sitecorePhaseStartedAt
+          : this.runtime.now().getTime(),
         async (nextCheckpoint) => {
           await this.persistSubtreeCheckpoint(record.id, nextCheckpoint);
         },
@@ -503,7 +554,7 @@ export class TransferProcessor implements vscode.Disposable {
             ...progress,
             startedAt: current.progress?.stage === "sitecore"
               ? current.progress.startedAt
-              : new Date().toISOString(),
+              : this.runtime.now().toISOString(),
           }
         : progress;
       return {
@@ -536,33 +587,32 @@ export class TransferProcessor implements vscode.Disposable {
     error?: string,
   ): Promise<string> {
     const directory = vscode.Uri.joinPath(this.journalStorageUri, "journals");
-    await vscode.workspace.fs.createDirectory(directory);
+    await this.runtime.createDirectory(directory);
+    const endedAt = this.runtime.now();
     const uri = vscode.Uri.joinPath(
       directory,
-      `journal-${journalTimestamp(new Date())}-${record.id.slice(0, 8)}.log`,
+      `journal-${journalTimestamp(endedAt)}-${record.id.slice(0, 8)}.log`,
     );
     const content = JSON.stringify({
       journalFormatVersion: 2,
       extensionVersion: this.extensionVersion,
       mode: "queued-transfer",
       outcome,
-      endedAt: new Date().toISOString(),
+      endedAt: endedAt.toISOString(),
       error,
       record,
     }, null, 2);
-    await vscode.workspace.fs.writeFile(uri, new TextEncoder().encode(`${content}\n`));
+    await this.runtime.writeFile(uri, new TextEncoder().encode(`${content}\n`));
     return uri.fsPath;
   }
 
   private async updateContext(): Promise<void> {
     await Promise.all([
-      vscode.commands.executeCommand(
-        "setContext",
+      this.runtime.setContext(
         "xmCloudSync.transferProcessorState",
         this.store.processorState,
       ),
-      vscode.commands.executeCommand(
-        "setContext",
+      this.runtime.setContext(
         "xmCloudSync.hasQueuedTransfers",
         this.store.list().length > 0,
       ),

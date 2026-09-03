@@ -1,5 +1,6 @@
 import { strictEqual } from "node:assert/strict";
 import * as vscode from "vscode";
+import { transferProcessorTests } from "./transferProcessorTests";
 import { transferQueueStoreTests } from "./transferQueueStoreTests";
 
 const extensionId = "OzrenTK.sitecore-xm-cloud-sync";
@@ -54,6 +55,7 @@ const integrationTests: readonly IntegrationTest[] = [
       strictEqual(configuration.get("textNormalization"), "none");
     },
   },
+  ...transferProcessorTests,
   ...transferQueueStoreTests,
 ];
 
