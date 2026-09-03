@@ -25,6 +25,12 @@ import {
 import { showPowerPublishScopeForm } from "./powerPublishScopeForm";
 import { parseReferenceField } from "./referenceDiscovery";
 import { readPublishingProfiles, readPublishRuns } from "./publishingRunState";
+import {
+  diagnosticStageIds,
+  finishRetryWithFailure,
+  prepareDiagnosticRetry,
+  prepareStatusRecheck,
+} from "./publishingRunTransitions";
 import type {
   PublishKind,
   PublishBatch,
@@ -57,7 +63,6 @@ const retryVerificationCommand = "xmCloudSync.retryPublishTraceVerification";
 const republishTraceCommand = "xmCloudSync.republishTrace";
 const repairPowerPublishCommand = "xmCloudSync.repairPowerPublish";
 const recheckStatusCommand = "xmCloudSync.recheckPublishTraceStatus";
-const diagnosticStageIds = ["edgeItem", "edgeLayout", "application", "browserDom"] as const;
 
 interface PublishOptions {
   readonly mode: PublishMode;
@@ -760,7 +765,7 @@ export class PublishingManager implements vscode.Disposable {
       return;
     }
     const controller = new AbortController();
-    let run = prepareDiagnosticRetry(original, firstFailedStage);
+    let run = prepareDiagnosticRetry(original, firstFailedStage, new Date().toISOString());
     await this.saveRun(run);
     this.openTrace(run);
     this.controllers.set(run.id, controller);
@@ -802,7 +807,12 @@ export class PublishingManager implements vscode.Disposable {
         await vscode.window.showInformationMessage("Verification retry was cancelled.");
         return;
       }
-      const failed = finishRetryWithFailure(run, "Verification retry failed", errorMessage(error));
+      const failed = finishRetryWithFailure(
+        run,
+        "Verification retry failed",
+        errorMessage(error),
+        new Date().toISOString(),
+      );
       await this.saveRun(failed);
       this.renderIfDisplayed(failed);
       await vscode.window.showErrorMessage(
@@ -960,7 +970,7 @@ export class PublishingManager implements vscode.Disposable {
       return;
     }
     const controller = new AbortController();
-    let run = prepareStatusRecheck(original);
+    let run = prepareStatusRecheck(original, new Date().toISOString());
     await this.saveRun(run);
     this.openTrace(run);
     this.controllers.set(run.id, controller);
@@ -1043,7 +1053,12 @@ export class PublishingManager implements vscode.Disposable {
         await vscode.window.showInformationMessage("Publish status check was cancelled.");
         return;
       }
-      const failed = finishRetryWithFailure(run, "Publish status check failed", errorMessage(error));
+      const failed = finishRetryWithFailure(
+        run,
+        "Publish status check failed",
+        errorMessage(error),
+        new Date().toISOString(),
+      );
       await this.saveRun(failed);
       this.renderIfDisplayed(failed);
       await vscode.window.showErrorMessage(
@@ -2859,172 +2874,6 @@ function canonicalSiteName(
   return sites.find((site) =>
     site.name.localeCompare(requested, undefined, { sensitivity: "base" }) === 0
   )?.name;
-}
-
-function prepareDiagnosticRetry(
-  run: PublishRun,
-  firstStage: typeof diagnosticStageIds[number],
-): PublishRun {
-  const firstIndex = diagnosticStageIds.indexOf(firstStage);
-  const attemptedAt = new Date().toISOString();
-  return {
-    ...archiveTraceAttempt(run, "verificationRetry", attemptedAt),
-    completedAt: undefined,
-    conclusion: undefined,
-    journalPath: undefined,
-    stages: run.stages.map((stage) => {
-      const diagnosticIndex = diagnosticStageIds.indexOf(
-        stage.id as typeof diagnosticStageIds[number],
-      );
-      if (diagnosticIndex < firstIndex) {
-        return stage;
-      }
-      if (stage.id === "edgeLayout" && (!run.route || !run.siteName)) {
-        return {
-          ...stage,
-          status: "skipped",
-          summary: "Route or Sitecore site name was not configured.",
-          evidence: undefined,
-          updatedAt: attemptedAt,
-        };
-      }
-      if (stage.id === "application" && !run.applicationUrl) {
-        return {
-          ...stage,
-          status: "skipped",
-          summary: "Application response verification was not configured.",
-          evidence: undefined,
-          updatedAt: attemptedAt,
-        };
-      }
-      if (
-        stage.id === "browserDom" &&
-        (!run.applicationUrl || !hasBrowserDomAssertions(run))
-      ) {
-        return {
-          ...stage,
-          status: "skipped",
-          summary: "No Browser DOM selectors were configured.",
-          evidence: undefined,
-          updatedAt: attemptedAt,
-        };
-      }
-      return {
-        ...stage,
-        status: "pending",
-        summary: "Queued for verification retry.",
-        evidence: undefined,
-        updatedAt: attemptedAt,
-      };
-    }),
-  };
-}
-
-function prepareStatusRecheck(run: PublishRun): PublishRun {
-  const attemptedAt = new Date().toISOString();
-  return {
-    ...archiveTraceAttempt(run, "statusRecheck", attemptedAt),
-    completedAt: undefined,
-    conclusion: undefined,
-    journalPath: undefined,
-    stages: run.stages.map((stage) => {
-      if (stage.id === "publishing") {
-        return {
-          ...stage,
-          status: "running",
-          summary: "Checking saved XM Cloud publishing operation IDs.",
-          evidence: undefined,
-          updatedAt: attemptedAt,
-        };
-      }
-      if (diagnosticStageIds.includes(stage.id as typeof diagnosticStageIds[number])) {
-        if (run.kind === "standard") {
-          return {
-            ...stage,
-            status: "skipped",
-            summary: "Not requested for Standard publish.",
-            evidence: undefined,
-            updatedAt: attemptedAt,
-          };
-        }
-        if (stage.id === "edgeLayout" && (!run.route || !run.siteName)) {
-          return {
-            ...stage,
-            status: "skipped",
-            summary: "Route or Sitecore site name was not configured.",
-            evidence: undefined,
-            updatedAt: attemptedAt,
-          };
-        }
-        if (stage.id === "application" && !run.applicationUrl) {
-          return {
-            ...stage,
-            status: "skipped",
-            summary: "Application response verification was not configured.",
-            evidence: undefined,
-            updatedAt: attemptedAt,
-          };
-        }
-        if (
-          stage.id === "browserDom" &&
-          (!run.applicationUrl || !hasBrowserDomAssertions(run))
-        ) {
-          return {
-            ...stage,
-            status: "skipped",
-            summary: "No Browser DOM selectors were configured.",
-            evidence: undefined,
-            updatedAt: attemptedAt,
-          };
-        }
-        return {
-          ...stage,
-          status: "pending",
-          summary: "Waiting for publishing status re-check.",
-          evidence: undefined,
-          updatedAt: attemptedAt,
-        };
-      }
-      return stage;
-    }),
-  };
-}
-
-function archiveTraceAttempt(
-  run: PublishRun,
-  action: PublishTraceAttempt["action"],
-  attemptedAt: string,
-): PublishRun {
-  const attempt: PublishTraceAttempt = {
-    attemptedAt,
-    action,
-    conclusion: run.conclusion,
-    stages: run.stages,
-  };
-  return {
-    ...run,
-    retryAttempts: [...(run.retryAttempts ?? []), attempt].slice(-10),
-  };
-}
-
-function finishRetryWithFailure(
-  run: PublishRun,
-  label: string,
-  message: string,
-): PublishRun {
-  const completedAt = new Date().toISOString();
-  return {
-    ...run,
-    completedAt,
-    conclusion: `${label}: ${message}`,
-    stages: run.stages.map((stage) => stage.status === "running"
-      ? { ...stage, status: "failed", summary: message, updatedAt: completedAt }
-      : stage),
-  };
-}
-
-function hasBrowserDomAssertions(run: PublishRun): boolean {
-  return run.fieldSelections?.some((field) => Boolean(field.browserSelector)) === true;
 }
 
 function expectedFieldsForSnapshot(
