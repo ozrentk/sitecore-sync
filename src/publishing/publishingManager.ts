@@ -36,8 +36,13 @@ import {
   deduplicateIds,
   deduplicateSnapshots,
   expectedFieldsForSnapshot,
+  formatFieldValue,
+  inspectPowerEdgeItem,
+  inspectTracedEdgeItem,
   powerExpectedFieldsForSnapshot,
+  summarizePowerEdgeObservations,
   versionlessSnapshotEvidence,
+  type EdgeItemObservation,
 } from "./publishingVerification";
 import type {
   PublishKind,
@@ -1431,7 +1436,7 @@ export class PublishingManager implements vscode.Disposable {
       );
     }
     const deadline = Date.now() + edgePropagationTimeoutMs;
-    const observations = new Map<string, PowerEdgeObservation>();
+    const observations = new Map<string, EdgeItemObservation>();
     let pendingSnapshots = snapshots;
     let pass = 1;
     while (pendingSnapshots.length) {
@@ -1439,7 +1444,7 @@ export class PublishingManager implements vscode.Disposable {
       await mapWithConcurrency(
         pendingSnapshots,
         maximumPowerEdgeVerificationConcurrency,
-        async (snapshot): Promise<PowerEdgeObservation> => {
+        async (snapshot): Promise<EdgeItemObservation> => {
           const item = await this.edge.item(
             settings.profile.edgeEndpoint,
             settings.edgeToken,
@@ -1447,38 +1452,8 @@ export class PublishingManager implements vscode.Disposable {
             run.language,
             signal,
           );
-          if (!item || normalizeId(item.id) !== normalizeId(snapshot.itemId)) {
-            return {
-              evidence: [],
-              divergences: [`${snapshot.path}: item not found`],
-              divergentItemId: snapshot.itemId,
-            };
-          }
           const fields = powerExpectedFieldsForSnapshot(run, snapshot);
-          const itemEvidence: string[] = [];
-          const itemDivergences: string[] = [];
-          for (const [fieldName, expected] of fields) {
-            const actual = item.fields[fieldName];
-            if (expected === undefined || actual !== expected) {
-              itemDivergences.push(
-                `${snapshot.path} › ${fieldName}: expected ${
-                  expected === undefined ? "missing authoring value" : formatFieldValue(expected)
-                }, Edge returned ${
-                  actual === undefined ? "missing" : formatFieldValue(actual)
-                }`,
-              );
-            } else {
-              itemEvidence.push(`${snapshot.path} › ${fieldName}: matched`);
-            }
-          }
-          if (!fields.length) {
-            itemEvidence.push(`${snapshot.path}: item identity matched`);
-          }
-          return {
-            evidence: itemEvidence,
-            divergences: itemDivergences,
-            divergentItemId: itemDivergences.length ? snapshot.itemId : undefined,
-          };
+          return inspectPowerEdgeItem(snapshot, item, fields);
         },
         (snapshot, observation, checkedThisPass) => {
           observations.set(normalizeId(snapshot.itemId), observation);
@@ -1488,9 +1463,10 @@ export class PublishingManager implements vscode.Disposable {
           ) {
             return;
           }
-          const matchedCount = [...observations.values()].filter((candidate) =>
-            !candidate.divergentItemId
-          ).length;
+          const matchedCount = summarizePowerEdgeObservations(
+            snapshots,
+            observations,
+          ).matchedCount;
           const summary = pass === 1
             ? `Checked ${observations.size} of ${snapshots.length} observable item(s); ${matchedCount} matched so far.`
             : `Rechecking ${pendingSnapshots.length} unmatched item(s): ${checkedThisPass} checked; ${matchedCount} of ${snapshots.length} matched.`;
@@ -1501,14 +1477,11 @@ export class PublishingManager implements vscode.Disposable {
       );
       await progressWrites;
 
-      const divergentItemIds = pendingSnapshots
-        .filter((snapshot) =>
-          observations.get(normalizeId(snapshot.itemId))?.divergentItemId
-        )
-        .map((snapshot) => snapshot.itemId);
+      const observationSummary = summarizePowerEdgeObservations(snapshots, observations);
+      const divergentItemIds = observationSummary.divergentItemIds;
       if (!divergentItemIds.length) {
         const evidence = [
-          ...powerEdgeEvidence(snapshots, observations, "evidence"),
+          ...observationSummary.evidence,
           ...skippedEvidence,
         ];
         this.output.appendLine(
@@ -1523,7 +1496,7 @@ export class PublishingManager implements vscode.Disposable {
       }
       if (Date.now() >= deadline) {
         const divergences = [
-          ...powerEdgeEvidence(snapshots, observations, "divergences"),
+          ...observationSummary.divergences,
           ...skippedEvidence,
         ];
         run = await this.setPowerEdgeVerification(
@@ -1655,24 +1628,14 @@ export class PublishingManager implements vscode.Disposable {
           run.language,
           signal,
         );
-        if (!item || normalizeId(item.id) !== normalizeId(snapshot.itemId)) {
-          missing.push(`${snapshot.path}: item not found`);
-          continue;
-        }
-        for (const [name, expected] of expectedFields) {
-          const actual = item.fields[name];
-          if (actual !== expected) {
-            missing.push(
-              `${snapshot.path} › ${name}: expected ${formatFieldValue(expected)}, Edge returned ${
-                actual === undefined ? "missing" : formatFieldValue(actual)
-              }`,
-            );
-          } else if (run.fieldSelections?.length) {
-            matches.push(
-              `${snapshot.path} › ${name}: ${formatFieldValue(expected)} matched`,
-            );
-          }
-        }
+        const observation = inspectTracedEdgeItem(
+          snapshot,
+          item,
+          expectedFields,
+          Boolean(run.fieldSelections?.length),
+        );
+        missing.push(...observation.divergences);
+        matches.push(...observation.evidence);
       }
       if (missing.length === 0) {
         return this.setStage(
@@ -2884,12 +2847,6 @@ function canonicalSiteName(
   )?.name;
 }
 
-interface PowerEdgeObservation {
-  readonly evidence: readonly string[];
-  readonly divergences: readonly string[];
-  readonly divergentItemId?: string;
-}
-
 async function mapWithConcurrency<T, TResult>(
   values: readonly T[],
   maximumConcurrency: number,
@@ -2919,12 +2876,6 @@ function summarizeFieldValue(value: string): string {
     return "(empty)";
   }
   return singleLine.length > 100 ? `${singleLine.slice(0, 97)}…` : singleLine;
-}
-
-function formatFieldValue(value: string): string {
-  return JSON.stringify(
-    value.length > 160 ? `${value.slice(0, 157)}…` : value,
-  );
 }
 
 function externalScopeReferenceEvidence(
@@ -3414,16 +3365,6 @@ function publishKindLabel(kind: PublishKind): string {
 
 function publishingProgressSummary(status: PublishingStatus): string {
   return `${status.state.toLocaleLowerCase()} · ${status.processed} item(s) processed.`;
-}
-
-function powerEdgeEvidence(
-  snapshots: readonly PublishSnapshot[],
-  observations: ReadonlyMap<string, PowerEdgeObservation>,
-  kind: "evidence" | "divergences",
-): readonly string[] {
-  return snapshots.flatMap((snapshot) =>
-    observations.get(normalizeId(snapshot.itemId))?.[kind] ?? []
-  );
 }
 
 function normalizeId(value: string): string {
