@@ -26,16 +26,11 @@ import {
 } from "../../src/transfers/transferTypes";
 import {
   fieldDraft,
-  MemoryMemento,
   pendingCheckpoint,
   publishingDraft,
   subtreeDraft,
 } from "./transferQueueStoreTests";
-
-interface IntegrationTest {
-  readonly name: string;
-  readonly execute: () => Promise<void>;
-}
+import { type IntegrationTest, MemoryMemento } from "./testSupport";
 
 class TestConnectionStore implements TransferProcessorConnectionStore {
   readonly connections = new Map<string, XmCloudConnection>();

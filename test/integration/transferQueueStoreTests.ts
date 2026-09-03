@@ -4,7 +4,6 @@ import {
   rejects,
   strictEqual,
 } from "node:assert/strict";
-import * as vscode from "vscode";
 import { TransferQueueStore } from "../../src/transfers/transferQueueStore";
 import type {
   FieldValueTransferDraft,
@@ -15,60 +14,16 @@ import type {
   SubtreeTransferRecord,
   TransferRecordStatus,
 } from "../../src/transfers/transferTypes";
+import { type IntegrationTest, MemoryMemento } from "./testSupport";
 
 const queueStateKey = "sitecoreXmCloudSync.transferQueue.v1";
-
-interface IntegrationTest {
-  readonly name: string;
-  readonly execute: () => Promise<void>;
-}
-
-export class MemoryMemento implements vscode.Memento {
-  readonly writes: unknown[] = [];
-  updateCalls = 0;
-  updateOverride:
-    | ((key: string, value: unknown, call: number) => Promise<void>)
-    | undefined;
-  private readonly values = new Map<string, unknown>();
-
-  constructor(queueState?: unknown) {
-    if (queueState !== undefined) {
-      this.values.set(queueStateKey, queueState);
-    }
-  }
-
-  get<T>(key: string): T | undefined;
-  get<T>(key: string, defaultValue: T): T;
-  get<T>(key: string, defaultValue?: T): T | undefined {
-    return (this.values.has(key) ? this.values.get(key) : defaultValue) as T | undefined;
-  }
-
-  async update(key: string, value: unknown): Promise<void> {
-    this.updateCalls += 1;
-    await this.updateOverride?.(key, value, this.updateCalls);
-    if (value === undefined) {
-      this.values.delete(key);
-    } else {
-      this.values.set(key, value);
-    }
-    this.writes.push(value);
-  }
-
-  keys(): readonly string[] {
-    return [...this.values.keys()];
-  }
-
-  readQueueState(): unknown {
-    return this.values.get(queueStateKey);
-  }
-}
 
 export const transferQueueStoreTests: readonly IntegrationTest[] = [
   {
     name: "TransferQueueStore initializes safely from missing or malformed state",
     async execute(): Promise<void> {
       const empty = new TransferQueueStore(new MemoryMemento());
-      const malformed = new TransferQueueStore(new MemoryMemento({
+      const malformed = new TransferQueueStore(queueMemento({
         processorState: "pausing",
         nextSequence: "invalid",
         records: [{ kind: "fieldValue" }],
@@ -100,7 +55,7 @@ export const transferQueueStoreTests: readonly IntegrationTest[] = [
       };
       const interruptedPublish = publishingRecord("publish", 10, "verifying");
       const failed = fieldRecord("failed", 12, "failed");
-      const memento = new MemoryMemento({
+      const memento = queueMemento({
         processorState: "running",
         nextSequence: 2,
         records: [
@@ -170,7 +125,7 @@ export const transferQueueStoreTests: readonly IntegrationTest[] = [
         match(second.record.enqueuedAt, /^\d{4}-\d{2}-\d{2}T/u);
         strictEqual(memento.updateCalls, 5);
         strictEqual(changes, 5);
-        strictEqual(typeof memento.readQueueState(), "object");
+        strictEqual(typeof memento.get(queueStateKey), "object");
       } finally {
         subscription.dispose();
         store.dispose();
@@ -331,7 +286,7 @@ export const transferQueueStoreTests: readonly IntegrationTest[] = [
       };
       const archiveMe = subtreeRecord("archive-me", 2, "failed");
       const removeMe = fieldRecord("remove-me", 3, "queued");
-      const store = new TransferQueueStore(new MemoryMemento({
+      const store = new TransferQueueStore(queueMemento({
         processorState: "paused",
         nextSequence: 200,
         records: [active, archiveMe, removeMe],
@@ -390,7 +345,7 @@ export const transferQueueStoreTests: readonly IntegrationTest[] = [
         },
         failureKind: "deploymentChanged" as const,
       };
-      const store = new TransferQueueStore(new MemoryMemento({
+      const store = new TransferQueueStore(queueMemento({
         processorState: "paused",
         nextSequence: 4,
         records: [normal, pending, deploymentChanged],
@@ -434,7 +389,7 @@ export const transferQueueStoreTests: readonly IntegrationTest[] = [
       const first = fieldRecord("first", 10, "queued");
       const second = fieldRecord("second", 20, "queued");
       const failed = fieldRecord("failed", 30, "failed");
-      const store = new TransferQueueStore(new MemoryMemento({
+      const store = new TransferQueueStore(queueMemento({
         processorState: "paused",
         nextSequence: 31,
         records: [failed, second, first],
@@ -584,4 +539,8 @@ export function pendingCheckpoint(): NonNullable<SubtreeTransferRecord["checkpoi
 
 function nextTurn(): Promise<void> {
   return new Promise((resolve) => setImmediate(resolve));
+}
+
+function queueMemento(queueState: unknown): MemoryMemento {
+  return new MemoryMemento({ [queueStateKey]: queueState });
 }
