@@ -15,10 +15,27 @@ export interface SitecoreRequestOptions {
   readonly retryable: boolean;
 }
 
+export interface SitecoreHttpRuntime {
+  fetch(input: string | URL, init: RequestInit): Promise<Response>;
+  now(): number;
+  random(): number;
+  wait(delayMilliseconds: number, signal: AbortSignal): Promise<void>;
+}
+
+const defaultRuntime: SitecoreHttpRuntime = {
+  fetch: (input, init) => fetch(input, init),
+  now: () => Date.now(),
+  random: () => Math.random(),
+  wait: waitWithSignal,
+};
+
 export class SitecoreHttpClient {
   private readonly blockedUntilByOrigin = new Map<string, number>();
 
-  constructor(private readonly log: SitecoreHttpLogger) {}
+  constructor(
+    private readonly log: SitecoreHttpLogger,
+    private readonly runtime: SitecoreHttpRuntime = defaultRuntime,
+  ) {}
 
   async request(
     input: string | URL,
@@ -36,8 +53,11 @@ export class SitecoreHttpClient {
         this.log.trace(
           `${options.name}: HTTP attempt ${attempt + 1}/${maximumRetryCount + 1}.`,
         );
-        const response = await fetch(url, { ...init, signal: options.signal });
-        const retryAfter = retryAfterMilliseconds(response);
+        const response = await this.runtime.fetch(url, {
+          ...init,
+          signal: options.signal,
+        });
+        const retryAfter = retryAfterMilliseconds(response, this.runtime.now());
         if (
           !retryable ||
           !retryableStatusCodes.has(response.status) ||
@@ -54,13 +74,18 @@ export class SitecoreHttpClient {
           return response;
         }
 
-        const delay = retryDelayMilliseconds(response, attempt);
+        const delay = retryDelayMilliseconds(
+          response,
+          attempt,
+          this.runtime.now(),
+          this.runtime.random(),
+        );
         void response.body?.cancel().catch(() => undefined);
         this.blockOrigin(url.origin, delay);
         this.log.warn(
           `${options.name}: HTTP ${response.status}; retrying attempt ${attempt + 2}/${maximumRetryCount + 1} in ${formatDelay(delay)}.`,
         );
-        await wait(delay, options.signal);
+        await this.runtime.wait(delay, options.signal);
       } catch (error: unknown) {
         if (options.signal.aborted) {
           throw abortReason(options.signal);
@@ -74,12 +99,12 @@ export class SitecoreHttpClient {
           throw error;
         }
 
-        const delay = exponentialDelayMilliseconds(attempt);
+        const delay = exponentialDelayMilliseconds(attempt, this.runtime.random());
         this.blockOrigin(url.origin, delay);
         this.log.warn(
           `${options.name}: network failure; retrying attempt ${attempt + 2}/${maximumRetryCount + 1} in ${formatDelay(delay)}.`,
         );
-        await wait(delay, options.signal);
+        await this.runtime.wait(delay, options.signal);
       }
     }
 
@@ -91,7 +116,7 @@ export class SitecoreHttpClient {
   }
 
   private blockOrigin(origin: string, delayMilliseconds: number): void {
-    const blockedUntil = Date.now() + delayMilliseconds;
+    const blockedUntil = this.runtime.now() + delayMilliseconds;
     const current = this.blockedUntilByOrigin.get(origin) ?? 0;
     if (blockedUntil > current) {
       this.blockedUntilByOrigin.set(origin, blockedUntil);
@@ -108,27 +133,38 @@ export class SitecoreHttpClient {
       return;
     }
 
-    const delay = blockedUntil - Date.now();
+    const delay = blockedUntil - this.runtime.now();
     if (delay <= 0) {
       this.blockedUntilByOrigin.delete(origin);
       return;
     }
 
     this.log.debug(`${requestName}: waiting ${formatDelay(delay)} for the Sitecore endpoint cooldown.`);
-    await wait(delay, signal);
+    await this.runtime.wait(delay, signal);
   }
 }
 
-function retryDelayMilliseconds(response: Response, retryIndex: number): number {
-  const retryAfter = retryAfterMilliseconds(response);
-  return retryAfter ?? exponentialDelayMilliseconds(retryIndex);
+function retryDelayMilliseconds(
+  response: Response,
+  retryIndex: number,
+  now: number,
+  random: number,
+): number {
+  const retryAfter = retryAfterMilliseconds(response, now);
+  return retryAfter ?? exponentialDelayMilliseconds(retryIndex, random);
 }
 
-function retryAfterMilliseconds(response: Response): number | undefined {
-  return parseRetryAfterMilliseconds(response.headers.get("retry-after"));
+function retryAfterMilliseconds(
+  response: Response,
+  now: number,
+): number | undefined {
+  return parseRetryAfterMilliseconds(response.headers.get("retry-after"), now);
 }
 
-function parseRetryAfterMilliseconds(value: string | null): number | undefined {
+function parseRetryAfterMilliseconds(
+  value: string | null,
+  now: number,
+): number | undefined {
   if (!value) {
     return undefined;
   }
@@ -142,16 +178,19 @@ function parseRetryAfterMilliseconds(value: string | null): number | undefined {
   if (Number.isNaN(date)) {
     return undefined;
   }
-  return Math.max(0, date - Date.now());
+  return Math.max(0, date - now);
 }
 
-function exponentialDelayMilliseconds(retryIndex: number): number {
+function exponentialDelayMilliseconds(retryIndex: number, random: number): number {
   const baseDelay = initialRetryDelayMilliseconds * 2 ** retryIndex;
-  const jitter = Math.floor(Math.random() * Math.max(1, baseDelay * 0.25));
+  const jitter = Math.floor(random * Math.max(1, baseDelay * 0.25));
   return baseDelay + jitter;
 }
 
-function wait(delayMilliseconds: number, signal: AbortSignal): Promise<void> {
+function waitWithSignal(
+  delayMilliseconds: number,
+  signal: AbortSignal,
+): Promise<void> {
   throwIfAborted(signal);
   return new Promise((resolve, reject) => {
     const timeout = setTimeout(() => {

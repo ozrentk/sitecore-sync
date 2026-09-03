@@ -106,7 +106,7 @@ Prefer repository scripts over ad hoc compiler, bundler, or packaging commands. 
 
 ### Current state
 
-The repository has a TypeScript unit-test suite under `test/unit/`. It uses Node's built-in test runner, Node's strict assertion API, and `tsx`, and runs through `npm test`. Initial coverage includes XM Cloud server URL normalization, Sitecore reference discovery, and collapsed Power Publish scope graph planning. The extension-host smoke suite under `test/integration/` uses `@vscode/test-electron` and covers activation, contributed-command registration, and configuration defaults through `npm run test:integration`.
+The repository has a TypeScript unit-test suite under `test/unit/`. It uses Node's built-in test runner, Node's strict assertion API, and `tsx`, and runs through `npm test`. Current coverage includes XM Cloud server URL normalization, Sitecore reference discovery, collapsed Power Publish scope graph planning, and Sitecore HTTP transport retry, cooldown, cancellation, and log-redaction behavior. The extension-host smoke suite under `test/integration/` uses `@vscode/test-electron` and covers activation, contributed-command registration, and configuration defaults through `npm run test:integration`.
 
 Run `npm test` for unit-test changes and `npm run test:integration` for extension activation, manifest wiring, or configuration changes. Continue to perform focused manual Extension Development Host checks for UI behavior that the smoke suite does not exercise. Record exactly what was and was not exercised.
 
