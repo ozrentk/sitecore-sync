@@ -1,4 +1,5 @@
 .vscode/**
+.github/**
 .agents/**
 .xm-cloud-sync/**
 .test-out/**

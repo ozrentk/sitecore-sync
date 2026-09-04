@@ -110,6 +110,8 @@ The repository has a TypeScript unit-test suite under `test/unit/`. It uses Node
 
 Run `npm test` for unit-test changes and `npm run test:integration` for extension activation, manifest wiring, or configuration changes. Continue to perform focused manual Extension Development Host checks for UI behavior that the smoke suite does not exercise. Record exactly what was and was not exercised.
 
+The Windows GitHub Actions workflow under `.github/workflows/ci.yml` runs type checking, unit tests, extension-host tests, and VSIX packaging for pull requests and pushes targeting `develop` or `main`, and supports manual runs. Keep the workflow aligned with the documented local commands and the checked-in lockfile.
+
 ### Expectations for changed behavior
 
 - Every defect fix should include a regression test when the affected logic can be tested without disproportionate setup.
