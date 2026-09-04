@@ -52,14 +52,21 @@ test("publishing form message readers accept only known object messages", () => 
 
 test("Power Publish scope messages validate IDs before reaching the graph", () => {
   strictEqual(readPowerScopeId({ scopeId: "scope-a" }), "scope-a");
+  strictEqual(readPowerScopeId({ scopeId: " scope-a " }), "scope-a");
+  strictEqual(readPowerScopeId({ scopeId: "   " }), undefined);
   strictEqual(readPowerScopeId({ scopeId: 42 }), undefined);
   strictEqual(readPowerScopeId(null), undefined);
   deepStrictEqual(
-    readPowerScopeSelection({ selectedScopeIds: ["scope-a", "scope-b"] }),
+    readPowerScopeSelection({ selectedScopeIds: [" scope-a ", "scope-b"] }),
     ["scope-a", "scope-b"],
   );
   match(String(readPowerScopeSelection({ selectedScopeIds: ["scope-a", 42] })), /invalid/u);
   match(String(readPowerScopeSelection({ selectedScopeIds: "scope-a" })), /invalid/u);
+  match(String(readPowerScopeSelection({ selectedScopeIds: ["scope-a", " "] })), /invalid/u);
+  match(
+    String(readPowerScopeSelection({ selectedScopeIds: ["scope-a", "SCOPE-A"] })),
+    /invalid/u,
+  );
 });
 
 test("Traced Publish submission normalizes trusted selections", () => {

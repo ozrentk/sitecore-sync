@@ -57,9 +57,11 @@ export function readPowerScopeFormMessageType(
 }
 
 export function readPowerScopeId(value: unknown): string | undefined {
-  return isRecord(value) && typeof value.scopeId === "string"
-    ? value.scopeId
-    : undefined;
+  if (!isRecord(value) || typeof value.scopeId !== "string") {
+    return undefined;
+  }
+  const scopeId = value.scopeId.trim();
+  return scopeId || undefined;
 }
 
 export function readPowerScopeSelection(value: unknown): readonly string[] | string {
@@ -70,7 +72,15 @@ export function readPowerScopeSelection(value: unknown): readonly string[] | str
   ) {
     return "The selected Power Publish scopes are invalid.";
   }
-  return value.selectedScopeIds;
+  const selectedScopeIds = value.selectedScopeIds.map((id) => id.trim());
+  if (
+    selectedScopeIds.some((id) => !id) ||
+    new Set(selectedScopeIds.map((id) => id.toLocaleLowerCase())).size !==
+      selectedScopeIds.length
+  ) {
+    return "The selected Power Publish scopes are invalid.";
+  }
+  return selectedScopeIds;
 }
 
 export function validateTracedPublishSubmission(
