@@ -1,4 +1,8 @@
-import { SitecoreHttpClient, type SitecoreHttpLogger } from "./sitecoreHttpClient";
+import {
+  SitecoreHttpClient,
+  type SitecoreHttpLogger,
+  type SitecoreHttpRuntime,
+} from "./sitecoreHttpClient";
 
 interface EdgeGraphQlError {
   readonly message?: unknown;
@@ -67,8 +71,8 @@ export interface EdgeSiteInfo {
 export class ExperienceEdgeClient {
   private readonly http: SitecoreHttpClient;
 
-  constructor(log: SitecoreHttpLogger) {
-    this.http = new SitecoreHttpClient(log);
+  constructor(log: SitecoreHttpLogger, httpRuntime?: SitecoreHttpRuntime) {
+    this.http = new SitecoreHttpClient(log, httpRuntime);
   }
 
   async item(
@@ -107,9 +111,16 @@ export class ExperienceEdgeClient {
     ) {
       throw new Error("Experience Edge returned an invalid item.");
     }
+    if (item.fields !== undefined && !Array.isArray(item.fields)) {
+      throw new Error("Experience Edge returned an invalid item.");
+    }
     const fields: Record<string, string> = {};
     for (const field of item.fields ?? []) {
-      if (typeof field.name === "string" && typeof field.value === "string") {
+      if (
+        isRecord(field) &&
+        typeof field.name === "string" &&
+        typeof field.value === "string"
+      ) {
         fields[field.name] = field.value;
       }
     }
@@ -174,8 +185,12 @@ export class ExperienceEdgeClient {
       {},
       signal,
     );
-    return (payload.data?.site?.allSiteInfo?.results ?? []).flatMap(
-      (site): readonly EdgeSiteInfo[] => typeof site.name === "string"
+    const sites = payload.data?.site?.allSiteInfo?.results ?? [];
+    if (!Array.isArray(sites)) {
+      throw new Error("Experience Edge returned an invalid site list.");
+    }
+    return sites.flatMap(
+      (site): readonly EdgeSiteInfo[] => isRecord(site) && typeof site.name === "string"
         ? [{
             name: site.name,
             hostname: typeof site.hostname === "string" ? site.hostname : undefined,
@@ -233,22 +248,35 @@ export class ExperienceEdgeClient {
       { name, signal, retryable: true },
     );
     const text = await response.text();
-    let payload: T;
+    let parsed: unknown;
     try {
-      payload = JSON.parse(text) as T;
+      parsed = JSON.parse(text) as unknown;
     } catch {
       throw new Error(`${name} returned invalid JSON.`);
     }
+    if (!isRecord(parsed)) {
+      throw new Error(`${name} returned an invalid response.`);
+    }
+    const payload = parsed as T;
     if (!response.ok) {
       throw new Error(`${name} failed (${response.status}).`);
     }
-    if (payload.errors?.length) {
-      const messages = payload.errors
-        .map((error) => error.message)
-        .filter((value): value is string => typeof value === "string")
+    const errors = payload.errors;
+    if (errors !== undefined && !Array.isArray(errors)) {
+      throw new Error(`${name} returned an invalid response.`);
+    }
+    if (errors?.length) {
+      const messages = errors
+        .flatMap((error): readonly string[] =>
+          isRecord(error) && typeof error.message === "string" ? [error.message] : []
+        )
         .join("; ");
       throw new Error(messages || `${name} returned a GraphQL error.`);
     }
     return payload;
   }
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
