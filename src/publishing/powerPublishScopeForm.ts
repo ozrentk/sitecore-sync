@@ -1,5 +1,14 @@
 import * as vscode from "vscode";
 import type { ObservedReferenceKind } from "./referenceDiscovery";
+import {
+  defaultPublishingFormRuntime,
+  type PublishingFormRuntime,
+} from "./publishingFormRuntime";
+import {
+  readPowerScopeFormMessageType,
+  readPowerScopeId,
+  readPowerScopeSelection,
+} from "./publishingFormValidation";
 
 export type PowerScopeScanStatus =
   | "notScanned"
@@ -46,12 +55,6 @@ export interface PowerScopeReviewResult {
   readonly selectedScopeIds: readonly string[];
 }
 
-type ScopeFormMessage =
-  | { readonly type: "ready" }
-  | { readonly type: "cancel" }
-  | { readonly type: "scan"; readonly scopeId?: unknown }
-  | { readonly type: "submit"; readonly selectedScopeIds?: unknown };
-
 export async function showPowerPublishScopeForm(
   extensionUri: vscode.Uri,
   initial: PowerScopeReviewState,
@@ -65,9 +68,10 @@ export async function showPowerPublishScopeForm(
   ) => PowerScopeReviewResult | string,
   signal: AbortSignal,
   initialSelectedScopeIds: readonly string[] = [],
+  runtime: PublishingFormRuntime = defaultPublishingFormRuntime,
 ): Promise<PowerScopeReviewResult | undefined> {
   const mediaUri = vscode.Uri.joinPath(extensionUri, "media", "publishing");
-  const panel = vscode.window.createWebviewPanel(
+  const panel = runtime.createWebviewPanel(
     "xmCloudSync.powerPublishScope",
     "Review Power Publish Scope",
     vscode.ViewColumn.Active,
@@ -80,7 +84,7 @@ export async function showPowerPublishScopeForm(
   panel.iconPath = vscode.Uri.joinPath(extensionUri, "media", "sitecore-xm-cloud-sync.svg");
   let html: string;
   try {
-    html = await loadFormHtml(panel.webview, mediaUri);
+    html = await loadFormHtml(panel.webview, mediaUri, runtime);
   } catch (error: unknown) {
     panel.dispose();
     throw error;
@@ -147,40 +151,52 @@ export async function showPowerPublishScopeForm(
             });
           }
         })
-        .finally(() => activeScans.delete(scopeId));
+        .finally(() => activeScans.delete(scopeId))
+        .catch(fail);
       activeScans.set(scopeId, scan);
     };
 
     signal.addEventListener("abort", abort, { once: true });
     panel.onDidDispose(() => finish(undefined, false));
-    subscription = panel.webview.onDidReceiveMessage((message: ScopeFormMessage) => {
+    subscription = panel.webview.onDidReceiveMessage((message: unknown) => {
       try {
-        switch (message.type) {
+        switch (readPowerScopeFormMessageType(message)) {
           case "ready":
-            void postState(latest).then(() => startScan(latest.rootScopeId));
+            void postState(latest).then(
+              () => startScan(latest.rootScopeId),
+              fail,
+            );
             return;
           case "cancel":
             finish(undefined);
             return;
           case "scan":
-            if (typeof message.scopeId === "string") {
-              startScan(message.scopeId);
+            {
+              const scopeId = readPowerScopeId(message);
+              if (scopeId) {
+                startScan(scopeId);
+              }
             }
             return;
           case "submit": {
-            if (
-              !Array.isArray(message.selectedScopeIds) ||
-              !message.selectedScopeIds.every((id) => typeof id === "string")
-            ) {
-              void panel.webview.postMessage({
-                type: "validationError",
-                message: "The selected Power Publish scopes are invalid.",
-              });
+            const selection = readPowerScopeSelection(message);
+            if (typeof selection === "string") {
+              void Promise.resolve(
+                panel.webview.postMessage({
+                  type: "validationError",
+                  message: selection,
+                }),
+              ).catch(fail);
               return;
             }
-            const result = validateSelection(message.selectedScopeIds);
+            const result = validateSelection(selection);
             if (typeof result === "string") {
-              void panel.webview.postMessage({ type: "validationError", message: result });
+              void Promise.resolve(
+                panel.webview.postMessage({
+                  type: "validationError",
+                  message: result,
+                }),
+              ).catch(fail);
               return;
             }
             finish(result);
@@ -201,11 +217,12 @@ export async function showPowerPublishScopeForm(
 async function loadFormHtml(
   webview: vscode.Webview,
   mediaUri: vscode.Uri,
+  runtime: PublishingFormRuntime,
 ): Promise<string> {
   const htmlUri = vscode.Uri.joinPath(mediaUri, "powerPublishScope.html");
   const styleUri = webview.asWebviewUri(vscode.Uri.joinPath(mediaUri, "powerPublishScope.css"));
   const scriptUri = webview.asWebviewUri(vscode.Uri.joinPath(mediaUri, "powerPublishScope.js"));
-  const bytes = await vscode.workspace.fs.readFile(htmlUri);
+  const bytes = await runtime.readFile(htmlUri);
   return Buffer.from(bytes).toString("utf8")
     .replaceAll("{{cspSource}}", webview.cspSource)
     .replaceAll("{{styleUri}}", styleUri.toString())
