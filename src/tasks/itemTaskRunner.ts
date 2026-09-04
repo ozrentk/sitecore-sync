@@ -226,12 +226,12 @@ export class ItemTaskRunner implements vscode.Disposable {
       );
 
       this.output.clear();
-      this.output.appendLine(`Task: ${plugin.name} (${plugin.id})`);
-      this.output.appendLine(`Item: ${candidate.item.path}`);
-      this.output.appendLine(
-        `Context: ${capitalize(candidate.side)} · ${candidate.connection.name} · ${candidate.language} · v${candidate.item.version}`,
-      );
+      this.output.appendLine(`*** Starting task: ${plugin.name} (${plugin.id})... ***`);
       this.output.appendLine(`Script: ${plugin.scriptPath}`);
+      this.output.appendLine(`Item path: ${candidate.item.path}`);
+      this.output.appendLine(
+        `Context: ${candidate.connection.name} · ${candidate.language} · v${candidate.item.version}`,
+      );
       this.output.appendLine("");
       this.output.show(true);
 
