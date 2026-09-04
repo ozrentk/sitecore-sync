@@ -23,7 +23,7 @@ try {
   await build({
     entryPoints: [path.join(repositoryRoot, "test", "integration", "index.ts")],
     bundle: true,
-    external: ["vscode"],
+    external: ["vscode", "playwright-core"],
     format: "cjs",
     platform: "node",
     target: "node20",
