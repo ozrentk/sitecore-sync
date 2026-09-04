@@ -231,6 +231,8 @@ npm run test:integration
 
 The first integration run downloads VS Code 1.100.0 into `.vscode-test/`, then launches an isolated Extension Development Host against an empty temporary workspace. It verifies activation, contributed-command registration, the default extension configuration, connection and credential persistence, queue and operation-sequence persistence, item-task discovery and isolated JavaScript worker execution, publishing configuration webview messaging and lifecycle, PublishingManager batch execution, restart recovery, diagnostic handoff, failure persistence, and queue recovery, and transfer-processor lifecycle, field-transfer, subtree-checkpoint, and deployment-monitoring behavior without contacting Sitecore. Run `npm run test:all` to execute both unit and extension-host suites.
 
+GitHub Actions runs the complete validation cycle on Windows Server 2025 with Node.js 24 for pull requests and pushes targeting `develop` or `main`. The workflow can also be started manually. It installs the checked-in dependency graph with `npm ci`, type-checks the extension and tests, runs both test suites, and builds the VSIX without publishing it.
+
 ## Build an installable extension
 
 ```powershell
