@@ -1,8 +1,21 @@
 import { chromium, type Browser } from "playwright-core";
+import {
+  classifyBrowserDomSelectorFailure,
+  evaluateBrowserDomObservation,
+  normalizeBrowserDomText,
+} from "./browserDomObservation";
 
 const browserChannels = ["chrome", "msedge"] as const;
 const navigationTimeoutMilliseconds = 30_000;
 const selectorTimeoutMilliseconds = 15_000;
+
+export interface BrowserDomRuntime {
+  launch(channel: typeof browserChannels[number]): Promise<Browser>;
+}
+
+const defaultBrowserDomRuntime: BrowserDomRuntime = {
+  launch: (channel) => chromium.launch({ channel, headless: true }),
+};
 
 export interface BrowserDomAssertion {
   readonly itemPath: string;
@@ -29,10 +42,19 @@ export async function verifyBrowserDom(
   url: string,
   assertions: readonly BrowserDomAssertion[],
   signal: AbortSignal,
+  runtime: BrowserDomRuntime = defaultBrowserDomRuntime,
 ): Promise<BrowserDomVerificationResult> {
-  const { browser, channel } = await launchInstalledBrowser();
+  if (signal.aborted) {
+    throw signal.reason;
+  }
+  const { browser, channel } = await launchInstalledBrowser(runtime);
+  let closePromise: Promise<void> | undefined;
+  const closeBrowser = (): Promise<void> => {
+    closePromise ??= browser.close().catch(() => undefined);
+    return closePromise;
+  };
   const abort = (): void => {
-    void browser.close();
+    void closeBrowser();
   };
   signal.addEventListener("abort", abort, { once: true });
   try {
@@ -56,18 +78,18 @@ export async function verifyBrowserDom(
           timeout: selectorTimeoutMilliseconds,
         });
       } catch (error: unknown) {
-        const message = errorMessage(error);
+        const failure = classifyBrowserDomSelectorFailure(error);
         results.push({
           ...assertion,
-          status: isInvalidSelectorError(message) ? "invalid" : "missing",
+          status: failure.status,
           matchCount: 0,
           observedTexts: [],
-          detail: message,
+          detail: failure.detail,
         });
         continue;
       }
       try {
-        const expected = normalizeDomText(assertion.expected);
+        const expected = normalizeBrowserDomText(assertion.expected);
         if (expected) {
           await locator.filter({ hasText: expected }).first().waitFor({
             state: "attached",
@@ -80,19 +102,12 @@ export async function verifyBrowserDom(
       const matchCount = await locator.count();
       const observedTexts = await Promise.all(
         Array.from({ length: Math.min(matchCount, 5) }, async (_value, index) =>
-          normalizeDomText(await locator.nth(index).textContent() ?? "")
+          normalizeBrowserDomText(await locator.nth(index).textContent() ?? "")
         ),
       );
-      const comparableExpected = normalizeDomTextForComparison(assertion.expected);
       results.push({
         ...assertion,
-        status: observedTexts.some((text) =>
-          comparableExpected
-            ? normalizeDomTextForComparison(text).includes(comparableExpected)
-            : text === ""
-        )
-          ? "matched"
-          : "different",
+        status: evaluateBrowserDomObservation(assertion.expected, observedTexts),
         matchCount,
         observedTexts,
       });
@@ -110,11 +125,11 @@ export async function verifyBrowserDom(
     throw error;
   } finally {
     signal.removeEventListener("abort", abort);
-    await browser.close().catch(() => undefined);
+    await closeBrowser();
   }
 }
 
-async function launchInstalledBrowser(): Promise<{
+async function launchInstalledBrowser(runtime: BrowserDomRuntime): Promise<{
   readonly browser: Browser;
   readonly channel: string;
 }> {
@@ -122,7 +137,7 @@ async function launchInstalledBrowser(): Promise<{
   for (const channel of browserChannels) {
     try {
       return {
-        browser: await chromium.launch({ channel, headless: true }),
+        browser: await runtime.launch(channel),
         channel,
       };
     } catch (error: unknown) {
@@ -132,18 +147,6 @@ async function launchInstalledBrowser(): Promise<{
   throw new Error(
     `Browser DOM verification requires Google Chrome or Microsoft Edge. ${failures.join(" | ")}`,
   );
-}
-
-function normalizeDomText(value: string): string {
-  return value.replace(/\s+/gu, " ").trim();
-}
-
-function normalizeDomTextForComparison(value: string): string {
-  return normalizeDomText(value).toLowerCase();
-}
-
-function isInvalidSelectorError(message: string): boolean {
-  return /invalid|unexpected token|not a valid selector|failed to parse/iu.test(message);
 }
 
 function errorMessage(error: unknown): string {
