@@ -29,6 +29,7 @@ import { showPowerPublishScopeForm } from "./powerPublishScopeForm";
 import { parseReferenceField } from "./referenceDiscovery";
 import { evaluateRenderedLayout } from "./renderedLayoutVerification";
 import { readPublishingProfiles, readPublishRuns } from "./publishingRunState";
+import { classifyPublishingTrace } from "./publishingTraceConclusion";
 import {
   diagnosticStageIds,
   finishRetryWithFailure,
@@ -814,7 +815,7 @@ export class PublishingManager implements vscode.Disposable {
           }
         },
       );
-      await this.complete(run, classify(run));
+      await this.complete(run, classifyPublishingTrace(run));
     } catch (error: unknown) {
       if (isAbort(error)) {
         await this.saveRun(original);
@@ -1060,7 +1061,7 @@ export class PublishingManager implements vscode.Disposable {
       run = await this.verifyLayout(run, settings, controller.signal);
       run = await this.verifyApplication(run, controller.signal);
       run = await this.verifyBrowserDom(run, controller.signal);
-      await this.complete(run, classify(run));
+      await this.complete(run, classifyPublishingTrace(run));
     } catch (error: unknown) {
       if (isAbort(error)) {
         await this.saveRun(original);
@@ -1280,7 +1281,7 @@ export class PublishingManager implements vscode.Disposable {
     run = await this.verifyLayout(run, profileSettings, signal);
     run = await this.verifyApplication(run, signal);
     run = await this.verifyBrowserDom(run, signal);
-    const conclusion = classify(run);
+    const conclusion = classifyPublishingTrace(run);
     await this.complete(run, conclusion);
   }
 
@@ -1410,7 +1411,7 @@ export class PublishingManager implements vscode.Disposable {
     run = await this.verifyLayout(run, verificationSettings, signal);
     run = await this.verifyApplication(run, signal);
     run = await this.verifyBrowserDom(run, signal);
-    await this.complete(run, classify(run));
+    await this.complete(run, classifyPublishingTrace(run));
   }
 
   private async verifyPowerEdgeItems(
@@ -2856,35 +2857,6 @@ function initialStages(
             : undefined,
     },
   ];
-}
-
-function classify(run: PublishRun): string {
-  const stage = (id: TraceStage["id"]): TraceStage | undefined =>
-    run.stages.find((candidate) => candidate.id === id);
-  if (stage("edgeItem")?.status === "diverged") {
-    return "Likely boundary: Sitecore publishing → Experience Edge ingestion.";
-  }
-  if (stage("edgeLayout")?.status === "diverged") {
-    return "Likely boundary: raw Experience Edge item → rendered route layout.";
-  }
-  if (stage("browserDom")?.status === "diverged") {
-    return "The browser found the configured element, but its rendered text differed from the selected field value.";
-  }
-  if (stage("browserDom")?.status === "inconclusive") {
-    return "Browser DOM verification could not identify every configured selector conclusively.";
-  }
-  if (stage("application")?.status === "diverged") {
-    return "Likely boundary: rendered Experience Edge layout → application or CDN response.";
-  }
-  if (stage("application")?.status === "inconclusive") {
-    return stage("browserDom")?.status === "matched"
-      ? "Selected values matched in the browser DOM; the server response alone was inconclusive."
-      : "Rendered layout matched, but the server response did not prove what the browser rendered.";
-  }
-  if (run.stages.some((candidate) => candidate.status === "failed")) {
-    return "Publishing completed, but an optional diagnostic stage could not be evaluated.";
-  }
-  return "Publishing and every configured diagnostic stage matched.";
 }
 
 function traceHtml(run: PublishRun, cspSource: string): string {
