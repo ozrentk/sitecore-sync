@@ -18,6 +18,7 @@ import {
   verifyBrowserDom,
   type BrowserDomAssertion,
 } from "./browserDomVerifier";
+import { evaluateBrowserDomResult } from "./browserDomVerification";
 import { evaluateApplicationResponse } from "./applicationVerification";
 import {
   CollapsedScopeGraph,
@@ -1795,38 +1796,13 @@ export class PublishingManager implements vscode.Disposable {
         assertions,
         signal,
       );
-      const different = result.assertions.filter((assertion) =>
-        assertion.status === "different"
-      );
-      const uncertain = result.assertions.filter((assertion) =>
-        assertion.status === "missing" || assertion.status === "invalid"
-      );
-      const status: TraceStageStatus = different.length
-        ? "diverged"
-        : uncertain.length
-          ? "inconclusive"
-          : "matched";
-      const evidence = [
-        `Browser: ${result.browserChannel}`,
-        `Requested URL: ${result.requestedUrl}`,
-        `Final URL: ${result.finalUrl}`,
-        ...result.assertions.map((assertion) => {
-          const observed = assertion.observedTexts.length
-            ? assertion.observedTexts.map(formatFieldValue).join(", ")
-            : "none";
-          return `${assertion.itemPath} › ${assertion.fieldName}: ${assertion.status}; selector ${JSON.stringify(assertion.selector)}; matches=${assertion.matchCount}; expected=${formatFieldValue(assertion.expected)}; observed=${observed}`;
-        }),
-      ];
+      const outcome = evaluateBrowserDomResult(result);
       run = await this.setStage(
         run,
         "browserDom",
-        status,
-        status === "matched"
-          ? `${assertions.length} selected field value(s) matched in the browser-rendered DOM.`
-          : status === "diverged"
-            ? `${different.length} selector assertion(s) found elements with different rendered text.`
-            : `${uncertain.length} selector assertion(s) could not identify a browser-rendered value conclusively.`,
-        evidence,
+        outcome.status,
+        outcome.summary,
+        outcome.evidence,
       );
     } catch (error: unknown) {
       if (isAbort(error)) {
