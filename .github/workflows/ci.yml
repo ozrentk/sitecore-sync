@@ -48,3 +48,11 @@ jobs:
 
       - name: Build VSIX
         run: npm run package
+
+      - name: Upload installable VSIX
+        uses: actions/upload-artifact@v7
+        with:
+          path: dist/sitecore-xm-cloud-sync.vsix
+          if-no-files-found: error
+          retention-days: 14
+          archive: false
