@@ -23,7 +23,9 @@ If the Authoring API returns identical site records, the extension displays the 
 
 ## Open a comparison
 
-Run **XM Cloud Sync: Open Comparison** from the Command Palette or use the diff icon in the XM Cloud Sync activity view. The comparison opens as a document-style tab with independent left and right connection and language selectors plus a swap button. Choices are remembered per workspace.
+Run **XM Cloud Sync: Open Comparison** from the Command Palette or use the diff icon in the XM Cloud Sync activity view. The comparison opens as a document-style tab with left and right connection and language selectors plus swap and **Lock languages** controls. Choices are remembered per workspace.
+
+Enable **Lock languages** to keep both sides on the same configured Sitecore language. If the current languages differ, choose which current language should be used on both sides. A language or connection change that cannot preserve the lock is blocked and offers an explicit unlock action; after unlocking for a connection change, the new side uses `en` when available or its first configured language. The lock never treats Sitecore language fallback or an item-level fallback version as proof that a language is configured.
 
 One XM Cloud connection is sufficient. Select the same connection on both sides to compare languages such as `en` and `de`, or select different connections to compare environments. **Compare with…** also offers the selected connection itself for cross-language comparison.
 

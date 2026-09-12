@@ -42,6 +42,7 @@ const rightSelect = document.getElementById("right-connection");
 const leftLanguageSelect = document.getElementById("left-language");
 const rightLanguageSelect = document.getElementById("right-language");
 const swapButton = document.getElementById("swap");
+const languageLock = document.getElementById("language-lock");
 const workspace = document.getElementById("workspace");
 
 function normalizeItemId(itemId) {
@@ -157,7 +158,10 @@ function renderLanguageOptions(side, select, selectedLanguage) {
   const languageState = state.languages[side];
   select.replaceChildren();
   const values = [...languageState.values];
-  if (selectedLanguage && !values.some((language) => language.name === selectedLanguage)) {
+  if (
+    selectedLanguage &&
+    !values.some((language) => language.name.toLowerCase() === selectedLanguage.toLowerCase())
+  ) {
     values.unshift({ name: selectedLanguage, displayName: selectedLanguage });
   }
   if (!values.length) {
@@ -174,7 +178,7 @@ function renderLanguageOptions(side, select, selectedLanguage) {
     option.textContent = language.displayName && language.displayName !== language.name
       ? `${language.displayName} (${language.name})`
       : language.name;
-    option.selected = language.name === selectedLanguage;
+    option.selected = language.name.toLowerCase() === selectedLanguage?.toLowerCase();
     select.append(option);
   }
   select.disabled = languageState.loading;
@@ -1680,6 +1684,8 @@ function render() {
   renderLanguageOptions("left", leftLanguageSelect, state.selection.leftLanguage);
   renderLanguageOptions("right", rightLanguageSelect, state.selection.rightLanguage);
   swapButton.disabled = state.connections.length < 1;
+  languageLock.checked = state.selection.languagesLocked === true;
+  languageLock.disabled = !state.selection.leftConnectionId || !state.selection.rightConnectionId;
 
   if (state.connections.length < 1) {
     const empty = document.createElement("div");
@@ -1860,6 +1866,10 @@ rightLanguageSelect.addEventListener("change", () => {
 
 swapButton.addEventListener("click", () => {
   vscode.postMessage({ type: "swapConnections" });
+});
+
+languageLock.addEventListener("change", () => {
+  vscode.postMessage({ type: "setLanguageLock", locked: languageLock.checked });
 });
 
 window.addEventListener("message", (event) => {
