@@ -3,11 +3,13 @@ import type { ConnectionStore } from "../connections/connectionStore";
 import {
   AuthoringContentClient,
   type AuthoringItemDetails,
+  type AuthoringItemIconReference,
   type AuthoringItemLocator,
   type AuthoringLanguage,
   type AuthoringTreeItem,
   type AuthoringTreeLevel,
 } from "../sitecore/authoringClient";
+import { resolveSitecoreThemeIconUrl } from "../sitecore/itemIcon";
 import {
   FieldDiffViewProvider,
   fieldDiffViewId,
@@ -42,6 +44,10 @@ const subtreeTransferModeKey = "sitecoreXmCloudSync.subtreeTransferMode.v1";
 const defaultLanguage = "en";
 const authoringRootPath = "/sitecore";
 const traversalConcurrencyPerSide = 2;
+const itemIconFieldId = "06d5295ced2f4a54b92f26228d113318";
+const itemIconLoadConcurrency = 4;
+const maximumItemIconReferences = 4_096;
+const maximumItemIconImages = 256;
 
 type TreeSide = "left" | "right";
 
@@ -109,6 +115,11 @@ interface LanguageLockQuickPickItem extends vscode.QuickPickItem {
   readonly candidate: LanguageLockCandidate;
 }
 
+interface CachedItemIcon {
+  readonly iconKey: string;
+  readonly dataUri: string;
+}
+
 class FieldDiffContentProvider implements vscode.TextDocumentContentProvider {
   private readonly contents = new Map<string, string>();
   private nextDocumentId = 1;
@@ -139,6 +150,11 @@ export class ComparisonPanelManager implements vscode.Disposable {
   private readonly pendingLanguages = new Map<string, Promise<readonly AuthoringLanguage[]>>();
   private readonly itemDetailsCache = new Map<string, AuthoringItemDetails>();
   private readonly pendingItemDetails = new Map<string, Promise<AuthoringItemDetails>>();
+  private readonly itemIconReferenceCache = new Map<string, string | undefined>();
+  private readonly pendingItemIconReferences = new Map<string, Promise<string | undefined>>();
+  private readonly itemIconCache = new Map<string, CachedItemIcon | undefined>();
+  private readonly pendingItemIcons = new Map<string, Promise<CachedItemIcon | undefined>>();
+  private readonly itemIconLoadWaiters: Array<() => void> = [];
   private readonly requestControllers = new Set<AbortController>();
   private readonly subtreeLoadControllers = new Map<string, AbortController>();
   private readonly pendingSubtreeConfirmations = new Set<string>();
@@ -148,6 +164,9 @@ export class ComparisonPanelManager implements vscode.Disposable {
   private readonly pendingFavoriteReveal = new Map<string, (found: boolean) => void>();
   private connectionSignature: string;
   private nextFavoriteRevealId = 1;
+  private nextItemIconKey = 1;
+  private activeItemIconLoads = 0;
+  private itemIconGeneration = 0;
   private pendingFavoriteNavigation: FavoriteNavigation | undefined;
   private selectedFieldDiffItem: FieldDiffSelection | undefined;
   private selectionChangeQueue: Promise<void> = Promise.resolve();
@@ -263,6 +282,15 @@ export class ComparisonPanelManager implements vscode.Disposable {
       record.target.connectionId,
       record.target.itemId,
     );
+    if (normalizeItemId(record.target.fieldId) === itemIconFieldId) {
+      this.invalidateItemIcon(record.target.connectionId, record.target.itemId);
+      await this.loadAndPostItemIcons(
+        targetSide,
+        record.target.connectionId,
+        record.target.language,
+        [record.target.itemId],
+      );
+    }
     await this.refreshFieldDiffView();
   }
 
@@ -1437,6 +1465,8 @@ export class ComparisonPanelManager implements vscode.Disposable {
       this.cancelRequests();
       this.treeLevelCache.clear();
       this.itemDetailsCache.clear();
+      this.clearItemIconCaches();
+      await this.panel?.webview.postMessage({ type: "itemIconsReset" });
       await this.loadSubtree(rowKey, leftItemId, rightItemId, "refreshAll");
     } finally {
       this.pendingSubtreeConfirmations.delete(rowKey);
@@ -1673,6 +1703,7 @@ export class ComparisonPanelManager implements vscode.Disposable {
           this.treeCacheKey(connectionId, language, { path: entry.path }),
         );
         this.invalidateItemDetails(connectionId, language, entry.itemId);
+        this.invalidateItemIcon(connectionId, entry.itemId);
       }
     }
 
@@ -1747,12 +1778,14 @@ export class ComparisonPanelManager implements vscode.Disposable {
     this.log.info(`Refreshing comparison item ${rowKey}.`);
     for (const { connectionId, language, itemId } of sides) {
       this.invalidateItemDetails(connectionId, language, itemId);
+      this.invalidateItemIcon(connectionId, itemId);
     }
 
     try {
-      const requests = sides.map(({ side, connectionId, itemId }) =>
+      const requests = sides.flatMap(({ side, connectionId, language, itemId }) => [
         this.loadAndPostItemDetails(side, connectionId, itemId),
-      );
+        this.loadAndPostItemIcons(side, connectionId, language, [itemId]),
+      ]);
       if (this.selectedFieldDiffItemMatchesIds(leftItemId, rightItemId)) {
         requests.push(this.refreshFieldDiffView());
       }
@@ -1805,9 +1838,11 @@ export class ComparisonPanelManager implements vscode.Disposable {
   }
 
   private async refreshStateAndTrees(): Promise<void> {
-    this.cancelSubtreeLoads();
+    this.cancelRequests();
+    this.clearItemIconCaches();
     await this.clearFieldDiffSelection();
     await this.postState();
+    await this.panel?.webview.postMessage({ type: "itemIconsReset" });
     await this.loadInitialTrees();
   }
 
@@ -1956,6 +1991,12 @@ export class ComparisonPanelManager implements vscode.Disposable {
       requestedItemId: level.item.itemId,
       level,
     });
+    void this.loadAndPostItemIcons(
+      side,
+      connectionId,
+      language,
+      [level.item, ...level.children].map((item) => item.itemId),
+    );
   }
 
   private isCurrentFavoriteNavigation(navigation: FavoriteNavigation): boolean {
@@ -2678,6 +2719,12 @@ export class ComparisonPanelManager implements vscode.Disposable {
         requestedItemId,
         level,
       });
+      void this.loadAndPostItemIcons(
+        side,
+        connectionId,
+        language,
+        [level.item, ...level.children].map((item) => item.itemId),
+      );
       this.log.info(
         `Loaded ${side} tree level ${level.item.path} with ${level.children.length} direct child item(s).`,
       );
@@ -2695,6 +2742,267 @@ export class ComparisonPanelManager implements vscode.Disposable {
       }
       throw error;
     }
+  }
+
+  private async loadAndPostItemIcons(
+    side: TreeSide,
+    connectionId: string,
+    language: string,
+    itemIds: readonly string[],
+  ): Promise<void> {
+    const generation = this.itemIconGeneration;
+    try {
+      const references = await this.getItemIconReferences(
+        connectionId,
+        language,
+        itemIds,
+      );
+      if (
+        generation !== this.itemIconGeneration ||
+        !this.panel ||
+        !this.isCurrentSelection(side, connectionId, language)
+      ) {
+        return;
+      }
+
+      const configuredIcons = [...new Set(
+        [...references.values()].filter((value): value is string => Boolean(value)),
+      )];
+      const loadedIcons = new Map<string, CachedItemIcon | undefined>();
+      await Promise.all(configuredIcons.map(async (configuredIcon) => {
+        loadedIcons.set(
+          configuredIcon,
+          await this.getItemIcon(connectionId, configuredIcon, generation),
+        );
+      }));
+      if (
+        generation !== this.itemIconGeneration ||
+        !this.panel ||
+        !this.isCurrentSelection(side, connectionId, language)
+      ) {
+        return;
+      }
+
+      const icons = [...new Map(
+        [...loadedIcons.values()]
+          .filter((icon): icon is CachedItemIcon => Boolean(icon))
+          .map((icon) => [icon.iconKey, icon]),
+      ).values()];
+      await this.panel.webview.postMessage({
+        type: "itemIconsLoaded",
+        side,
+        connectionId,
+        language,
+        items: itemIds.map((itemId) => {
+          const configuredIcon = references.get(normalizeItemId(itemId));
+          return {
+            itemId,
+            iconKey: configuredIcon ? loadedIcons.get(configuredIcon)?.iconKey : undefined,
+          };
+        }),
+        icons,
+      });
+    } catch (error: unknown) {
+      if (!isAbortError(error) && generation === this.itemIconGeneration) {
+        this.log.debug(
+          `Unable to load item-icon metadata for connection ${connectionId}; using fallback icons.`,
+        );
+      }
+    }
+  }
+
+  private async getItemIconReferences(
+    connectionId: string,
+    language: string,
+    itemIds: readonly string[],
+  ): Promise<ReadonlyMap<string, string | undefined>> {
+    const normalizedItemIds = [...new Map(itemIds.map((itemId) => [
+      normalizeItemId(itemId),
+      itemId,
+    ])).entries()];
+    const missing = normalizedItemIds.filter(([normalizedId]) => {
+      const cacheKey = this.itemIconReferenceCacheKey(connectionId, normalizedId);
+      return !this.itemIconReferenceCache.has(cacheKey) &&
+        !this.pendingItemIconReferences.has(cacheKey);
+    });
+
+    const connection = this.connectionStore.get(connectionId);
+    if (!connection) {
+      throw new Error("The XM Cloud connection no longer exists.");
+    }
+    const clientSecret = missing.length
+      ? this.connectionStore.getClientSecret(connectionId)
+      : Promise.resolve(undefined);
+
+    for (let offset = 0; offset < missing.length; offset += 128) {
+      const batchEntries = missing.slice(offset, offset + 128);
+      const batch = clientSecret.then(async (secret) => {
+        if (!secret) {
+          throw new Error("The connection's client secret is missing.");
+        }
+        const controller = new AbortController();
+        const timeout = setTimeout(
+          () => controller.abort(new Error("Item-icon metadata loading timed out.")),
+          30_000,
+        );
+        this.requestControllers.add(controller);
+        try {
+          return await this.authoringClient.loadItemIconReferences(
+            connection,
+            secret,
+            batchEntries.map(([, itemId]) => itemId),
+            language,
+            controller.signal,
+          );
+        } finally {
+          clearTimeout(timeout);
+          this.requestControllers.delete(controller);
+        }
+      }).then((loaded) => new Map<string, AuthoringItemIconReference>(
+        loaded.map((reference) => [normalizeItemId(reference.itemId), reference]),
+      ));
+
+      for (const [normalizedId] of batchEntries) {
+        const cacheKey = this.itemIconReferenceCacheKey(connectionId, normalizedId);
+        let request: Promise<string | undefined>;
+        request = batch.then((loaded) => {
+          const configuredIcon = loaded.get(normalizedId)?.configuredIcon;
+          setBoundedCache(
+            this.itemIconReferenceCache,
+            cacheKey,
+            configuredIcon,
+            maximumItemIconReferences,
+          );
+          return configuredIcon;
+        }).finally(() => {
+          if (this.pendingItemIconReferences.get(cacheKey) === request) {
+            this.pendingItemIconReferences.delete(cacheKey);
+          }
+        });
+        this.pendingItemIconReferences.set(cacheKey, request);
+      }
+    }
+
+    const result = new Map<string, string | undefined>();
+    await Promise.all(normalizedItemIds.map(async ([normalizedId]) => {
+      const cacheKey = this.itemIconReferenceCacheKey(connectionId, normalizedId);
+      const configuredIcon = this.itemIconReferenceCache.has(cacheKey)
+        ? this.itemIconReferenceCache.get(cacheKey)
+        : await this.pendingItemIconReferences.get(cacheKey);
+      result.set(normalizedId, configuredIcon);
+    }));
+    return result;
+  }
+
+  private async getItemIcon(
+    connectionId: string,
+    configuredIcon: string,
+    generation: number,
+  ): Promise<CachedItemIcon | undefined> {
+    const connection = this.connectionStore.get(connectionId);
+    if (!connection) {
+      return undefined;
+    }
+    const iconUrl = resolveSitecoreThemeIconUrl(connection.serverUrl, configuredIcon);
+    if (!iconUrl) {
+      return undefined;
+    }
+    const cacheKey = `${connectionId}:${iconUrl.href}`;
+    if (this.itemIconCache.has(cacheKey)) {
+      return this.itemIconCache.get(cacheKey);
+    }
+    const pending = this.pendingItemIcons.get(cacheKey);
+    if (pending) {
+      return pending;
+    }
+
+    let request: Promise<CachedItemIcon | undefined>;
+    request = this.withItemIconLoadPermit(async () => {
+      if (generation !== this.itemIconGeneration) {
+        return undefined;
+      }
+      const clientSecret = await this.connectionStore.getClientSecret(connectionId);
+      if (!clientSecret || generation !== this.itemIconGeneration) {
+        return undefined;
+      }
+      const controller = new AbortController();
+      const timeout = setTimeout(
+        () => controller.abort(new Error("Item-icon loading timed out.")),
+        30_000,
+      );
+      this.requestControllers.add(controller);
+      try {
+        const dataUri = await this.authoringClient.loadItemIcon(
+          connection,
+          clientSecret,
+          configuredIcon,
+          controller.signal,
+        );
+        if (generation !== this.itemIconGeneration) {
+          return undefined;
+        }
+        const icon = {
+          iconKey: `item-icon-${this.nextItemIconKey}`,
+          dataUri,
+        };
+        this.nextItemIconKey += 1;
+        setBoundedCache(this.itemIconCache, cacheKey, icon, maximumItemIconImages);
+        return icon;
+      } catch (error: unknown) {
+        if (!isAbortError(error) && generation === this.itemIconGeneration) {
+          setBoundedCache(this.itemIconCache, cacheKey, undefined, maximumItemIconImages);
+          this.log.debug(
+            `Unable to load a configured item icon for connection ${connectionId}; using the fallback icon.`,
+          );
+        }
+        return undefined;
+      } finally {
+        clearTimeout(timeout);
+        this.requestControllers.delete(controller);
+      }
+    }).finally(() => {
+      if (this.pendingItemIcons.get(cacheKey) === request) {
+        this.pendingItemIcons.delete(cacheKey);
+      }
+    });
+    this.pendingItemIcons.set(cacheKey, request);
+    return request;
+  }
+
+  private async withItemIconLoadPermit<T>(operation: () => Promise<T>): Promise<T> {
+    if (this.activeItemIconLoads >= itemIconLoadConcurrency) {
+      await new Promise<void>((resolve) => this.itemIconLoadWaiters.push(resolve));
+    } else {
+      this.activeItemIconLoads += 1;
+    }
+    try {
+      return await operation();
+    } finally {
+      const next = this.itemIconLoadWaiters.shift();
+      if (next) {
+        next();
+      } else {
+        this.activeItemIconLoads -= 1;
+      }
+    }
+  }
+
+  private itemIconReferenceCacheKey(connectionId: string, normalizedItemId: string): string {
+    return `${connectionId}:${normalizedItemId}`;
+  }
+
+  private invalidateItemIcon(connectionId: string, itemId: string): void {
+    const cacheKey = this.itemIconReferenceCacheKey(connectionId, normalizeItemId(itemId));
+    this.itemIconReferenceCache.delete(cacheKey);
+    this.pendingItemIconReferences.delete(cacheKey);
+  }
+
+  private clearItemIconCaches(): void {
+    this.itemIconReferenceCache.clear();
+    this.pendingItemIconReferences.clear();
+    this.itemIconCache.clear();
+    this.pendingItemIcons.clear();
+    this.nextItemIconKey = 1;
   }
 
   private async reportTreeLoadFailure(
@@ -2890,6 +3198,7 @@ export class ComparisonPanelManager implements vscode.Disposable {
   }
 
   private cancelRequests(): void {
+    this.itemIconGeneration += 1;
     this.cancelSubtreeLoads();
     for (const controller of this.requestControllers) {
       controller.abort();
@@ -2898,6 +3207,8 @@ export class ComparisonPanelManager implements vscode.Disposable {
     this.pendingTreeLevels.clear();
     this.pendingLanguages.clear();
     this.pendingItemDetails.clear();
+    this.pendingItemIconReferences.clear();
+    this.pendingItemIcons.clear();
     for (const resolve of this.pendingFavoriteReveal.values()) {
       resolve(false);
     }
@@ -2921,6 +3232,7 @@ export class ComparisonPanelManager implements vscode.Disposable {
     this.treeLevelCache.clear();
     this.languageCache.clear();
     this.itemDetailsCache.clear();
+    this.clearItemIconCaches();
     this.panel?.dispose();
     this.disposePanelSubscriptions();
     for (const disposable of this.disposables) {
@@ -2952,6 +3264,23 @@ function throwIfAborted(signal: AbortSignal): void {
 
 function normalizeItemId(itemId: string): string {
   return itemId.replace(/[{}-]/g, "").toLowerCase();
+}
+
+function setBoundedCache<K, V>(
+  cache: Map<K, V>,
+  key: K,
+  value: V,
+  maximumEntries: number,
+): void {
+  cache.delete(key);
+  cache.set(key, value);
+  while (cache.size > maximumEntries) {
+    const oldestKey = cache.keys().next().value as K | undefined;
+    if (oldestKey === undefined) {
+      break;
+    }
+    cache.delete(oldestKey);
+  }
 }
 
 function normalizedPath(path: string): string {
