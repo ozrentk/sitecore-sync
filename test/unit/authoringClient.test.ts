@@ -1,4 +1,4 @@
-import { deepStrictEqual, rejects, strictEqual } from "node:assert/strict";
+import { deepStrictEqual, match, rejects, strictEqual } from "node:assert/strict";
 import { test } from "node:test";
 import { AuthoringContentClient } from "../../src/sitecore/authoringClient";
 import {
@@ -108,6 +108,109 @@ test("loadLanguages applies fallbacks, de-duplicates, sorts, and validates names
       signal,
     ),
     /returned an invalid language/u,
+  );
+});
+
+test("loadItemIconReferences batches item aliases and validates returned identities", async () => {
+  const runtime = new QueuedHttpRuntime([
+    tokenResponse(),
+    jsonResponse({
+      data: {
+        item0: { itemId: "{ITEM-ONE}", icon: { value: " Network/16x16/home.png " } },
+        item1: { itemId: "item-two", icon: null },
+      },
+    }),
+  ]);
+  const client = new AuthoringContentClient(noOpLogger, runtime);
+
+  deepStrictEqual(
+    await client.loadItemIconReferences(
+      testConnection,
+      "client-secret",
+      ["{ITEM-ONE}", "item-two", "item-two"],
+      "en",
+      signal,
+    ),
+    [
+      { itemId: "{ITEM-ONE}", configuredIcon: "Network/16x16/home.png" },
+      { itemId: "item-two" },
+    ],
+  );
+  const body = requestBody(runtime, 1);
+  strictEqual(body.operationName, "XmCloudSyncItemIcons");
+  match(String(body.query), /item0: item\(where: \$where0\)/u);
+  deepStrictEqual(body.variables, {
+    where0: { database: "master", language: "en", itemId: "{ITEM-ONE}" },
+    where1: { database: "master", language: "en", itemId: "item-two" },
+  });
+});
+
+test("loadItemIconReferences isolates optional icon failures from tree loading", async () => {
+  const invalidRuntime = new QueuedHttpRuntime([
+    tokenResponse(),
+    jsonResponse({ data: { item0: { itemId: "other-item", icon: { value: 42 } } } }),
+  ]);
+  await rejects(
+    new AuthoringContentClient(noOpLogger, invalidRuntime).loadItemIconReferences(
+      testConnection,
+      "client-secret",
+      ["expected-item"],
+      "en",
+      signal,
+    ),
+    /invalid item icon data/u,
+  );
+
+  const missingRuntime = new QueuedHttpRuntime([
+    tokenResponse(),
+    jsonResponse({ data: { item0: null } }),
+  ]);
+  deepStrictEqual(
+    await new AuthoringContentClient(noOpLogger, missingRuntime).loadItemIconReferences(
+      testConnection,
+      "client-secret",
+      ["missing-item"],
+      "en",
+      signal,
+    ),
+    [{ itemId: "missing-item" }],
+  );
+});
+
+test("loadItemIcon fetches an authenticated same-origin raster asset", async () => {
+  const runtime = new QueuedHttpRuntime([
+    tokenResponse(),
+    new Response(Uint8Array.from([1, 2, 3]), {
+      headers: { "content-type": "image/png" },
+    }),
+  ]);
+  const client = new AuthoringContentClient(noOpLogger, runtime);
+
+  strictEqual(
+    await client.loadItemIcon(
+      testConnection,
+      "client-secret",
+      "Network/16x16/home.png",
+      signal,
+    ),
+    "data:image/png;base64,AQID",
+  );
+  strictEqual(
+    String(runtime.requests[1]?.input),
+    "https://cm.example.com/sitecore/shell/themes/standard/Network/16x16/home.png",
+  );
+  const headers = new Headers(runtime.requests[1]?.init.headers);
+  strictEqual(headers.get("authorization"), "Bearer access-token");
+  strictEqual(runtime.requests[1]?.init.redirect, "error");
+
+  await rejects(
+    new AuthoringContentClient(noOpLogger, new QueuedHttpRuntime([])).loadItemIcon(
+      testConnection,
+      "client-secret",
+      "https://external.example.test/icon.png",
+      signal,
+    ),
+    /not a supported theme image/u,
   );
 });
 

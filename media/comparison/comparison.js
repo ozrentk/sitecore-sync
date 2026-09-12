@@ -29,6 +29,8 @@ const state = {
     left: new Map(),
     right: new Map(),
   },
+  itemIconKeys: new Map(),
+  itemIconData: new Map(),
   refreshOperations: new Map(),
   subtreeLoadOperations: new Map(),
   syncOperations: new Map(),
@@ -47,6 +49,24 @@ const workspace = document.getElementById("workspace");
 
 function normalizeItemId(itemId) {
   return itemId.replace(/[{}-]/g, "").toLowerCase();
+}
+
+function itemIconItemKey(connectionId, itemId) {
+  return `${connectionId}:${normalizeItemId(itemId)}`;
+}
+
+function setBoundedMap(map, key, value, maximumEntries) {
+  map.delete(key);
+  map.set(key, value);
+  while (map.size > maximumEntries) {
+    map.delete(map.keys().next().value);
+  }
+}
+
+function isItemIconDataUri(value) {
+  return typeof value === "string" &&
+    value.length <= 175_000 &&
+    /^data:image\/(?:gif|jpeg|png|webp|x-icon|vnd\.microsoft\.icon);base64,[a-z\d+/]+={0,2}$/iu.test(value);
 }
 
 function normalizedFieldValue(value) {
@@ -1272,6 +1292,7 @@ function createItemCell(node, side, depth, pair) {
     );
   }
   cell.title = tooltipLines.join("\n");
+  cell.append(createItemIcon(node, side));
   const name = document.createElement("span");
   name.className = "item-name";
   name.textContent = displayName;
@@ -1280,6 +1301,31 @@ function createItemCell(node, side, depth, pair) {
   }
   cell.append(name);
   return cell;
+}
+
+function createItemIcon(node, side) {
+  const connectionId = state.selection[`${side}ConnectionId`];
+  const iconKey = connectionId
+    ? state.itemIconKeys.get(itemIconItemKey(connectionId, node.itemId))
+    : undefined;
+  const dataUri = iconKey ? state.itemIconData.get(iconKey) : undefined;
+  if (dataUri) {
+    const image = document.createElement("img");
+    image.className = "item-icon";
+    image.src = dataUri;
+    image.alt = "";
+    image.setAttribute("aria-hidden", "true");
+    image.addEventListener("error", () => image.replaceWith(createFallbackItemIcon()));
+    return image;
+  }
+  return createFallbackItemIcon();
+}
+
+function createFallbackItemIcon() {
+  const fallback = document.createElement("span");
+  fallback.className = "item-icon fallback";
+  fallback.setAttribute("aria-hidden", "true");
+  return fallback;
 }
 
 function clearNodeDetails(node) {
@@ -1765,6 +1811,44 @@ function applyLoadedLevel(message) {
   node.error = undefined;
 }
 
+function applyItemIconsMessage(message) {
+  const tree = state.trees[message.side];
+  if (
+    !tree ||
+    tree.connectionId !== message.connectionId ||
+    tree.language !== message.language ||
+    !Array.isArray(message.items) ||
+    !Array.isArray(message.icons)
+  ) {
+    return;
+  }
+
+  for (const icon of message.icons) {
+    if (
+      typeof icon?.iconKey === "string" &&
+      icon.iconKey.length <= 128 &&
+      isItemIconDataUri(icon.dataUri)
+    ) {
+      setBoundedMap(state.itemIconData, icon.iconKey, icon.dataUri, 256);
+    }
+  }
+  for (const item of message.items) {
+    if (typeof item?.itemId !== "string" || !item.itemId) {
+      continue;
+    }
+    const key = itemIconItemKey(message.connectionId, item.itemId);
+    if (
+      typeof item.iconKey === "string" &&
+      item.iconKey.length <= 128 &&
+      state.itemIconData.has(item.iconKey)
+    ) {
+      setBoundedMap(state.itemIconKeys, key, item.iconKey, 4_096);
+    } else {
+      state.itemIconKeys.delete(key);
+    }
+  }
+}
+
 function applyLoading(message) {
   const tree = state.trees[message.side];
   if (!tree || tree.connectionId !== message.connectionId || tree.language !== message.language) {
@@ -1896,6 +1980,11 @@ window.addEventListener("message", (event) => {
     applyLoading(message);
   } else if (message?.type === "treeLoaded") {
     applyLoadedLevel(message);
+  } else if (message?.type === "itemIconsLoaded") {
+    applyItemIconsMessage(message);
+  } else if (message?.type === "itemIconsReset") {
+    state.itemIconKeys.clear();
+    state.itemIconData.clear();
   } else if (message?.type === "treeLoadFailed") {
     applyLoadFailure(message);
   } else if (message?.type === "itemDetailsLoading") {

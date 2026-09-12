@@ -190,6 +190,29 @@ select:focus {
   opacity: .7;
 }
 
+.item-icon {
+  flex: 0 0 16px;
+  align-self: center;
+  width: 16px;
+  height: 16px;
+  object-fit: contain;
+}
+
+.item-icon.fallback {
+  position: relative;
+  box-sizing: border-box;
+  border: 1px solid color-mix(in srgb, var(--vscode-descriptionForeground) 70%, transparent);
+  border-radius: 2px;
+  opacity: .65;
+}
+
+.item-icon.fallback::after {
+  position: absolute;
+  inset: 3px;
+  content: "";
+  border: 1px solid color-mix(in srgb, var(--vscode-descriptionForeground) 65%, transparent);
+}
+
 .item-name {
   flex: 1 1 auto;
   overflow: hidden;

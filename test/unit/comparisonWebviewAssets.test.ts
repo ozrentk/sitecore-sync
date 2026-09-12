@@ -12,7 +12,7 @@ import { Script } from "node:vm";
 
 const comparisonAssetRoot = resolve(process.cwd(), "media", "comparison");
 
-test("comparison webview assets preserve the language-lock host contract", async () => {
+test("comparison webview assets preserve language-lock and item-icon contracts", async () => {
   const htmlPath = resolve(comparisonAssetRoot, "comparison.html");
   const scriptPath = resolve(comparisonAssetRoot, "comparison.js");
   const stylePath = resolve(comparisonAssetRoot, "comparison.css");
@@ -26,7 +26,7 @@ test("comparison webview assets preserve the language-lock host contract", async
   doesNotThrow(() => new Script(script, { filename: scriptPath }));
   match(
     html,
-    /Content-Security-Policy" content="default-src 'none'; style-src \{\{cspSource\}\}; script-src \{\{cspSource\}\};?"/,
+    /Content-Security-Policy" content="default-src 'none'; img-src data:; style-src \{\{cspSource\}\}; script-src \{\{cspSource\}\};?"/,
   );
 
   const declaredIds = [...html.matchAll(/\sid="([^"]+)"/g)].map((matchResult) => matchResult[1]);
@@ -39,5 +39,10 @@ test("comparison webview assets preserve the language-lock host contract", async
   match(html, /<span>Lock languages<\/span>/);
   match(script, /type: "setLanguageLock", locked: languageLock\.checked/);
   match(script, /languageLock\.checked = state\.selection\.languagesLocked === true/);
+  match(script, /message\?\.type === "itemIconsLoaded"/);
+  match(script, /message\?\.type === "itemIconsReset"/);
+  match(script, /isItemIconDataUri\(icon\.dataUri\)/);
+  match(script, /createFallbackItemIcon\(\)/);
+  match(style, /\.item-icon\.fallback/);
   doesNotMatch(script, /\.innerHTML\s*=|eval\s*\(|new Function\s*\(/);
 });

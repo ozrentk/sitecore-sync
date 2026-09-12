@@ -16,6 +16,10 @@ import {
   type SitecoreHttpLogger,
   type SitecoreHttpRuntime,
 } from "./sitecoreHttpClient";
+import {
+  readItemIconDataUri,
+  resolveSitecoreThemeIconUrl,
+} from "./itemIcon";
 
 const tokenEndpoint = "https://auth.sitecorecloud.io/oauth/token";
 const audience = "https://api.sitecorecloud.io";
@@ -135,6 +139,14 @@ interface LanguagesQueryResponse {
   readonly errors?: readonly GraphQlError[];
 }
 
+interface ItemIconsQueryResponse {
+  readonly data?: Readonly<Record<string, {
+    readonly itemId?: unknown;
+    readonly icon?: { readonly value?: unknown } | null;
+  } | null>>;
+  readonly errors?: readonly GraphQlError[];
+}
+
 interface RawItemField {
   readonly fieldId?: unknown;
   readonly name?: unknown;
@@ -224,6 +236,11 @@ export interface AuthoringTreeItem {
 export interface AuthoringTreeLevel {
   readonly item: AuthoringTreeItem;
   readonly children: readonly AuthoringTreeItem[];
+}
+
+export interface AuthoringItemIconReference {
+  readonly itemId: string;
+  readonly configuredIcon?: string;
 }
 
 export type AuthoringItemLocator =
@@ -904,6 +921,97 @@ export class AuthoringContentClient {
     return [...languages.values()].sort((left, right) =>
       left.name.localeCompare(right.name, undefined, { sensitivity: "base" }),
     );
+  }
+
+  async loadItemIconReferences(
+    connection: XmCloudConnection,
+    clientSecret: string,
+    itemIds: readonly string[],
+    language: string,
+    signal: AbortSignal,
+  ): Promise<readonly AuthoringItemIconReference[]> {
+    const uniqueItemIds = new Map<string, string>();
+    for (const itemId of itemIds) {
+      const normalized = normalizeGuid(itemId);
+      if (normalized) {
+        uniqueItemIds.set(normalized, itemId);
+      }
+    }
+    const requestedItemIds = [...uniqueItemIds.values()];
+    if (!requestedItemIds.length) {
+      return [];
+    }
+    if (requestedItemIds.length > 128) {
+      throw new Error("A Sitecore item icon query cannot contain more than 128 items.");
+    }
+
+    const variables: Record<string, unknown> = {};
+    const variableDefinitions: string[] = [];
+    const selections: string[] = [];
+    requestedItemIds.forEach((itemId, index) => {
+      const variableName = `where${index}`;
+      variableDefinitions.push(`$${variableName}: ItemQueryInput!`);
+      variables[variableName] = { database: "master", language, itemId };
+      selections.push(
+        `item${index}: item(where: $${variableName}) { itemId icon: field(name: "__Icon") { value } }`,
+      );
+    });
+    const query = `query XmCloudSyncItemIcons(${variableDefinitions.join(", ")}) { ${selections.join(" ")} }`;
+    const accessToken = await this.getAccessToken(connection, clientSecret, signal);
+    const payload = await this.postGraphQl<ItemIconsQueryResponse>(
+      connection.serverUrl,
+      accessToken,
+      "Sitecore Authoring item icons query",
+      "XmCloudSyncItemIcons",
+      query,
+      variables,
+      signal,
+    );
+    if (!payload.data || typeof payload.data !== "object" || Array.isArray(payload.data)) {
+      throw new Error("Authoring API response did not contain item icon data.");
+    }
+
+    return requestedItemIds.map((itemId, index): AuthoringItemIconReference => {
+      const item = payload.data?.[`item${index}`];
+      if (!item) {
+        return { itemId };
+      }
+      if (
+        typeof item.itemId !== "string" ||
+        normalizeGuid(item.itemId) !== normalizeGuid(itemId)
+      ) {
+        throw new Error("Authoring API returned invalid item icon data.");
+      }
+      const configuredIcon = typeof item.icon?.value === "string"
+        ? item.icon.value.trim()
+        : "";
+      return configuredIcon
+        ? { itemId: item.itemId, configuredIcon }
+        : { itemId: item.itemId };
+    });
+  }
+
+  async loadItemIcon(
+    connection: XmCloudConnection,
+    clientSecret: string,
+    configuredIcon: string,
+    signal: AbortSignal,
+  ): Promise<string> {
+    const iconUrl = resolveSitecoreThemeIconUrl(connection.serverUrl, configuredIcon);
+    if (!iconUrl) {
+      throw new Error("The configured Sitecore item icon is not a supported theme image.");
+    }
+    const accessToken = await this.getAccessToken(connection, clientSecret, signal);
+    const response = await this.http.request(
+      iconUrl,
+      {
+        method: "GET",
+        headers: { authorization: `Bearer ${accessToken}` },
+        redirect: "error",
+      },
+      { name: "Sitecore item icon request", signal, retryable: true },
+    );
+    return readItemIconDataUri(response);
   }
 
   async loadItemDetails(
