@@ -15,6 +15,7 @@ body {
 }
 
 button,
+input,
 select {
   font: inherit;
 }
@@ -47,6 +48,24 @@ select {
 .toolbar-buttons {
   display: flex;
   gap: 5px;
+}
+
+.language-lock {
+  display: flex;
+  gap: 5px;
+  align-items: center;
+  color: var(--vscode-foreground);
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.language-lock input {
+  accent-color: var(--vscode-focusBorder);
+}
+
+.language-lock:has(input:disabled) {
+  color: var(--vscode-disabledForeground);
+  cursor: default;
 }
 
 

@@ -27,6 +27,14 @@ import {
   type ItemTaskCandidateContext,
 } from "../tasks/itemTaskRunner";
 import type { PublishingManager } from "../publishing/publishingManager";
+import {
+  availableLanguage,
+  languageLockCandidates,
+  lockedLanguagePair,
+  preferredLanguage,
+  sameLanguage,
+  type LanguageLockCandidate,
+} from "./languageLock";
 
 const selectionKey = "sitecoreXmCloudSync.comparisonSelection.v1";
 const fieldTransferConfirmationKey = "sitecoreXmCloudSync.fieldTransferConfirmationAccepted.v1";
@@ -42,6 +50,7 @@ interface ComparisonSelection {
   readonly rightConnectionId?: string;
   readonly leftLanguage: string;
   readonly rightLanguage: string;
+  readonly languagesLocked: boolean;
 }
 
 interface WebviewMessage {
@@ -56,6 +65,7 @@ interface WebviewMessage {
   readonly leftRefreshPlan?: unknown;
   readonly rightRefreshPlan?: unknown;
   readonly language?: unknown;
+  readonly locked?: unknown;
   readonly fieldId?: unknown;
   readonly leftName?: unknown;
   readonly rightName?: unknown;
@@ -93,6 +103,10 @@ interface TraversalEntry {
 
 interface SubtreeTransferModeQuickPickItem extends vscode.QuickPickItem {
   readonly mode: SubtreeTransferMode;
+}
+
+interface LanguageLockQuickPickItem extends vscode.QuickPickItem {
+  readonly candidate: LanguageLockCandidate;
 }
 
 class FieldDiffContentProvider implements vscode.TextDocumentContentProvider {
@@ -136,6 +150,8 @@ export class ComparisonPanelManager implements vscode.Disposable {
   private nextFavoriteRevealId = 1;
   private pendingFavoriteNavigation: FavoriteNavigation | undefined;
   private selectedFieldDiffItem: FieldDiffSelection | undefined;
+  private selectionChangeQueue: Promise<void> = Promise.resolve();
+  private warnedInvalidLanguageLock: string | undefined;
   readonly onDidChangeComparisonState = this.comparisonStateEmitter.event;
   readonly fieldDiffViewProvider: FieldDiffViewProvider;
 
@@ -291,7 +307,11 @@ export class ComparisonPanelManager implements vscode.Disposable {
         this.comparisonStateEmitter.fire();
       }),
       panel.webview.onDidReceiveMessage(async (message: WebviewMessage) => {
-        await this.handleMessage(message);
+        if (this.isSelectionMessage(message)) {
+          await this.enqueueSelectionChange(async () => await this.handleMessage(message));
+        } else {
+          await this.handleMessage(message);
+        }
       }),
     ];
 
@@ -305,7 +325,18 @@ export class ComparisonPanelManager implements vscode.Disposable {
   }
 
   async openWith(leftConnectionId: string, rightConnectionId: string): Promise<void> {
-    const selection = this.normalizeSelection({ leftConnectionId, rightConnectionId });
+    const current = this.getSelection();
+    const requested = this.normalizeSelection({
+      leftConnectionId,
+      rightConnectionId,
+      leftLanguage: current.languagesLocked ? current.leftLanguage : defaultLanguage,
+      rightLanguage: current.languagesLocked ? current.rightLanguage : defaultLanguage,
+      languagesLocked: current.languagesLocked,
+    });
+    const selection = await this.prepareConnectionPairSelection(requested, "Unlock and Open");
+    if (!selection) {
+      return;
+    }
     await this.saveSelection(selection);
     await this.open();
     await this.postState();
@@ -346,11 +377,15 @@ export class ComparisonPanelManager implements vscode.Disposable {
     rightConnectionId: string,
     path: string,
   ): Promise<void> {
-    const selection = this.normalizeSelection({
+    const requested = this.normalizeSelection({
       ...this.getSelection(),
       leftConnectionId: favoriteConnectionId,
       rightConnectionId,
     });
+    const selection = await this.prepareConnectionPairSelection(requested, "Unlock and Open");
+    if (!selection) {
+      return;
+    }
     await this.saveSelection(selection);
     const navigation = {
       connectionId: favoriteConnectionId,
@@ -382,6 +417,319 @@ export class ComparisonPanelManager implements vscode.Disposable {
     }
     const selection = this.getSelection();
     return selection.leftConnectionId === connectionId || selection.rightConnectionId === connectionId;
+  }
+
+  private async prepareConnectionPairSelection(
+    requested: ComparisonSelection,
+    unlockAction: string,
+  ): Promise<ComparisonSelection | undefined> {
+    if (!requested.languagesLocked) {
+      return requested;
+    }
+    if (!requested.leftConnectionId || !requested.rightConnectionId) {
+      return undefined;
+    }
+    try {
+      const [leftLanguages, rightLanguages] = await Promise.all([
+        this.getLanguages(requested.leftConnectionId),
+        this.getLanguages(requested.rightConnectionId),
+      ]);
+      const pair = lockedLanguagePair(requested.leftLanguage, leftLanguages, rightLanguages);
+      if (pair) {
+        return { ...requested, ...pair };
+      }
+      const leftFallback = preferredLanguage(leftLanguages);
+      const rightFallback = preferredLanguage(rightLanguages);
+      if (!leftFallback || !rightFallback) {
+        await vscode.window.showWarningMessage(
+          "The requested comparison cannot be opened because one of its connections exposes no configured content languages.",
+        );
+        return undefined;
+      }
+      const action = await vscode.window.showWarningMessage(
+        `The requested connections do not both have the locked language "${requested.leftLanguage}".`,
+        unlockAction,
+      );
+      return action === unlockAction
+        ? {
+            ...requested,
+            leftLanguage: leftFallback,
+            rightLanguage: rightFallback,
+            languagesLocked: false,
+          }
+        : undefined;
+    } catch (error: unknown) {
+      await vscode.window.showErrorMessage(
+        `Unable to verify the comparison languages: ${errorMessage(error)}`,
+      );
+      return undefined;
+    }
+  }
+
+  private isSelectionMessage(message: WebviewMessage): boolean {
+    return message.type === "swapConnections" ||
+      message.type === "selectConnection" ||
+      message.type === "selectLanguage" ||
+      message.type === "setLanguageLock";
+  }
+
+  private async enqueueSelectionChange(operation: () => Promise<void>): Promise<void> {
+    const pending = this.selectionChangeQueue.then(operation, operation);
+    this.selectionChangeQueue = pending.catch(() => undefined);
+    await pending;
+  }
+
+  private async applySelection(selection: ComparisonSelection): Promise<void> {
+    this.warnedInvalidLanguageLock = undefined;
+    this.cancelSubtreeLoads();
+    await this.clearFieldDiffSelection();
+    await this.saveSelection(this.normalizeSelection(selection));
+    await this.postState();
+    await this.loadInitialTrees();
+  }
+
+  private async rejectSelectionChange(): Promise<void> {
+    await this.postState();
+  }
+
+  private async handleLanguageSelection(side: TreeSide, requestedLanguage: string): Promise<void> {
+    const selection = this.getSelection();
+    const connectionId = side === "left"
+      ? selection.leftConnectionId
+      : selection.rightConnectionId;
+    if (!connectionId) {
+      await this.rejectSelectionChange();
+      return;
+    }
+
+    try {
+      const sideLanguages = await this.getLanguages(connectionId);
+      const canonicalLanguage = availableLanguage(sideLanguages, requestedLanguage);
+      if (!canonicalLanguage) {
+        await this.rejectSelectionChange();
+        await vscode.window.showWarningMessage(
+          `The language "${requestedLanguage.trim()}" is not configured for ${this.connectionStore.get(connectionId)?.name ?? "the selected connection"}.`,
+        );
+        return;
+      }
+
+      if (!selection.languagesLocked) {
+        await this.applySelection({
+          ...selection,
+          ...(side === "left"
+            ? { leftLanguage: canonicalLanguage }
+            : { rightLanguage: canonicalLanguage }),
+        });
+        return;
+      }
+
+      const otherSide: TreeSide = side === "left" ? "right" : "left";
+      const otherConnectionId = otherSide === "left"
+        ? selection.leftConnectionId
+        : selection.rightConnectionId;
+      if (!otherConnectionId) {
+        await this.rejectSelectionChange();
+        return;
+      }
+      const otherLanguages = await this.getLanguages(otherConnectionId);
+      const otherLanguage = availableLanguage(otherLanguages, canonicalLanguage);
+      if (otherLanguage) {
+        await this.applySelection({
+          ...selection,
+          leftLanguage: side === "left" ? canonicalLanguage : otherLanguage,
+          rightLanguage: side === "right" ? canonicalLanguage : otherLanguage,
+        });
+        return;
+      }
+
+      await this.rejectSelectionChange();
+      const action = await vscode.window.showWarningMessage(
+        `The language "${canonicalLanguage}" is not configured for ${this.connectionStore.get(otherConnectionId)?.name ?? `the ${otherSide} connection`}.`,
+        "Unlock and Select",
+      );
+      if (action === "Unlock and Select") {
+        await this.applySelection({
+          ...selection,
+          languagesLocked: false,
+          ...(side === "left"
+            ? { leftLanguage: canonicalLanguage }
+            : { rightLanguage: canonicalLanguage }),
+        });
+      }
+    } catch (error: unknown) {
+      await vscode.window.showErrorMessage(
+        `Unable to verify the selected language: ${errorMessage(error)}`,
+      );
+      await this.rejectSelectionChange();
+    }
+  }
+
+  private async handleConnectionSelection(side: TreeSide, requestedConnectionId: string): Promise<void> {
+    const connection = this.connectionStore.get(requestedConnectionId);
+    if (!connection) {
+      await this.rejectSelectionChange();
+      return;
+    }
+    const selection = this.getSelection();
+    if (!selection.languagesLocked) {
+      await this.applySelection(this.normalizeSelection({
+        ...selection,
+        ...(side === "left"
+          ? { leftConnectionId: connection.id }
+          : { rightConnectionId: connection.id }),
+      }));
+      return;
+    }
+
+    const nextSelection = this.normalizeSelection({
+      ...selection,
+      ...(side === "left"
+        ? { leftConnectionId: connection.id }
+        : { rightConnectionId: connection.id }),
+    });
+    if (!nextSelection.leftConnectionId || !nextSelection.rightConnectionId) {
+      await this.rejectSelectionChange();
+      return;
+    }
+
+    try {
+      const [leftLanguages, rightLanguages] = await Promise.all([
+        this.getLanguages(nextSelection.leftConnectionId),
+        this.getLanguages(nextSelection.rightConnectionId),
+      ]);
+      const pair = lockedLanguagePair(selection.leftLanguage, leftLanguages, rightLanguages);
+      if (pair) {
+        await this.applySelection({ ...nextSelection, ...pair, languagesLocked: true });
+        return;
+      }
+
+      const newConnectionLanguages = side === "left" ? leftLanguages : rightLanguages;
+      const fallbackLanguage = preferredLanguage(newConnectionLanguages);
+      if (!fallbackLanguage) {
+        await this.rejectSelectionChange();
+        await vscode.window.showWarningMessage(
+          `${connection.name} does not expose any configured content languages, so it cannot be selected.`,
+        );
+        return;
+      }
+      await this.rejectSelectionChange();
+      const action = await vscode.window.showWarningMessage(
+        `${connection.name} does not have the locked language "${selection.leftLanguage}".`,
+        "Unlock and Switch",
+      );
+      if (action === "Unlock and Switch") {
+        await this.applySelection({
+          ...nextSelection,
+          languagesLocked: false,
+          ...(side === "left"
+            ? { leftLanguage: fallbackLanguage }
+            : { rightLanguage: fallbackLanguage }),
+        });
+      }
+    } catch (error: unknown) {
+      await vscode.window.showErrorMessage(
+        `Unable to verify the new connection's languages: ${errorMessage(error)}`,
+      );
+      await this.rejectSelectionChange();
+    }
+  }
+
+  private async handleLanguageLockChange(locked: boolean): Promise<void> {
+    const selection = this.getSelection();
+    if (locked === selection.languagesLocked) {
+      await this.rejectSelectionChange();
+      return;
+    }
+
+    if (!locked) {
+      let leftLanguage = selection.leftLanguage;
+      let rightLanguage = selection.rightLanguage;
+      try {
+        if (selection.leftConnectionId) {
+          const languages = await this.getLanguages(selection.leftConnectionId);
+          leftLanguage = availableLanguage(languages, leftLanguage) ??
+            preferredLanguage(languages) ?? leftLanguage;
+        }
+        if (selection.rightConnectionId) {
+          const languages = await this.getLanguages(selection.rightConnectionId);
+          rightLanguage = availableLanguage(languages, rightLanguage) ??
+            preferredLanguage(languages) ?? rightLanguage;
+        }
+      } catch {
+        // Unlocking must remain available even when language discovery is temporarily unavailable.
+      }
+      await this.applySelection({
+        ...selection,
+        leftLanguage,
+        rightLanguage,
+        languagesLocked: false,
+      });
+      return;
+    }
+
+    if (!selection.leftConnectionId || !selection.rightConnectionId) {
+      await vscode.window.showWarningMessage(
+        "Choose connections on both sides before locking languages.",
+      );
+      await this.rejectSelectionChange();
+      return;
+    }
+
+    try {
+      const [leftLanguages, rightLanguages] = await Promise.all([
+        this.getLanguages(selection.leftConnectionId),
+        this.getLanguages(selection.rightConnectionId),
+      ]);
+      if (sameLanguage(selection.leftLanguage, selection.rightLanguage)) {
+        const pair = lockedLanguagePair(selection.leftLanguage, leftLanguages, rightLanguages);
+        if (pair) {
+          await this.applySelection({ ...selection, ...pair, languagesLocked: true });
+          return;
+        }
+      }
+
+      const candidates = languageLockCandidates(
+        selection.leftLanguage,
+        selection.rightLanguage,
+        leftLanguages,
+        rightLanguages,
+      );
+      if (!candidates.length) {
+        await this.rejectSelectionChange();
+        await vscode.window.showWarningMessage(
+          "Neither selected language is configured on both connections. Choose a shared language before locking.",
+        );
+        return;
+      }
+
+      await this.rejectSelectionChange();
+      const picked = await vscode.window.showQuickPick<LanguageLockQuickPickItem>(
+        candidates.map((candidate) => ({
+          label: `Use ${candidate.language}`,
+          description: `Currently selected on the ${candidate.source} side`,
+          candidate,
+        })),
+        {
+          title: "Lock comparison languages",
+          placeHolder: "Choose which current language to use on both sides",
+          ignoreFocusOut: true,
+        },
+      );
+      if (!picked) {
+        return;
+      }
+      await this.applySelection({
+        ...selection,
+        leftLanguage: picked.candidate.leftLanguage,
+        rightLanguage: picked.candidate.rightLanguage,
+        languagesLocked: true,
+      });
+    } catch (error: unknown) {
+      await vscode.window.showErrorMessage(
+        `Unable to lock comparison languages: ${errorMessage(error)}`,
+      );
+      await this.rejectSelectionChange();
+    }
   }
 
   private async handleMessage(message: WebviewMessage): Promise<void> {
@@ -422,17 +770,14 @@ export class ComparisonPanelManager implements vscode.Disposable {
     }
 
     if (message.type === "swapConnections") {
-      this.cancelSubtreeLoads();
-      await this.clearFieldDiffSelection();
       const selection = this.getSelection();
-      await this.saveSelection({
+      await this.applySelection({
+        ...selection,
         leftConnectionId: selection.rightConnectionId,
         rightConnectionId: selection.leftConnectionId,
         leftLanguage: selection.rightLanguage,
         rightLanguage: selection.leftLanguage,
       });
-      await this.postState();
-      await this.loadInitialTrees();
       return;
     }
 
@@ -441,18 +786,7 @@ export class ComparisonPanelManager implements vscode.Disposable {
       (message.side === "left" || message.side === "right") &&
       typeof message.connectionId === "string"
     ) {
-      this.cancelSubtreeLoads();
-      await this.clearFieldDiffSelection();
-      const connectionId = this.connectionStore.get(message.connectionId)?.id;
-      const selection = this.getSelection();
-      await this.saveSelection(this.normalizeSelection({
-        ...selection,
-        ...(message.side === "left"
-          ? { leftConnectionId: connectionId }
-          : { rightConnectionId: connectionId }),
-      }));
-      await this.postState();
-      await this.loadInitialTrees();
+      await this.handleConnectionSelection(message.side, message.connectionId);
       return;
     }
 
@@ -462,17 +796,12 @@ export class ComparisonPanelManager implements vscode.Disposable {
       typeof message.language === "string" &&
       message.language.trim()
     ) {
-      this.cancelSubtreeLoads();
-      await this.clearFieldDiffSelection();
-      const selection = this.getSelection();
-      await this.saveSelection({
-        ...selection,
-        ...(message.side === "left"
-          ? { leftLanguage: message.language }
-          : { rightLanguage: message.language }),
-      });
-      await this.postState();
-      await this.loadInitialTrees();
+      await this.handleLanguageSelection(message.side, message.language);
+      return;
+    }
+
+    if (message.type === "setLanguageLock" && typeof message.locked === "boolean") {
+      await this.handleLanguageLockChange(message.locked);
       return;
     }
 
@@ -2174,7 +2503,48 @@ export class ComparisonPanelManager implements vscode.Disposable {
       return;
     }
 
-    const selection = this.getSelection();
+    let selection = this.getSelection();
+    if (
+      selection.languagesLocked &&
+      selection.leftConnectionId &&
+      selection.rightConnectionId
+    ) {
+      const leftConnectionId = selection.leftConnectionId;
+      const rightConnectionId = selection.rightConnectionId;
+      try {
+        const [leftLanguages, rightLanguages] = await Promise.all([
+          this.getLanguages(leftConnectionId),
+          this.getLanguages(rightConnectionId),
+        ]);
+        const pair = sameLanguage(selection.leftLanguage, selection.rightLanguage)
+          ? lockedLanguagePair(selection.leftLanguage, leftLanguages, rightLanguages)
+          : undefined;
+        if (!pair) {
+          await this.reportInvalidRestoredLanguageLock(
+            selection,
+            leftLanguages,
+            rightLanguages,
+          );
+          return;
+        }
+        if (
+          pair.leftLanguage !== selection.leftLanguage ||
+          pair.rightLanguage !== selection.rightLanguage
+        ) {
+          selection = { ...selection, ...pair };
+          await this.saveSelection(selection);
+          await this.postState();
+        }
+        this.warnedInvalidLanguageLock = undefined;
+      } catch {
+        await Promise.all([
+          this.loadAndPostLanguages("left", leftConnectionId),
+          this.loadAndPostLanguages("right", rightConnectionId),
+        ]);
+        return;
+      }
+    }
+
     const requests: Promise<void>[] = [];
     if (selection.leftConnectionId) {
       requests.push(this.loadAndPostLanguages("left", selection.leftConnectionId));
@@ -2197,6 +2567,60 @@ export class ComparisonPanelManager implements vscode.Disposable {
       );
     }
     await Promise.all(requests);
+  }
+
+  private async reportInvalidRestoredLanguageLock(
+    selection: ComparisonSelection,
+    leftLanguages: readonly AuthoringLanguage[],
+    rightLanguages: readonly AuthoringLanguage[],
+  ): Promise<void> {
+    if (!selection.leftConnectionId || !selection.rightConnectionId || !this.panel) {
+      return;
+    }
+    await Promise.all([
+      this.loadAndPostLanguages("left", selection.leftConnectionId),
+      this.loadAndPostLanguages("right", selection.rightConnectionId),
+    ]);
+
+    const leftAvailable = availableLanguage(leftLanguages, selection.leftLanguage);
+    const rightAvailable = availableLanguage(rightLanguages, selection.rightLanguage);
+    const message = sameLanguage(selection.leftLanguage, selection.rightLanguage)
+      ? `The saved locked language "${selection.leftLanguage}" is no longer configured on both connections.`
+      : "The saved locked language selection is inconsistent.";
+    const unavailableSides: readonly TreeSide[] = leftAvailable && rightAvailable
+      ? ["left", "right"]
+      : [
+          ...(leftAvailable ? [] : ["left" as const]),
+          ...(rightAvailable ? [] : ["right" as const]),
+        ];
+    await Promise.all(unavailableSides.map(async (side) => {
+      const connectionId = side === "left"
+        ? selection.leftConnectionId
+        : selection.rightConnectionId;
+      const language = side === "left" ? selection.leftLanguage : selection.rightLanguage;
+      await this.panel?.webview.postMessage({
+        type: "treeLoadFailed",
+        side,
+        connectionId,
+        language,
+        message,
+      });
+    }));
+
+    const signature = [
+      selection.leftConnectionId,
+      selection.rightConnectionId,
+      selection.leftLanguage.toLowerCase(),
+      selection.rightLanguage.toLowerCase(),
+    ].join(":");
+    if (this.warnedInvalidLanguageLock === signature) {
+      return;
+    }
+    this.warnedInvalidLanguageLock = signature;
+    const action = await vscode.window.showWarningMessage(message, "Unlock Languages");
+    if (action === "Unlock Languages") {
+      await this.handleLanguageLockChange(false);
+    }
   }
 
   private async loadTreeLevel(
@@ -2412,6 +2836,7 @@ export class ComparisonPanelManager implements vscode.Disposable {
       rightConnectionId,
       leftLanguage: selection.leftLanguage?.trim() || defaultLanguage,
       rightLanguage: selection.rightLanguage?.trim() || defaultLanguage,
+      languagesLocked: selection.languagesLocked === true,
     };
   }
 

@@ -109,13 +109,12 @@ The activity view is the launcher and connection-management surface. The primary
 
 The **Transfers** view is collapsed by default. Selecting a connection exposes a title-bar trash action, but deletion is disabled while that connection is selected on either side of the open comparison or referenced by a queued transfer. A connection's context menu and the empty Connections welcome view provide **Paste as Connection URL**, which reads a full XM Cloud URL from the clipboard, extracts its HTTPS origin, and uses that origin to prefill the add-connection workflow.
 
-The comparison tab's sticky top bar contains independent left and right connection and language selectors plus a swap action. The comparison tab remembers its selections per workspace and updates when connections are added or removed.
+The comparison tab's sticky top bar contains left and right connection and language selectors, a swap action, and a workspace-persisted **Lock languages** checkbox. While locked, changing either language selects the same configured language on the other side using case-insensitive matching. Enabling the lock when the selections differ asks which current language should win and succeeds only when that language is configured on both connections. A language or connection change that cannot preserve the lock is blocked and offers an explicit unlock action; unlocking for a connection change selects `en` on the new connection when available, otherwise its first configured language. Item-version availability and Sitecore language fallback do not count as connection-level language availability.
 
 TODO: Add comparison navigation and presentation improvements:
 
 - Add search across comparison items, including direct lookup by normalized Sitecore item ID. Search should reveal a match by loading only the ancestor path required to display it rather than expanding the complete tree.
 - Display Sitecore item icons in the comparison tree. Icon loading should be cached, use the item's configured Sitecore icon when available, and retain a lightweight fallback when an icon cannot be resolved.
-- Add a **Lock languages** control between the left and right language selectors. While enabled, changing either selector should select the same language on the other side when that language exists there; unavailable languages must be explained without silently changing to an unrelated language.
 
 Later enhancement: double-clicking a configured site beneath a connection in the Connections pane should open or reveal the comparison tab and use that site's root as the relevant comparison-side starting point. The exact side-selection behavior and handling when the other connection has not yet been chosen remain to be designed.
 
