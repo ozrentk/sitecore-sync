@@ -2765,43 +2765,40 @@ export class ComparisonPanelManager implements vscode.Disposable {
         return;
       }
 
-      const configuredIcons = [...new Set(
-        [...references.values()].filter((value): value is string => Boolean(value)),
-      )];
-      const loadedIcons = new Map<string, CachedItemIcon | undefined>();
-      await Promise.all(configuredIcons.map(async (configuredIcon) => {
-        loadedIcons.set(
-          configuredIcon,
-          await this.getItemIcon(connectionId, configuredIcon, generation),
-        );
-      }));
-      if (
-        generation !== this.itemIconGeneration ||
-        !this.panel ||
-        !this.isCurrentSelection(side, connectionId, language)
-      ) {
-        return;
+      const itemIdsByConfiguredIcon = new Map<string, string[]>();
+      const itemsWithoutConfiguredIcon: string[] = [];
+      for (const itemId of itemIds) {
+        const configuredIcon = references.get(normalizeItemId(itemId));
+        if (!configuredIcon) {
+          itemsWithoutConfiguredIcon.push(itemId);
+          continue;
+        }
+        const matchingItemIds = itemIdsByConfiguredIcon.get(configuredIcon) ?? [];
+        matchingItemIds.push(itemId);
+        itemIdsByConfiguredIcon.set(configuredIcon, matchingItemIds);
       }
 
-      const icons = [...new Map(
-        [...loadedIcons.values()]
-          .filter((icon): icon is CachedItemIcon => Boolean(icon))
-          .map((icon) => [icon.iconKey, icon]),
-      ).values()];
-      await this.panel.webview.postMessage({
-        type: "itemIconsLoaded",
-        side,
-        connectionId,
-        language,
-        items: itemIds.map((itemId) => {
-          const configuredIcon = references.get(normalizeItemId(itemId));
-          return {
-            itemId,
-            iconKey: configuredIcon ? loadedIcons.get(configuredIcon)?.iconKey : undefined,
-          };
-        }),
-        icons,
-      });
+      if (itemsWithoutConfiguredIcon.length) {
+        await this.postItemIcons(
+          side,
+          connectionId,
+          language,
+          generation,
+          itemsWithoutConfiguredIcon,
+          undefined,
+        );
+      }
+      await Promise.all([...itemIdsByConfiguredIcon].map(async ([configuredIcon, matchingItemIds]) => {
+        const icon = await this.getItemIcon(connectionId, configuredIcon, generation);
+        await this.postItemIcons(
+          side,
+          connectionId,
+          language,
+          generation,
+          matchingItemIds,
+          icon,
+        );
+      }));
     } catch (error: unknown) {
       if (!isAbortError(error) && generation === this.itemIconGeneration) {
         this.log.debug(
@@ -2809,6 +2806,31 @@ export class ComparisonPanelManager implements vscode.Disposable {
         );
       }
     }
+  }
+
+  private async postItemIcons(
+    side: TreeSide,
+    connectionId: string,
+    language: string,
+    generation: number,
+    itemIds: readonly string[],
+    icon: CachedItemIcon | undefined,
+  ): Promise<void> {
+    if (
+      generation !== this.itemIconGeneration ||
+      !this.panel ||
+      !this.isCurrentSelection(side, connectionId, language)
+    ) {
+      return;
+    }
+    await this.panel.webview.postMessage({
+      type: "itemIconsLoaded",
+      side,
+      connectionId,
+      language,
+      items: itemIds.map((itemId) => ({ itemId, iconKey: icon?.iconKey })),
+      icons: icon ? [icon] : [],
+    });
   }
 
   private async getItemIconReferences(

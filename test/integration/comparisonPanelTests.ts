@@ -166,6 +166,95 @@ export const comparisonPanelTests: readonly IntegrationTest[] = [{
     }
   },
 }, {
+  name: "posts completed comparison icons without waiting for slower icons",
+  async execute(): Promise<void> {
+    const left = connection("left", "Left");
+    const messages: Array<Record<string, unknown>> = [];
+    let releaseSlowIcon: (() => void) | undefined;
+    let reportFastIcon: (() => void) | undefined;
+    const slowIcon = new Promise<void>((resolve) => { releaseSlowIcon = resolve; });
+    const fastIconCompleted = new Promise<void>((resolve) => { reportFastIcon = resolve; });
+    const manager = Object.create(
+      ComparisonPanelManager.prototype,
+    ) as unknown as ComparisonPanelHarness;
+    Object.assign(manager, {
+      panel: {
+        webview: {
+          postMessage: async (message: Record<string, unknown>) => {
+            messages.push(message);
+            return true;
+          },
+        },
+      },
+      workspaceState: new MemoryMemento({
+        [selectionKey]: {
+          leftConnectionId: left.id,
+          leftLanguage: "en",
+        },
+      }),
+      connectionStore: {
+        list: () => [left],
+        get: (id: string) => id === left.id ? left : undefined,
+        getClientSecret: async () => "secret",
+      },
+      authoringClient: {
+        loadItemIconReferences: async () => [{
+          itemId: "fast-item",
+          configuredIcon: "Applications/16x16/fast.png",
+        }, {
+          itemId: "slow-item",
+          configuredIcon: "Applications/16x16/slow.png",
+        }],
+        loadItemIcon: async (
+          _connection: XmCloudConnection,
+          _secret: string,
+          configuredIcon: string,
+        ) => {
+          if (configuredIcon.endsWith("slow.png")) {
+            await slowIcon;
+          } else {
+            reportFastIcon?.();
+          }
+          return "data:image/png;base64,AQID";
+        },
+      },
+      log: { debug: () => undefined },
+      itemIconReferenceCache: new Map(),
+      pendingItemIconReferences: new Map(),
+      itemIconCache: new Map(),
+      pendingItemIcons: new Map(),
+      itemIconLoadWaiters: [],
+      requestControllers: new Set(),
+      activeItemIconLoads: 0,
+      itemIconGeneration: 0,
+      nextItemIconKey: 1,
+    });
+
+    const loading = manager.loadAndPostItemIcons(
+      "left",
+      left.id,
+      "en",
+      ["fast-item", "slow-item"],
+    );
+    await fastIconCompleted;
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    const messagesBeforeSlowIcon = [...messages];
+
+    releaseSlowIcon?.();
+    await loading;
+
+    strictEqual(messagesBeforeSlowIcon.length, 1);
+    deepStrictEqual(messagesBeforeSlowIcon[0]?.items, [{
+      itemId: "fast-item",
+      iconKey: "item-icon-1",
+    }]);
+    strictEqual(messages.length, 2);
+    deepStrictEqual(messages[1]?.items, [{
+      itemId: "slow-item",
+      iconKey: "item-icon-2",
+    }]);
+  },
+}, {
   name: "keeps optional comparison icon failures out of the tree-loading contract",
   async execute(): Promise<void> {
     const left = connection("left", "Left");
