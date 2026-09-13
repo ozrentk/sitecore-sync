@@ -9,7 +9,7 @@ import {
   type AuthoringTreeItem,
   type AuthoringTreeLevel,
 } from "../sitecore/authoringClient";
-import { resolveSitecoreThemeIconUrl } from "../sitecore/itemIcon";
+import { resolveSitecoreIconUrl } from "../sitecore/itemIcon";
 import {
   FieldDiffViewProvider,
   fieldDiffViewId,
@@ -2903,7 +2903,7 @@ export class ComparisonPanelManager implements vscode.Disposable {
     if (!connection) {
       return undefined;
     }
-    const iconUrl = resolveSitecoreThemeIconUrl(connection.serverUrl, configuredIcon);
+    const iconUrl = resolveSitecoreIconUrl(connection.serverUrl, configuredIcon);
     if (!iconUrl) {
       return undefined;
     }

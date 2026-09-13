@@ -197,7 +197,7 @@ test("loadItemIcon fetches an authenticated same-origin raster asset", async () 
   );
   strictEqual(
     String(runtime.requests[1]?.input),
-    "https://cm.example.com/sitecore/shell/themes/standard/Network/16x16/home.png",
+    "https://cm.example.com/-/icon/Network/16x16/home.png",
   );
   const headers = new Headers(runtime.requests[1]?.init.headers);
   strictEqual(headers.get("authorization"), "Bearer access-token");
@@ -210,7 +210,7 @@ test("loadItemIcon fetches an authenticated same-origin raster asset", async () 
       "https://external.example.test/icon.png",
       signal,
     ),
-    /not a supported theme image/u,
+    /not supported/u,
   );
 });
 
