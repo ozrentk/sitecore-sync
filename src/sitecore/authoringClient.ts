@@ -143,6 +143,7 @@ interface ItemIconsQueryResponse {
   readonly data?: Readonly<Record<string, {
     readonly itemId?: unknown;
     readonly icon?: { readonly value?: unknown } | null;
+    readonly template?: { readonly templateId?: unknown } | null;
   } | null>>;
   readonly errors?: readonly GraphQlError[];
 }
@@ -953,7 +954,7 @@ export class AuthoringContentClient {
       variableDefinitions.push(`$${variableName}: ItemQueryInput!`);
       variables[variableName] = { database: "master", language, itemId };
       selections.push(
-        `item${index}: item(where: $${variableName}) { itemId icon: field(name: "__Icon") { value } }`,
+        `item${index}: item(where: $${variableName}) { itemId icon: field(name: "__Icon") { value } template { templateId } }`,
       );
     });
     const query = `query XmCloudSyncItemIcons(${variableDefinitions.join(", ")}) { ${selections.join(" ")} }`;
@@ -971,7 +972,11 @@ export class AuthoringContentClient {
       throw new Error("Authoring API response did not contain item icon data.");
     }
 
-    return requestedItemIds.map((itemId, index): AuthoringItemIconReference => {
+    const itemReferences = requestedItemIds.map((itemId, index): {
+      readonly itemId: string;
+      readonly configuredIcon?: string;
+      readonly templateId?: string;
+    } => {
       const item = payload.data?.[`item${index}`];
       if (!item) {
         return { itemId };
@@ -985,10 +990,97 @@ export class AuthoringContentClient {
       const configuredIcon = typeof item.icon?.value === "string"
         ? item.icon.value.trim()
         : "";
-      return configuredIcon
-        ? { itemId: item.itemId, configuredIcon }
-        : { itemId: item.itemId };
+      if (configuredIcon) {
+        return { itemId: item.itemId, configuredIcon };
+      }
+      if (
+        typeof item.template?.templateId !== "string" ||
+        !normalizeGuid(item.template.templateId)
+      ) {
+        throw new Error("Authoring API returned invalid item icon data.");
+      }
+      return { itemId: item.itemId, templateId: item.template.templateId };
     });
+
+    const templateIds = new Map<string, string>();
+    for (const reference of itemReferences) {
+      if (reference.templateId) {
+        const normalizedTemplateId = normalizeGuid(reference.templateId);
+        if (!templateIds.has(normalizedTemplateId)) {
+          templateIds.set(normalizedTemplateId, reference.templateId);
+        }
+      }
+    }
+    const templateIcons = await this.loadTemplateIcons(
+      connection.serverUrl,
+      accessToken,
+      [...templateIds.values()],
+      language,
+      signal,
+    );
+    return itemReferences.map((reference): AuthoringItemIconReference => {
+      const configuredIcon = reference.configuredIcon ?? (
+        reference.templateId
+          ? templateIcons.get(normalizeGuid(reference.templateId))
+          : undefined
+      );
+      return configuredIcon
+        ? { itemId: reference.itemId, configuredIcon }
+        : { itemId: reference.itemId };
+    });
+  }
+
+  private async loadTemplateIcons(
+    serverUrl: string,
+    accessToken: string,
+    templateIds: readonly string[],
+    language: string,
+    signal: AbortSignal,
+  ): Promise<ReadonlyMap<string, string | undefined>> {
+    if (!templateIds.length) {
+      return new Map();
+    }
+    const variables: Record<string, unknown> = {};
+    const variableDefinitions: string[] = [];
+    const selections: string[] = [];
+    templateIds.forEach((templateId, index) => {
+      const variableName = `where${index}`;
+      variableDefinitions.push(`$${variableName}: ItemQueryInput!`);
+      variables[variableName] = { database: "master", language, itemId: templateId };
+      selections.push(
+        `template${index}: item(where: $${variableName}) { itemId icon: field(name: "__Icon") { value } }`,
+      );
+    });
+    const query = `query XmCloudSyncTemplateIcons(${variableDefinitions.join(", ")}) { ${selections.join(" ")} }`;
+    const payload = await this.postGraphQl<ItemIconsQueryResponse>(
+      serverUrl,
+      accessToken,
+      "Sitecore Authoring template icons query",
+      "XmCloudSyncTemplateIcons",
+      query,
+      variables,
+      signal,
+    );
+    if (!payload.data || typeof payload.data !== "object" || Array.isArray(payload.data)) {
+      throw new Error("Authoring API response did not contain template icon data.");
+    }
+
+    return new Map(templateIds.map((templateId, index): [string, string | undefined] => {
+      const template = payload.data?.[`template${index}`];
+      if (!template) {
+        return [normalizeGuid(templateId), undefined];
+      }
+      if (
+        typeof template.itemId !== "string" ||
+        normalizeGuid(template.itemId) !== normalizeGuid(templateId)
+      ) {
+        throw new Error("Authoring API returned invalid template icon data.");
+      }
+      const configuredIcon = typeof template.icon?.value === "string"
+        ? template.icon.value.trim()
+        : "";
+      return [normalizeGuid(template.itemId), configuredIcon || undefined];
+    }));
   }
 
   async loadItemIcon(

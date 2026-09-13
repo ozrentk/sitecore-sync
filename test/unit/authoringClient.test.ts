@@ -111,13 +111,34 @@ test("loadLanguages applies fallbacks, de-duplicates, sorts, and validates names
   );
 });
 
-test("loadItemIconReferences batches item aliases and validates returned identities", async () => {
+test("loadItemIconReferences resolves item icons before deduplicated template fallbacks", async () => {
   const runtime = new QueuedHttpRuntime([
     tokenResponse(),
     jsonResponse({
       data: {
-        item0: { itemId: "{ITEM-ONE}", icon: { value: " Network/16x16/home.png " } },
-        item1: { itemId: "item-two", icon: null },
+        item0: {
+          itemId: "{ITEM-ONE}",
+          icon: { value: " Network/16x16/home.png " },
+          template: { templateId: "template-one" },
+        },
+        item1: {
+          itemId: "item-two",
+          icon: null,
+          template: { templateId: "{SHARED-TEMPLATE}" },
+        },
+        item2: {
+          itemId: "item-three",
+          icon: { value: "" },
+          template: { templateId: "shared-template" },
+        },
+      },
+    }),
+    jsonResponse({
+      data: {
+        template0: {
+          itemId: "shared-template",
+          icon: { value: " Office/16x16/document.png " },
+        },
       },
     }),
   ]);
@@ -127,21 +148,30 @@ test("loadItemIconReferences batches item aliases and validates returned identit
     await client.loadItemIconReferences(
       testConnection,
       "client-secret",
-      ["{ITEM-ONE}", "item-two", "item-two"],
+      ["{ITEM-ONE}", "item-two", "item-three", "item-two"],
       "en",
       signal,
     ),
     [
       { itemId: "{ITEM-ONE}", configuredIcon: "Network/16x16/home.png" },
-      { itemId: "item-two" },
+      { itemId: "item-two", configuredIcon: "Office/16x16/document.png" },
+      { itemId: "item-three", configuredIcon: "Office/16x16/document.png" },
     ],
   );
   const body = requestBody(runtime, 1);
   strictEqual(body.operationName, "XmCloudSyncItemIcons");
   match(String(body.query), /item0: item\(where: \$where0\)/u);
+  match(String(body.query), /template \{ templateId \}/u);
   deepStrictEqual(body.variables, {
     where0: { database: "master", language: "en", itemId: "{ITEM-ONE}" },
     where1: { database: "master", language: "en", itemId: "item-two" },
+    where2: { database: "master", language: "en", itemId: "item-three" },
+  });
+  const templateBody = requestBody(runtime, 2);
+  strictEqual(templateBody.operationName, "XmCloudSyncTemplateIcons");
+  match(String(templateBody.query), /template0: item\(where: \$where0\)/u);
+  deepStrictEqual(templateBody.variables, {
+    where0: { database: "master", language: "en", itemId: "{SHARED-TEMPLATE}" },
   });
 });
 
@@ -174,6 +204,57 @@ test("loadItemIconReferences isolates optional icon failures from tree loading",
       signal,
     ),
     [{ itemId: "missing-item" }],
+  );
+
+  const missingTemplateIconRuntime = new QueuedHttpRuntime([
+    tokenResponse(),
+    jsonResponse({
+      data: {
+        item0: {
+          itemId: "expected-item",
+          icon: null,
+          template: { templateId: "template-id" },
+        },
+      },
+    }),
+    jsonResponse({ data: { template0: null } }),
+  ]);
+  deepStrictEqual(
+    await new AuthoringContentClient(noOpLogger, missingTemplateIconRuntime)
+      .loadItemIconReferences(
+        testConnection,
+        "client-secret",
+        ["expected-item"],
+        "en",
+        signal,
+      ),
+    [{ itemId: "expected-item" }],
+  );
+
+  const malformedTemplateRuntime = new QueuedHttpRuntime([
+    tokenResponse(),
+    jsonResponse({
+      data: {
+        item0: {
+          itemId: "expected-item",
+          icon: null,
+          template: { templateId: "template-id" },
+        },
+      },
+    }),
+    jsonResponse({
+      data: { template0: { itemId: "other-template", icon: null } },
+    }),
+  ]);
+  await rejects(
+    new AuthoringContentClient(noOpLogger, malformedTemplateRuntime).loadItemIconReferences(
+      testConnection,
+      "client-secret",
+      ["expected-item"],
+      "en",
+      signal,
+    ),
+    /invalid template icon data/u,
   );
 });
 
