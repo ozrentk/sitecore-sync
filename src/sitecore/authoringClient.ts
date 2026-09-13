@@ -18,7 +18,7 @@ import {
 } from "./sitecoreHttpClient";
 import {
   readItemIconDataUri,
-  resolveSitecoreThemeIconUrl,
+  resolveSitecoreIconUrl,
 } from "./itemIcon";
 
 const tokenEndpoint = "https://auth.sitecorecloud.io/oauth/token";
@@ -997,9 +997,9 @@ export class AuthoringContentClient {
     configuredIcon: string,
     signal: AbortSignal,
   ): Promise<string> {
-    const iconUrl = resolveSitecoreThemeIconUrl(connection.serverUrl, configuredIcon);
+    const iconUrl = resolveSitecoreIconUrl(connection.serverUrl, configuredIcon);
     if (!iconUrl) {
-      throw new Error("The configured Sitecore item icon is not a supported theme image.");
+      throw new Error("The configured Sitecore item icon is not supported.");
     }
     const accessToken = await this.getAccessToken(connection, clientSecret, signal);
     const response = await this.http.request(

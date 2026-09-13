@@ -3,8 +3,8 @@ import { Buffer } from "node:buffer";
 export const maximumItemIconBytes = 128 * 1024;
 export const maximumConfiguredIconLength = 2_048;
 
-const themePathPrefix = "/sitecore/shell/themes/";
-const standardThemePathPrefix = `${themePathPrefix}standard/`;
+const iconHandlerPathPrefix = "/-/icon/";
+const standardThemePathPrefix = "/sitecore/shell/themes/standard/";
 const supportedExtensions = new Set([".gif", ".ico", ".jpeg", ".jpg", ".png", ".webp"]);
 const supportedMediaTypes = new Set([
   "image/gif",
@@ -15,7 +15,7 @@ const supportedMediaTypes = new Set([
   "image/vnd.microsoft.icon",
 ]);
 
-export function resolveSitecoreThemeIconUrl(
+export function resolveSitecoreIconUrl(
   serverUrl: string,
   configuredIcon: string,
 ): URL | undefined {
@@ -29,26 +29,59 @@ export function resolveSitecoreThemeIconUrl(
     return undefined;
   }
 
-  const server = new URL(serverUrl);
-  let resolved: URL;
+  let server: URL;
   try {
-    if (/^[a-z][a-z\d+.-]*:/iu.test(value)) {
-      resolved = new URL(value);
-    } else if (value.startsWith("~/")) {
-      resolved = new URL(value.slice(1), server);
-    } else if (value.startsWith("/")) {
-      resolved = new URL(value, server);
-    } else {
-      const segments = value.split("/");
-      if (segments.some((segment) => segment === "." || segment === "..")) {
-        return undefined;
-      }
-      resolved = new URL(`${standardThemePathPrefix}${value}`, server);
-    }
+    server = new URL(serverUrl);
   } catch {
     return undefined;
   }
 
+  let iconPath = value;
+  if (/^[a-z][a-z\d+.-]*:/iu.test(iconPath)) {
+    let configuredUrl: URL;
+    try {
+      configuredUrl = new URL(iconPath);
+    } catch {
+      return undefined;
+    }
+    if (
+      configuredUrl.protocol !== "https:" ||
+      configuredUrl.origin !== server.origin ||
+      configuredUrl.username ||
+      configuredUrl.password ||
+      configuredUrl.search ||
+      configuredUrl.hash
+    ) {
+      return undefined;
+    }
+    iconPath = configuredUrl.pathname;
+  } else if (iconPath.startsWith("~/")) {
+    iconPath = iconPath.slice(1);
+  }
+
+  if (iconPath.toLowerCase().startsWith(standardThemePathPrefix)) {
+    iconPath = iconPath.slice(standardThemePathPrefix.length);
+  } else if (iconPath.startsWith("/") && !iconPath.toLowerCase().startsWith(iconHandlerPathPrefix)) {
+    return undefined;
+  }
+  if (iconPath.toLowerCase().startsWith(iconHandlerPathPrefix)) {
+    iconPath = iconPath.slice(iconHandlerPathPrefix.length);
+  }
+  const segments = iconPath.split("/");
+  if (
+    !iconPath ||
+    segments.some((segment) => !segment || segment === "." || segment === "..") ||
+    /%(?:2e|2f|5c)/iu.test(iconPath)
+  ) {
+    return undefined;
+  }
+
+  let resolved: URL;
+  try {
+    resolved = new URL(`${iconHandlerPathPrefix}${iconPath}`, server);
+  } catch {
+    return undefined;
+  }
   const path = resolved.pathname.toLowerCase();
   const extensionStart = path.lastIndexOf(".");
   const extension = extensionStart >= 0 ? path.slice(extensionStart) : "";
@@ -60,7 +93,7 @@ export function resolveSitecoreThemeIconUrl(
     resolved.search ||
     resolved.hash ||
     /%(?:2e|2f|5c)/iu.test(path) ||
-    !path.startsWith(themePathPrefix) ||
+    !path.startsWith(iconHandlerPathPrefix) ||
     !supportedExtensions.has(extension)
   ) {
     return undefined;

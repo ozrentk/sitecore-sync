@@ -3,48 +3,49 @@ import { test } from "node:test";
 import {
   maximumItemIconBytes,
   readItemIconDataUri,
-  resolveSitecoreThemeIconUrl,
+  resolveSitecoreIconUrl,
 } from "../../src/sitecore/itemIcon";
 
-test("Sitecore theme icon paths resolve only within the selected HTTPS origin", () => {
+test("Sitecore icon identifiers resolve through the same-origin icon handler", () => {
   strictEqual(
-    resolveSitecoreThemeIconUrl(
+    resolveSitecoreIconUrl(
       "https://cm.example.test",
       "Network\\16x16\\home.png",
     )?.href,
-    "https://cm.example.test/sitecore/shell/themes/standard/Network/16x16/home.png",
+    "https://cm.example.test/-/icon/Network/16x16/home.png",
   );
   strictEqual(
-    resolveSitecoreThemeIconUrl(
+    resolveSitecoreIconUrl(
       "https://cm.example.test",
       "~/sitecore/shell/themes/standard/Applications/16x16/document.png",
     )?.href,
-    "https://cm.example.test/sitecore/shell/themes/standard/Applications/16x16/document.png",
+    "https://cm.example.test/-/icon/Applications/16x16/document.png",
   );
   strictEqual(
-    resolveSitecoreThemeIconUrl(
+    resolveSitecoreIconUrl(
       "https://cm.example.test",
-      "https://cm.example.test/sitecore/shell/themes/custom/folder.webp",
+      "https://cm.example.test/-/icon/Applications/16x16/folder.webp",
     )?.href,
-    "https://cm.example.test/sitecore/shell/themes/custom/folder.webp",
+    "https://cm.example.test/-/icon/Applications/16x16/folder.webp",
   );
 });
 
-test("Sitecore theme icon paths reject unsafe and unsupported locations", () => {
+test("Sitecore icon identifiers reject unsafe and unsupported locations", () => {
   for (const configuredIcon of [
-    "https://external.example.test/sitecore/shell/themes/standard/icon.png",
-    "http://cm.example.test/sitecore/shell/themes/standard/icon.png",
+    "https://external.example.test/-/icon/Applications/16x16/icon.png",
+    "http://cm.example.test/-/icon/Applications/16x16/icon.png",
     "//cm.example.test/sitecore/shell/themes/standard/icon.png",
     "/sitecore/api/authoring/graphql/v1/icon.png",
+    "/sitecore/shell/themes/custom/icon.png",
     "../admin/icon.png",
-    "/sitecore/shell/themes/standard/%2f..%2fadmin.png",
-    "/sitecore/shell/themes/standard/%5c..%5cadmin.png",
+    "/-/icon/%2f..%2fadmin.png",
+    "/-/icon/%5c..%5cadmin.png",
     "Network/16x16/icon.svg",
     "Network/16x16/icon.png?token=value",
     "data:image/png;base64,AQID",
   ]) {
     strictEqual(
-      resolveSitecoreThemeIconUrl("https://cm.example.test", configuredIcon),
+      resolveSitecoreIconUrl("https://cm.example.test", configuredIcon),
       undefined,
       configuredIcon,
     );
