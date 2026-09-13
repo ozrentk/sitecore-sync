@@ -149,7 +149,7 @@ test("loadItemIconReferences resolves item icons before deduplicated template fa
       testConnection,
       "client-secret",
       ["{ITEM-ONE}", "item-two", "item-three", "item-two"],
-      "en",
+      "de",
       signal,
     ),
     [
@@ -163,15 +163,15 @@ test("loadItemIconReferences resolves item icons before deduplicated template fa
   match(String(body.query), /item0: item\(where: \$where0\)/u);
   match(String(body.query), /template \{ templateId \}/u);
   deepStrictEqual(body.variables, {
-    where0: { database: "master", language: "en", itemId: "{ITEM-ONE}" },
-    where1: { database: "master", language: "en", itemId: "item-two" },
-    where2: { database: "master", language: "en", itemId: "item-three" },
+    where0: { database: "master", language: "de", itemId: "{ITEM-ONE}" },
+    where1: { database: "master", language: "de", itemId: "item-two" },
+    where2: { database: "master", language: "de", itemId: "item-three" },
   });
   const templateBody = requestBody(runtime, 2);
   strictEqual(templateBody.operationName, "XmCloudSyncTemplateIcons");
   match(String(templateBody.query), /template0: item\(where: \$where0\)/u);
   deepStrictEqual(templateBody.variables, {
-    where0: { database: "master", language: "en", itemId: "{SHARED-TEMPLATE}" },
+    where0: { database: "master", itemId: "{SHARED-TEMPLATE}" },
   });
 });
 

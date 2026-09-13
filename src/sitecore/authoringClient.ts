@@ -1015,7 +1015,6 @@ export class AuthoringContentClient {
       connection.serverUrl,
       accessToken,
       [...templateIds.values()],
-      language,
       signal,
     );
     return itemReferences.map((reference): AuthoringItemIconReference => {
@@ -1034,7 +1033,6 @@ export class AuthoringContentClient {
     serverUrl: string,
     accessToken: string,
     templateIds: readonly string[],
-    language: string,
     signal: AbortSignal,
   ): Promise<ReadonlyMap<string, string | undefined>> {
     if (!templateIds.length) {
@@ -1046,7 +1044,9 @@ export class AuthoringContentClient {
     templateIds.forEach((templateId, index) => {
       const variableName = `where${index}`;
       variableDefinitions.push(`$${variableName}: ItemQueryInput!`);
-      variables[variableName] = { database: "master", language, itemId: templateId };
+      // Template icons are shared fields. Omitting language also allows templates
+      // without a version in the comparison language to resolve.
+      variables[variableName] = { database: "master", itemId: templateId };
       selections.push(
         `template${index}: item(where: $${variableName}) { itemId icon: field(name: "__Icon") { value } }`,
       );
