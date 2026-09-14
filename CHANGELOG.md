@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.11.0
+
+- Added site-click navigation in Connections: reveal the site root in an existing comparison using the same cached and lazy ancestor-loading behavior as favorites.
+
 ## 0.10.1
 
 - Fixed intermittent favorite reveal failures caused by overlapping ancestor loads discarding already-loaded descendants in the comparison tree.

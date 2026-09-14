@@ -44,10 +44,18 @@ export class ConnectionTreeItem extends vscode.TreeItem {
 }
 
 export class SiteTreeItem extends vscode.TreeItem {
-  constructor(readonly site: AuthoringSite) {
+  constructor(
+    readonly connection: XmCloudConnection,
+    readonly site: AuthoringSite,
+  ) {
     super(site.name, vscode.TreeItemCollapsibleState.None);
     this.description = site.rootPath;
     this.contextValue = "xmCloudSite";
+    this.command = {
+      command: "xmCloudSync.openSite",
+      title: "Open Site in Comparison",
+      arguments: [this],
+    };
     this.iconPath = new vscode.ThemeIcon("globe");
 
     const tooltip = new vscode.MarkdownString(undefined, true);
@@ -126,7 +134,7 @@ export class ConnectionTreeProvider
         this.testStates.get(element.connection.id)?.sites ??
         this.store.listVerifiedSites(element.connection.id)
       ).map(
-        (site) => new SiteTreeItem(site),
+        (site) => new SiteTreeItem(element.connection, site),
       );
       return [...favorites, ...sites];
     }

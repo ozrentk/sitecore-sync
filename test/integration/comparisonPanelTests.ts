@@ -1,6 +1,12 @@
 import { deepStrictEqual, strictEqual } from "node:assert/strict";
 import * as vscode from "vscode";
 import { ComparisonPanelManager } from "../../src/comparison/comparisonPanel";
+import {
+  SiteTreeItem,
+  ConnectionTreeProvider,
+  ConnectionTreeItem,
+} from "../../src/connections/connectionTreeProvider";
+import type { ConnectionStore } from "../../src/connections/connectionStore";
 import type { XmCloudConnection } from "../../src/connections/connection";
 import type {
   AuthoringLanguage,
@@ -12,6 +18,7 @@ const selectionKey = "sitecoreXmCloudSync.comparisonSelection.v1";
 
 interface ComparisonPanelHarness {
   handleMessage(message: unknown): Promise<void>;
+  openSite(connectionId: string, path: string): Promise<void>;
   openFavorite(connectionId: string, path: string): Promise<void>;
   loadAndPostItemIcons(
     side: "left" | "right",
@@ -22,6 +29,35 @@ interface ComparisonPanelHarness {
 }
 
 export const comparisonPanelTests: readonly IntegrationTest[] = [{
+  name: "site entries retain their connection and expose root navigation",
+  async execute(): Promise<void> {
+    const owner = connection("owner", "Owner");
+    const site = { name: "Example", rootPath: "/sitecore/content/Example", rootItemId: "root" };
+    const emitter = new vscode.EventEmitter<void>();
+    const provider = new ConnectionTreeProvider({
+      onDidChange: emitter.event,
+      list: () => [owner],
+      listFavoritePaths: () => [],
+      listVerifiedSites: () => [site],
+    } as unknown as ConnectionStore);
+    try {
+      const root = provider.getChildren()[0];
+      strictEqual(root instanceof ConnectionTreeItem, true);
+      const item = provider.getChildren(root)[0];
+      strictEqual(item instanceof SiteTreeItem, true);
+      if (!(item instanceof SiteTreeItem)) {
+        throw new Error("Missing site entry");
+      }
+      strictEqual(item.connection, owner);
+      strictEqual(item.site.rootPath, site.rootPath);
+      strictEqual(item.command?.command, "xmCloudSync.openSite");
+      deepStrictEqual(item.command?.arguments, [item]);
+    } finally {
+      provider.dispose();
+      emitter.dispose();
+    }
+  },
+}, {
   name: "persists and mirrors the comparison language lock",
   async execute(): Promise<void> {
     const left = connection("left", "Left");
@@ -89,10 +125,11 @@ export const comparisonPanelTests: readonly IntegrationTest[] = [{
       stateEmitter.dispose();
     }
   },
-}, {
-  name: "newer favorite navigation supersedes an older in-flight reveal",
+}, ...(["left", "right"] as const).map((side): IntegrationTest => ({
+  name: `site navigation on the ${side} supersedes an older favorite reveal`,
   async execute(): Promise<void> {
     const left = connection("left", "Left");
+    const other = connection("other", "Other");
     const firstPath = "/sitecore/content/First";
     const secondPath = "/sitecore/content/Second";
     const revealAttempts = new Map<string, number>();
@@ -141,13 +178,14 @@ export const comparisonPanelTests: readonly IntegrationTest[] = [{
       },
       workspaceState: new MemoryMemento({
         [selectionKey]: {
-          leftConnectionId: left.id,
-          leftLanguage: "en",
+          [side === "left" ? "rightConnectionId" : "leftConnectionId"]: other.id,
+          [`${side}ConnectionId`]: left.id,
+          [`${side}Language`]: "en",
         },
       }),
       connectionStore: {
-        list: () => [left],
-        get: (id: string) => id === left.id ? left : undefined,
+        list: () => [left, other],
+        get: (id: string) => [left, other].find((candidate) => candidate.id === id),
       },
       getTreeLevel: async (
         _connectionId: string,
@@ -172,7 +210,7 @@ export const comparisonPanelTests: readonly IntegrationTest[] = [{
 
     const firstNavigation = manager.openFavorite(left.id, firstPath);
     await firstAncestorStarted;
-    await manager.openFavorite(left.id, secondPath);
+    await manager.openSite(left.id, secondPath);
     releaseFirstAncestor?.();
     await firstNavigation;
 
@@ -186,13 +224,14 @@ export const comparisonPanelTests: readonly IntegrationTest[] = [{
       navigationId: 2,
       path: secondPath,
     }]);
+    strictEqual(navigationStarts[1]?.side, side);
     strictEqual(revealAttempts.get(firstPath), 1);
     strictEqual(revealAttempts.get(secondPath), 2);
     strictEqual(loadedLevels.some((message) => (
       message.level as AuthoringTreeLevel | undefined
     )?.item.itemId === "stale-item"), false);
   },
-}, {
+})), {
   name: "loads comparison item icons once and reuses the bounded caches",
   async execute(): Promise<void> {
     const left = connection("left", "Left");

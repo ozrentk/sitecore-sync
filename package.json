@@ -2,7 +2,7 @@
   "name": "sitecore-xm-cloud-sync",
   "displayName": "XM Cloud Sync",
   "description": "Compare and synchronize Sitecore XM Cloud authoring content from VS Code.",
-  "version": "0.10.1",
+  "version": "0.11.0",
   "publisher": "OzrenTK",
   "license": "MIT",
   "engines": {
@@ -35,6 +35,7 @@
     "onCommand:xmCloudSync.removeConnection",
     "onCommand:xmCloudSync.openComparison",
     "onCommand:xmCloudSync.openFavorite",
+    "onCommand:xmCloudSync.openSite",
     "onCommand:xmCloudSync.removeFavorite",
     "onCommand:xmCloudSync.showLogs",
     "onCommand:xmCloudSync.showPublishOutput",
@@ -77,6 +78,10 @@
         "command": "xmCloudSync.openComparison",
         "title": "XM Cloud Sync: Open Comparison",
         "icon": "$(diff)"
+      },
+      {
+        "command": "xmCloudSync.openSite",
+        "title": "Open Site in Comparison"
       },
       {
         "command": "xmCloudSync.openFavorite",
@@ -476,6 +481,10 @@
         }
       ],
       "commandPalette": [
+        {
+          "command": "xmCloudSync.openSite",
+          "when": "false"
+        },
         {
           "command": "xmCloudSync.configureDeploymentMonitoring",
           "when": "false"
