@@ -58,6 +58,10 @@ export const comparisonPanelTests: readonly IntegrationTest[] = [{
     await manager.applySelection({ ...selection, leftLanguage: "fr" });
     deepStrictEqual(loads, [{ side: "left", connectionId: "left", locator: { path: "/sitecore" } }]);
     strictEqual(clears, 1);
+    for (const type of ["standardPublish", "tracedPublish", "powerPublish"]) {
+      await manager.handleMessage({ type, side: "left", itemId: "item", path: "/sitecore/content" });
+    }
+    await manager.handleMessage({ type: "syncSubtree", rowKey: "row", direction: "leftToRight", sourceItemId: "item", sourcePath: "/sitecore/content" });
     loads.length = 0;
     await manager.applySelection({ ...selection });
     strictEqual(loads.length, 0);
@@ -73,6 +77,12 @@ export const comparisonPanelTests: readonly IntegrationTest[] = [{
     });
     await manager.handleMessage({ type: "selectFieldDiffItem", leftItemId: "item", comparisonKey: JSON.stringify(["left", "en", "right", "en"]) });
     strictEqual(fieldRefreshes, 0);
+    await manager.handleMessage({ type: "selectFieldDiffItem", leftItemId: "item", comparisonKey: JSON.stringify(["left", "fr", "right", "en"]) });
+    strictEqual(fieldRefreshes, 0, "Field Diff remains blocked until the staged view commits");
+    await manager.handleMessage({ type: "languageViewReady", comparisonKey: JSON.stringify(["left", "en", "right", "en"]) });
+    await manager.handleMessage({ type: "selectFieldDiffItem", leftItemId: "item" });
+    strictEqual(fieldRefreshes, 0, "An old acknowledgement cannot unlock the new view");
+    await manager.handleMessage({ type: "languageViewReady", comparisonKey: JSON.stringify(["left", "fr", "right", "en"]) });
     await manager.handleMessage({ type: "selectFieldDiffItem", leftItemId: "item", comparisonKey: JSON.stringify(["left", "fr", "right", "en"]) });
     strictEqual(fieldRefreshes, 1);
     loads.length = 0;
