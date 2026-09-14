@@ -1118,7 +1118,7 @@ function showContextMenu(event, pair, clickedSide, forceDisabled = false) {
   const syncLeftToRight = document.createElement("button");
   syncLeftToRight.className = "context-menu-item";
   syncLeftToRight.type = "button";
-  syncLeftToRight.textContent = "Transfer Left > Right";
+  syncLeftToRight.textContent = "Tree Transfer Left > Right";
   syncLeftToRight.disabled = disabled || sameEnvironment || !pair.left;
   syncLeftToRight.title = sameEnvironment
     ? "Subtree transfer requires two different XM Cloud environments."
@@ -1132,7 +1132,7 @@ function showContextMenu(event, pair, clickedSide, forceDisabled = false) {
   const syncRightToLeft = document.createElement("button");
   syncRightToLeft.className = "context-menu-item";
   syncRightToLeft.type = "button";
-  syncRightToLeft.textContent = "Transfer Right > Left";
+  syncRightToLeft.textContent = "Tree Transfer Right > Left";
   syncRightToLeft.disabled = disabled || sameEnvironment || !pair.right;
   syncRightToLeft.title = sameEnvironment
     ? "Subtree transfer requires two different XM Cloud environments."

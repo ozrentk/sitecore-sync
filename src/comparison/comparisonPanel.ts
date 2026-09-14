@@ -3439,6 +3439,8 @@ function subtreeTransferConfirmation(
   sourcePath: string,
   preflight: SubtreeTransferPreflight,
 ): { readonly message: string; readonly detail: string; readonly action: string } {
+  const languageScope =
+    "Transferred items include all source languages and versions, regardless of the selected comparison language.";
   const counts =
     `Source: ${preflight.sourceItems} item(s) · Target: ${preflight.targetItems} item(s)\n` +
     `Will add: ${preflight.addItems} · update: ${preflight.updateItems} · remove: ${preflight.removeItems}`;
@@ -3446,13 +3448,13 @@ function subtreeTransferConfirmation(
     case "addMissing":
       return {
         message: "Add missing content?",
-        detail: `Existing target items under ${sourcePath} will be kept.\n\n${counts}`,
+        detail: `Existing target items under ${sourcePath} will be kept.\n\n${languageScope}\n\n${counts}`,
         action: "Add Transfer",
       };
     case "synchronize":
       return {
         message: "Synchronize target tree?",
-        detail: `Matching items under ${sourcePath} will be replaced. Target-only items will remain.\n\n${counts}`,
+        detail: `Matching items under ${sourcePath} will be replaced. Target-only items will remain.\n\n${languageScope}\n\n${counts}`,
         action: "Add Transfer",
       };
     case "exactMirror":
@@ -3460,6 +3462,7 @@ function subtreeTransferConfirmation(
         message: "Replace target tree?",
         detail:
           "The target subtree will be deleted and recreated from source.\n\n" +
+          `${languageScope}\n\n` +
           `Path: ${sourcePath}\n\n` +
           `Source: ${preflight.sourceItems} item(s) · Target: ${preflight.targetItems} item(s)\n` +
           `Matching: ${preflight.updateItems} · Source-only: ${preflight.addItems} · ` +
