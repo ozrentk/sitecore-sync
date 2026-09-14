@@ -13,6 +13,8 @@ Create an environment automation client for the XM Cloud environment in Sitecore
 3. Enter a unique name, the CM server URL, client ID, and client secret.
 4. Select **Test Connection**, or use the play button beside the saved connection later.
 
+After the connection is saved, a missing shared public-page URL template adds optional **Set up URL template** and **Not now** actions to the success notification. Declining or dismissing leaves the connection saved and usable. If the shared template already exists, this offer is omitted even when the new connection has no individual public URL values. The same behavior applies to **Paste as Connection URL**.
+
 The client secret is stored in VS Code `SecretStorage`. OAuth access tokens are kept in memory only.
 
 Deployment monitoring is optional. The extension first tries the connection's existing credentials; if they already have Deploy API access, no setup is needed. Otherwise subtree transfers continue normally without monitoring. To enable the additional guard explicitly, right-click a connection and select **Configure Deployment Monitoring**, then enter an organization automation client with Deploy API access. The extension matches the saved CM hostname to its deployment environment and stores the additional secret in `SecretStorage`.
