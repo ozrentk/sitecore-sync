@@ -63,12 +63,20 @@ const navigationInput = document.getElementById("item-navigation-input");
 const navigationMode = document.getElementById("item-navigation-mode");
 const navigationStatus = document.getElementById("item-navigation-status");
 const navigationCancel = document.getElementById("item-navigation-cancel");
+const navigationResults = document.getElementById("item-navigation-results");
+const navigationMore = document.getElementById("item-navigation-more");
 let navigationRequestId = 0;
 const navigationRetainedNodes = { left: new Map(), right: new Map() };
-function cancelItemLookup() {
+function clearItemLookupUi() {
   navigationRequestId += 1;
   navigationCancel.hidden = true;
   navigationStatus.textContent = "";
+  navigationResults.replaceChildren();
+  navigationResults.hidden = true;
+  navigationMore.hidden = true;
+}
+function cancelItemLookup() {
+  clearItemLookupUi();
   vscode.postMessage({ type: "cancelItemLookup" });
 }
 navigationInput.addEventListener("input", () => {
@@ -76,13 +84,34 @@ navigationInput.addEventListener("input", () => {
   const text = navigationInput.value.trim();
   const id = text.startsWith("{") && text.endsWith("}") ? text.slice(1, -1) : text;
   navigationMode.textContent = /^(?:[a-f0-9]{32}|[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12})$/i.test(id)
-    ? "Go to ID" : text.startsWith("/") ? "Go to path" : text ? "Search (coming later)" : "Go to ID / path";
+    ? "Go to ID" : text.startsWith("/") ? "Go to path" : text ? "Search" : "Go to ID / path";
 });
 navigationCancel.addEventListener("click", cancelItemLookup);
+navigationMore.addEventListener("click", () => {
+  navigationMore.disabled = true;
+  navigationStatus.textContent = "Loading more results...";
+  navigationCancel.hidden = false;
+  vscode.postMessage({ type: "moreItemResults", requestId: String(navigationRequestId) });
+});
+navigationInput.addEventListener("keydown", event => {
+  if (event.key === "ArrowDown" && !navigationResults.hidden) { event.preventDefault(); navigationResults.querySelector("button")?.focus(); }
+  if (event.key === "Escape") { cancelItemLookup(); }
+});
+navigationResults.addEventListener("keydown", event => {
+  const buttons = [...navigationResults.querySelectorAll("button")];
+  const current = buttons.indexOf(document.activeElement);
+  if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+    event.preventDefault();
+    buttons[Math.max(0, Math.min(buttons.length - 1, current + (event.key === "ArrowDown" ? 1 : -1)))]?.focus();
+  } else if (event.key === "Escape") { cancelItemLookup(); navigationInput.focus(); }
+});
 document.getElementById("item-navigation").addEventListener("submit", (event) => {
   event.preventDefault();
   if (!navigationInput.value.trim()) { return; }
   navigationRequestId += 1;
+  navigationResults.replaceChildren();
+  navigationResults.hidden = true;
+  navigationMore.hidden = true;
   navigationStatus.textContent = "Looking up item...";
   navigationCancel.hidden = false;
   vscode.postMessage({ type: "navigateItem", query: navigationInput.value, requestId: String(navigationRequestId),
@@ -2407,7 +2436,38 @@ languageLock.addEventListener("change", () => {
 
 window.addEventListener("message", (event) => {
   const message = event.data;
-  if (message?.type === "itemLookupStatus") {
+  if (message?.type === "itemSearchResults") {
+    if (message.requestId !== String(navigationRequestId)) { return; }
+    if (!message.append) { navigationResults.replaceChildren(); }
+    for (const item of message.items) {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.textContent = `${item.name} — ${item.path} — ${message.connectionName}`;
+      button.addEventListener("click", () => {
+        navigationRequestId += 1;
+        navigationResults.hidden = true;
+        navigationMore.hidden = true;
+        navigationStatus.textContent = "Revealing item...";
+        navigationCancel.hidden = false;
+        vscode.postMessage({ type: "revealItemResult", searchRequestId: message.requestId, requestId: String(navigationRequestId), itemId: item.itemId,
+          roots: { left: state.trees.left.root?.path, right: state.trees.right.root?.path } });
+      });
+      navigationResults.append(button);
+    }
+    navigationResults.hidden = false;
+    navigationStatus.textContent = message.text;
+    navigationMore.hidden = !message.hasMore;
+    navigationMore.disabled = false;
+    navigationCancel.hidden = true;
+    return;
+  } else if (message?.type === "itemSearchError") {
+    if (message.requestId === String(navigationRequestId)) {
+      navigationStatus.textContent = message.text;
+      navigationMore.disabled = false;
+      navigationCancel.hidden = true;
+    }
+    return;
+  } else if (message?.type === "itemLookupStatus") {
     if (message.requestId === String(navigationRequestId)) {
       navigationStatus.textContent = message.text;
       navigationCancel.hidden = true;
@@ -2426,6 +2486,7 @@ window.addEventListener("message", (event) => {
       (message.side === "left" || message.side === "right") &&
       typeof message.path === "string"
     ) {
+      if (message.source !== "lookup") { clearItemLookupUi(); }
       cancelLanguageRestoration();
       state.favoriteNavigationId = message.navigationId;
       state.selectedRowKey = undefined;
@@ -2444,6 +2505,7 @@ window.addEventListener("message", (event) => {
     });
     return;
   } else if (message?.type === "stateChanged") {
+    if (JSON.stringify(state.selection) !== JSON.stringify(message.selection)) { clearItemLookupUi(); }
     state.connections = message.connections;
     state.selection = message.selection;
     state.textNormalization = message.textNormalization || "none";

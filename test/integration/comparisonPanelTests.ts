@@ -31,6 +31,41 @@ interface ComparisonPanelHarness {
 }
 
 export const comparisonPanelTests: readonly IntegrationTest[] = [{
+  name: "name search falls back on empty left results, paginates only the chosen connection and blocks stale selections",
+  async execute(): Promise<void> {
+    const manager = Object.create(ComparisonPanelManager.prototype) as ComparisonPanelHarness;
+    const messages: Array<Record<string, unknown>> = [];
+    const calls: string[] = [];
+    let fail = false;
+    let revealSide: string | undefined;
+    Object.assign(manager, {
+      favoriteNavigationGeneration: 0, pendingFavoriteReveal: new Map(),
+      panel: { webview: { postMessage: async (message: Record<string, unknown>) => { messages.push(message); return true; } } },
+      getSelection: () => ({ leftConnectionId: "left", rightConnectionId: "right", leftLanguage: "en", rightLanguage: "fr" }),
+      connectionStore: { get: (id: string) => connection(id, id), getClientSecret: async () => "secret" },
+      authoringClient: { searchItemsByName: async (connection: XmCloudConnection, _secret: string, _query: string, _language: string, page: number) => {
+        calls.push(`${connection.id}:${page}`);
+        if (fail) { throw new Error("offline"); }
+        return connection.id === "left" ? { items: [], totalCount: 0, hasMore: false } : { items: [treeLevel(`/sitecore/Page${page}`, `id${page}`).item], totalCount: 75, hasMore: page === 0 };
+      } },
+      getTreeLevel: async (id: string) => { revealSide = id; return treeLevel("/sitecore/Page0"); },
+      revealFavoriteNavigation: async () => undefined,
+    });
+    await manager.handleMessage({ type: "navigateItem", query: "Page", requestId: "1" });
+    deepStrictEqual(calls.splice(0), ["left:0", "right:0"]);
+    strictEqual(messages.at(-1)?.type, "itemSearchResults");
+    await manager.handleMessage({ type: "moreItemResults", requestId: "1" });
+    deepStrictEqual(calls.splice(0), ["right:1"]);
+    await manager.handleMessage({ type: "revealItemResult", searchRequestId: "old", requestId: "2", itemId: "id0" });
+    strictEqual(revealSide, undefined);
+    await manager.handleMessage({ type: "revealItemResult", searchRequestId: "1", requestId: "2", itemId: "id0" });
+    strictEqual(revealSide, "right");
+    fail = true;
+    await manager.handleMessage({ type: "navigateItem", query: "Page", requestId: "3" });
+    deepStrictEqual(calls, ["left:0"]);
+    strictEqual(String(messages.at(-1)?.text).includes("offline"), true);
+  },
+}, {
   name: "exact navigation falls back only on not-found and ignores cancelled lookups",
   async execute(): Promise<void> {
     const manager = Object.create(ComparisonPanelManager.prototype) as ComparisonPanelHarness;

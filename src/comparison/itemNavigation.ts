@@ -20,7 +20,7 @@ export function classifyNavigationInput(value: string): NavigationInput {
     }
     return { kind: "path", locator: { path: text.replace(/\/{2,}/gu, "/").replace(/\/$/u, "") || "/" } };
   }
-  if (/[{}]/u.test(text) || /^[a-f0-9-]{28,}$/iu.test(text)) {
+  if (/[{}]/u.test(text) || /^[a-f0-9-]{28,}$/iu.test(text) || /^[a-z0-9]{8}(?:-[a-z0-9]{4}){3}-[a-z0-9]{12}$/iu.test(text)) {
     return { kind: "invalid", message: "An item ID needs 32 hexadecimal digits, optionally dashed and enclosed in braces." };
   }
   return { kind: "name", text };

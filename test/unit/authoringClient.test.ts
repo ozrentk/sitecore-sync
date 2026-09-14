@@ -1,6 +1,6 @@
 import { deepStrictEqual, match, rejects, strictEqual } from "node:assert/strict";
 import { test } from "node:test";
-import { AuthoringContentClient } from "../../src/sitecore/authoringClient";
+import { AuthoringContentClient, AuthoringItemNotFoundError } from "../../src/sitecore/authoringClient";
 import {
   jsonResponse,
   noOpLogger,
@@ -486,4 +486,37 @@ test("authoring rejects GraphQL errors, non-JSON content, and invalid JSON", asy
       expected,
     );
   }
+});
+
+
+test("indexed name search uses variables, bounded paging and deduplicated results", async () => {
+  const found = treeItem("abcd", "Vehicle", "/sitecore/content/Vehicle");
+  const runtime = new QueuedHttpRuntime([tokenResponse(), jsonResponse({ data: { search: { totalCount: 100, results: [{ innerItem: found }, { innerItem: { ...found, itemId: "{ABCD}" } }] } } })]);
+  const client = new AuthoringContentClient(noOpLogger, runtime);
+  const result = await client.searchItemsByName(testConnection, "secret", 'Vehicle "quote"', "en-CA", 0, signal);
+  strictEqual(result.items.length, 1);
+  strictEqual(result.hasMore, true);
+  const body = requestBody(runtime, 1);
+  deepStrictEqual(body.variables, { name: 'Vehicle "quote"', language: "en-CA" });
+  match(String(body.query), /index: "sitecore_master_index"/);
+  match(String(body.query), /pageSize: 50, pageIndex: 0/);
+  strictEqual(String(body.query).includes('Vehicle "quote"'), false);
+  await rejects(client.searchItemsByName(testConnection, "secret", "name", "en", 10, signal), /page/);
+  await rejects(client.searchItemsByName(testConnection, "secret", "", "en", 0, signal), /requires/);
+  await rejects(client.searchItemsByName(testConnection, "secret", "name", "en", 0, AbortSignal.abort()), /abort/i);
+});
+
+test("indexed search rejects failures and invalid result envelopes", async () => {
+  for (const payload of [{ errors: [{ message: "Index unavailable" }] }, { data: { search: null } }, { data: { search: { totalCount: -1, results: [] } } }, { data: { search: { totalCount: 1, results: [{ innerItem: { itemId: 42 } }] } } }]) {
+    const client = new AuthoringContentClient(noOpLogger, new QueuedHttpRuntime([tokenResponse(), jsonResponse(payload)]));
+    await rejects(client.searchItemsByName(testConnection, "secret", "Page", "en", 0, signal));
+  }
+});
+
+
+test("exact lookup distinguishes an absent item from a malformed response", async () => {
+  const missing = new AuthoringContentClient(noOpLogger, new QueuedHttpRuntime([tokenResponse(), jsonResponse({ data: { item: null } })]));
+  await rejects(missing.loadTreeLevel(testConnection, "secret", { path: "/missing" }, "en", signal), AuthoringItemNotFoundError);
+  const malformed = new AuthoringContentClient(noOpLogger, new QueuedHttpRuntime([tokenResponse(), jsonResponse({ data: {} })]));
+  await rejects(malformed.loadTreeLevel(testConnection, "secret", { path: "/missing" }, "en", signal), error => error instanceof Error && !(error instanceof AuthoringItemNotFoundError));
 });

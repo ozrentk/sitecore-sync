@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.18.0
+
+- Enabled indexed name search in the comparison input with left-first lookup, bounded pagination, keyboard-accessible results and cancellation.
+- Search result selection reuses exact navigation on the matching connection.
+
 ## 0.17.0
 
 - Added a shared public-page URL template, per-connection/site mappings, URL previews and public-page actions in comparison and Field Diff.

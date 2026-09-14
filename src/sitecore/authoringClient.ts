@@ -846,6 +846,51 @@ export class AuthoringContentClient {
     return undefined;
   }
 
+  async searchItemsByName(
+    connection: XmCloudConnection, clientSecret: string, text: string,
+    language: string, page: number, signal: AbortSignal,
+  ): Promise<{ readonly items: readonly AuthoringTreeItem[]; readonly totalCount: number; readonly hasMore: boolean }> {
+    if (!text.trim() || text.length > 2048 || !Number.isInteger(page) || page < 0 || page >= 10) {
+      throw new Error("Name search requires text and a page from 0 through 9.");
+    }
+    signal.throwIfAborted();
+    const token = await this.getAccessToken(connection, clientSecret, signal);
+    // Documented Authoring indexed search, never a tree crawl. Numeric paging is
+    // bounded above; all user text is passed as GraphQL variables.
+    const payload = await this.postGraphQl<{
+      readonly errors?: readonly GraphQlError[];
+      readonly data?: { readonly search?: { readonly totalCount?: unknown; readonly results?: readonly { readonly innerItem?: RawAuthoringTreeItem | null }[] } | null };
+    }>(connection.serverUrl, token, "Authoring name search", "XmCloudSyncNameSearch", `
+      query XmCloudSyncNameSearch($name: String!, $language: String!) {
+        search(query: {
+          index: "sitecore_master_index"
+          searchStatement: { criteria: [
+            { criteriaType: CONTAINS, field: "_name", value: $name }
+            { operator: MUST, criteriaType: EXACT, field: "_language", value: $language }
+          ] }
+          paging: { pageSize: 50, pageIndex: ${page} }
+        }) {
+          totalCount
+          results { innerItem { itemId name displayName path hasChildren } }
+        }
+      }`, { name: text.trim(), language }, signal);
+    const result = payload.data?.search;
+    if (!result || !Number.isSafeInteger(result.totalCount) || (result.totalCount as number) < 0 || !Array.isArray(result.results) || result.results.length > 50) {
+      throw new Error("Authoring returned an invalid indexed search response.");
+    }
+    const items = new Map<string, AuthoringTreeItem>();
+    for (const entry of result.results) {
+      if (!entry || typeof entry !== "object") { throw new Error("Authoring returned an invalid search result."); }
+      if (entry.innerItem) {
+        const item = parseTreeItem(entry.innerItem);
+        if (!item.path.startsWith("/")) { throw new Error("Authoring search returned a non-absolute item path."); }
+        items.set(item.itemId.replace(/[{}-]/gu, "").toLowerCase(), item);
+      }
+    }
+    const totalCount = result.totalCount as number;
+    return { items: [...items.values()], totalCount, hasMore: page < 9 && (page + 1) * 50 < totalCount };
+  }
+
   async loadTreeLevel(
     connection: XmCloudConnection,
     clientSecret: string,
@@ -1522,11 +1567,12 @@ export class AuthoringContentClient {
       throw new Error(`Authoring API request failed (${response.status}).`);
     }
     throwForGraphQlErrors(payload.errors);
-    if (!payload.data?.item) {
+    if (payload.data?.item === null) {
       const identifier = "path" in locator ? locator.path : locator.itemId;
       throw new AuthoringItemNotFoundError(`Authoring item “${identifier}” was not found.`);
     }
 
+    if (!payload.data?.item) { throw new Error("Authoring returned an invalid item lookup response."); }
     const item = parseTreeItem(payload.data.item);
     const children = (payload.data.item.children?.nodes ?? []).map(parseTreeItem);
     const pageInfo = payload.data.item.children?.pageInfo;
