@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.16.0
+
+- Added connection-wide exact item ID/path navigation with left-first lookup, cancellation, ancestor reveal and automatic scope widening.
+
 ## 0.15.2
 
 - Show language-switch labels only on comparison sides whose language is changing.

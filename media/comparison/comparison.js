@@ -59,6 +59,36 @@ const languageSwitchStatusRight = document.getElementById("language-switch-statu
 const languageSwitchTextRight = document.getElementById("language-switch-text-right");
 const languageSwitchRetryRight = document.getElementById("language-switch-retry-right");
 
+const navigationInput = document.getElementById("item-navigation-input");
+const navigationMode = document.getElementById("item-navigation-mode");
+const navigationStatus = document.getElementById("item-navigation-status");
+const navigationCancel = document.getElementById("item-navigation-cancel");
+let navigationRequestId = 0;
+const navigationRetainedNodes = { left: new Map(), right: new Map() };
+function cancelItemLookup() {
+  navigationRequestId += 1;
+  navigationCancel.hidden = true;
+  navigationStatus.textContent = "";
+  vscode.postMessage({ type: "cancelItemLookup" });
+}
+navigationInput.addEventListener("input", () => {
+  cancelItemLookup();
+  const text = navigationInput.value.trim();
+  const id = text.startsWith("{") && text.endsWith("}") ? text.slice(1, -1) : text;
+  navigationMode.textContent = /^(?:[a-f0-9]{32}|[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12})$/i.test(id)
+    ? "Go to ID" : text.startsWith("/") ? "Go to path" : text ? "Search (coming later)" : "Go to ID / path";
+});
+navigationCancel.addEventListener("click", cancelItemLookup);
+document.getElementById("item-navigation").addEventListener("submit", (event) => {
+  event.preventDefault();
+  if (!navigationInput.value.trim()) { return; }
+  navigationRequestId += 1;
+  navigationStatus.textContent = "Looking up item...";
+  navigationCancel.hidden = false;
+  vscode.postMessage({ type: "navigateItem", query: navigationInput.value, requestId: String(navigationRequestId),
+    roots: { left: state.trees.left.root?.path, right: state.trees.right.root?.path } });
+});
+
 function normalizeItemId(itemId) {
   return itemId.replace(/[{}-]/g, "").toLowerCase();
 }
@@ -2154,7 +2184,7 @@ function applyLoadedLevel(message) {
       ? tree.root
       : createTreeNode(message.level.item);
     Object.assign(root, message.level.item);
-    root.children = mergeLoadedChildren(root.children, message.level.children);
+    root.children = mergeLoadedChildren(root.children, message.level.children, message.side);
     root.childrenLoaded = true;
     root.loading = false;
     root.error = undefined;
@@ -2169,18 +2199,19 @@ function applyLoadedLevel(message) {
     return;
   }
   Object.assign(node, message.level.item);
-  node.children = mergeLoadedChildren(node.children, message.level.children);
+  node.children = mergeLoadedChildren(node.children, message.level.children, message.side);
   node.childrenLoaded = true;
   node.loading = false;
   node.error = undefined;
 }
 
-function mergeLoadedChildren(previousChildren, items) {
+function mergeLoadedChildren(previousChildren, items, side) {
   const previousById = new Map(previousChildren.map((child) => [normalizeItemId(child.itemId), child]));
   // Ancestor responses can overlap navigation/expansion. Keep loaded descendants
   // attached to their identity while accepting the server's current order and metadata.
   return items.map((item) => {
-    const node = previousById.get(normalizeItemId(item.itemId));
+    const node = previousById.get(normalizeItemId(item.itemId)) ||
+      navigationRetainedNodes[side]?.get(normalizeItemId(item.itemId));
     return node ? Object.assign(node, item) : createTreeNode(item);
   });
 }
@@ -2365,7 +2396,20 @@ languageLock.addEventListener("change", () => {
 
 window.addEventListener("message", (event) => {
   const message = event.data;
-  if (message?.type === "favoriteNavigationStarted") {
+  if (message?.type === "itemLookupStatus") {
+    if (message.requestId === String(navigationRequestId)) {
+      navigationStatus.textContent = message.text;
+      navigationCancel.hidden = true;
+      navigationRetainedNodes.left.clear();
+      navigationRetainedNodes.right.clear();
+    }
+    return;
+  } else if (message?.type === "navigationRoot") {
+    const retained = navigationRetainedNodes[message.side];
+    const remember = (node) => { if (node) { retained.set(normalizeItemId(node.itemId), node); node.children.forEach(remember); } };
+    remember(state.trees[message.side].root);
+    applyLoadedLevel(message);
+  } else if (message?.type === "favoriteNavigationStarted") {
     if (
       Number.isSafeInteger(message.navigationId) &&
       (message.side === "left" || message.side === "right") &&

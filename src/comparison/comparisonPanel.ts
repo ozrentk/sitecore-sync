@@ -2,6 +2,7 @@ import * as vscode from "vscode";
 import type { ConnectionStore } from "../connections/connectionStore";
 import {
   AuthoringContentClient,
+  AuthoringItemNotFoundError,
   type AuthoringItemDetails,
   type AuthoringItemIconReference,
   type AuthoringItemLocator,
@@ -38,6 +39,8 @@ import {
   type LanguageLockCandidate,
 } from "./languageLock";
 
+import { classifyNavigationInput, isWithinPath } from "./itemNavigation";
+
 const selectionKey = "sitecoreXmCloudSync.comparisonSelection.v1";
 const fieldTransferConfirmationKey = "sitecoreXmCloudSync.fieldTransferConfirmationAccepted.v1";
 const subtreeTransferModeKey = "sitecoreXmCloudSync.subtreeTransferMode.v1";
@@ -61,6 +64,8 @@ interface ComparisonSelection {
 }
 
 interface WebviewMessage {
+  readonly query?: unknown;
+  readonly roots?: unknown;
   readonly comparisonKey?: unknown;
   readonly type?: unknown;
   readonly side?: unknown;
@@ -99,7 +104,8 @@ export interface NavigationLoadingState {
 }
 
 interface FavoriteNavigation {
-  readonly source: "favorite" | "site";
+  readonly source: "favorite" | "site" | "lookup";
+  readonly signal?: AbortSignal;
   readonly navigationId: number;
   readonly connectionId: string;
   readonly path: string;
@@ -152,6 +158,7 @@ class FieldDiffContentProvider implements vscode.TextDocumentContentProvider {
 }
 
 export class ComparisonPanelManager implements vscode.Disposable {
+  private lookupController: AbortController | undefined;
   private panel: vscode.WebviewPanel | undefined;
   private panelDisposables: vscode.Disposable[] = [];
   private readonly disposables: vscode.Disposable[] = [];
@@ -551,6 +558,7 @@ export class ComparisonPanelManager implements vscode.Disposable {
     const changedSides = (["left", "right"] as const).filter((side) =>
       !sameConnections || previous[`${side}Language`] !== next[`${side}Language`]
     );
+    this.lookupController?.abort();
     this.cancelSubtreeLoads();
     if (changedSides.length) {
       this.pendingLanguageView = sameConnections ? JSON.stringify([
@@ -814,6 +822,16 @@ export class ComparisonPanelManager implements vscode.Disposable {
   }
 
   private async handleMessage(message: WebviewMessage): Promise<void> {
+    if (message.type === "cancelItemLookup") {
+      this.lookupController?.abort();
+      this.favoriteNavigationGeneration += 1;
+      this.resolvePendingFavoriteReveals(false);
+      return;
+    }
+    if (message.type === "navigateItem" && typeof message.query === "string" && typeof message.requestId === "string") {
+      await this.navigateItem(message.query, message.requestId, message.roots);
+      return;
+    }
     if (message.type === "languageViewReady" && message.comparisonKey === this.pendingLanguageView) {
       this.pendingLanguageView = undefined;
       return;
@@ -921,7 +939,7 @@ export class ComparisonPanelManager implements vscode.Disposable {
       await this.loadTreeLevel(
         message.side,
         message.connectionId,
-        { path: authoringRootPath },
+        { path: "/" },
       );
       return;
     }
@@ -2012,6 +2030,55 @@ export class ComparisonPanelManager implements vscode.Disposable {
     );
   }
 
+  private async navigateItem(query: string, requestId: string, roots: unknown): Promise<void> {
+    this.lookupController?.abort();
+    const controller = new AbortController();
+    this.lookupController = controller;
+    this.favoriteNavigationGeneration += 1;
+    const generation = this.favoriteNavigationGeneration;
+    const current = (): boolean => !controller.signal.aborted && generation === this.favoriteNavigationGeneration;
+    const status = async (text: string): Promise<void> => {
+      if (current()) { await this.panel?.webview.postMessage({ type: "itemLookupStatus", requestId, text }); }
+    };
+    const input = classifyNavigationInput(query);
+    if (input.kind === "empty") { await status(""); return; }
+    if (input.kind === "invalid") { await status(input.message); return; }
+    if (input.kind === "name") { await status("Name search is coming later. Enter an item ID or absolute path."); return; }
+    try {
+      const selection = this.getSelection();
+      for (const side of ["left", "right"] as const) {
+        const connectionId = selection[`${side}ConnectionId`];
+        if (!connectionId) { continue; }
+        let level: AuthoringTreeLevel;
+        try {
+          level = await this.getTreeLevel(connectionId, selection[`${side}Language`], input.locator, controller.signal);
+        } catch (error: unknown) {
+          if (error instanceof AuthoringItemNotFoundError) { continue; }
+          throw error;
+        }
+        if (!current()) { return; }
+        const navigation: FavoriteNavigation = { source: "lookup", navigationId: generation, connectionId, side, path: level.item.path, signal: controller.signal };
+        const rootPaths = roots && typeof roots === "object" ? roots as Record<string, unknown> : {};
+        let widened = false;
+        for (const treeSide of ["left", "right"] as const) {
+          const root = rootPaths[treeSide];
+          const treeConnection = selection[`${treeSide}ConnectionId`];
+          if (!treeConnection || typeof root !== "string" || isWithinPath(level.item.path, root)) { continue; }
+          const rootLevel = await this.getTreeLevel(treeConnection, selection[`${treeSide}Language`], { path: "/" }, controller.signal);
+          if (!current()) { return; }
+          await this.panel?.webview.postMessage({ type: "navigationRoot", side: treeSide, connectionId: treeConnection, language: selection[`${treeSide}Language`], level: rootLevel });
+          widened = true;
+        }
+        await this.revealFavoriteNavigation(navigation);
+        await status(widened ? "Expanded the displayed scope to / to reveal the item." : `Selected ${level.item.path}.`);
+        return;
+      }
+      await status("Item not found on either selected connection.");
+    } catch (error: unknown) {
+      await status(`Unable to navigate: ${errorMessage(error)}`);
+    }
+  }
+
   private async navigateToFavorite(navigation: FavoriteNavigation): Promise<void> {
     try {
       await this.revealFavoriteNavigation(navigation);
@@ -2053,6 +2120,7 @@ export class ComparisonPanelManager implements vscode.Disposable {
         navigation.connectionId,
         this.sideLanguage(navigation.side),
         { path: navigation.path },
+        navigation.signal,
       );
       for (const ancestorPath of favoriteAncestorPaths(navigation.path)) {
         if (!this.panel || !this.isCurrentFavoriteNavigation(navigation)) {
@@ -2090,6 +2158,7 @@ export class ComparisonPanelManager implements vscode.Disposable {
       if (!this.isCurrentFavoriteNavigation(navigation)) {
         return;
       }
+      if (navigation.source === "lookup") { throw error; }
       this.finishFavoriteNavigation(navigation);
       const message = errorMessage(error);
       this.log.warn(
@@ -2121,7 +2190,7 @@ export class ComparisonPanelManager implements vscode.Disposable {
       return;
     }
     const language = this.sideLanguage(side);
-    const level = await this.getTreeLevel(connectionId, language, { path });
+    const level = await this.getTreeLevel(connectionId, language, { path }, navigation.signal);
     if (
       !this.panel ||
       !this.isCurrentFavoriteNavigation(navigation) ||
@@ -2146,7 +2215,7 @@ export class ComparisonPanelManager implements vscode.Disposable {
   }
 
   private isCurrentFavoriteNavigation(navigation: FavoriteNavigation): boolean {
-    if (navigation.navigationId !== this.favoriteNavigationGeneration) {
+    if (navigation.signal?.aborted || navigation.navigationId !== this.favoriteNavigationGeneration) {
       return false;
     }
     const selection = this.getSelection();
@@ -2191,6 +2260,7 @@ export class ComparisonPanelManager implements vscode.Disposable {
     side: TreeSide,
     source: "favorite" | "site" = "favorite",
   ): FavoriteNavigation {
+    this.lookupController?.abort();
     this.favoriteNavigationGeneration += 1;
     this.resolvePendingFavoriteReveals(false);
     const navigation: FavoriteNavigation = {
@@ -2773,7 +2843,7 @@ export class ComparisonPanelManager implements vscode.Disposable {
         this.loadTreeLevel(
           "left",
           selection.leftConnectionId,
-          { path: authoringRootPath },
+          { path: "/" },
         ),
       );
     }
@@ -2783,7 +2853,7 @@ export class ComparisonPanelManager implements vscode.Disposable {
         this.loadTreeLevel(
           "right",
           selection.rightConnectionId,
-          { path: authoringRootPath },
+          { path: "/" },
         ),
       );
     }
@@ -3400,6 +3470,7 @@ export class ComparisonPanelManager implements vscode.Disposable {
   }
 
   private cancelRequests(): void {
+    this.lookupController?.abort();
     this.pendingLanguageView = undefined;
     this.itemIconGeneration += 1;
     this.favoriteNavigationGeneration += 1;
