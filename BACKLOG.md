@@ -2,7 +2,7 @@
 
 Consolidated planning inventory as of 2026-09-14, reviewed against version 0.20.0. Unchecked entries are outstanding, not a commitment to implement them in this order. Product requirements remain in [PRODUCT_SPEC.md](PRODUCT_SPEC.md); completed release details are in [CHANGELOG.md](CHANGELOG.md).
 
-Status: B01–B06 are explicit TODOs; B07–B15 are deferred enhancements; B16 is a known limitation; B17 is documentation cleanup; B18 is an initial idea requiring planning. Grouping does not change their priority or scope.
+Status: B01–B06 are explicit TODOs; B07–B15 are deferred enhancements; B16 is a known limitation; B17 is documentation cleanup; B18 has an agreed high-level plan and awaits implementation. Grouping does not change their priority or scope.
 
 ## Publishing and delivery verification
 
@@ -26,7 +26,23 @@ Status: B01–B06 are explicit TODOs; B07–B15 are deferred enhancements; B16 i
 - [ ] **B07 — Specific item-version selection.** Allow comparison of selected numbered versions instead of only the latest version in each selected language.
 - [ ] **B08 — Expand All size preflight.** Estimate unique left/right subtree items without materializing the webview tree. Support cancellation and either an exact count or a configurable warning threshold before expansion.
 - [ ] **B10 — ID-first/path-fallback comparison identity.** Add an alternative identity mode for matching items between environments. This is separate from the completed ID/path navigation feature.
-- [ ] **B18 — Single-tree browsing mode (idea; needs planning).** Show one connection's content tree using the same visual style and navigation behavior as the existing comparison tree, without a second tree or difference indicators. Expose only actions meaningful for a single tree. This records an exploratory requirement, not an approved implementation plan. Planning should decide how users enter this mode and switch to comparison, which connection/language/root and navigation state are retained, how single-item fields are presented, and the exact action set. Candidate actions for discussion include expand/refresh, ID/path lookup and name search, favorites, item details, public-page navigation, publishing and item task plug-ins; cross-connection diff and transfer actions do not belong in this mode. Direct field editing is not implied by this idea.
+- [ ] **B18 — Browse mode for a single connection (planned; not implemented).** Opening a connection defaults to one full-width content tree. Use the familiar comparison-tree presentation and navigation, expose meaningful single-connection actions, and provide an explicit Browse / Compare switch. See the agreed plan below.
+
+### B18 — Agreed high-level plan
+
+**Entry and presentation.** Opening a connection opens Browse mode without asking for a second connection. Show connection and language selectors, the existing ID/path/name input, and one full-width tree. Retain icons, indentation, lazy expansion, loading/error feedback, selection and refresh behavior. Omit the second column, difference indicators, swap, language lock and directional transfer controls in Browse mode. Existing explicit comparison entry points should still open Compare mode.
+
+**Single-connection actions.** Support expand/collapse, refresh and cancellation; ID/path lookup and indexed name search on the selected connection; sites and favorites; copying IDs/paths; item details; and public-page navigation for eligible items. Publishing is a first-class Browse workflow: retain Standard, Traced and Power Publish, together with matching item task plug-ins. Preserve the existing Operations queue, history, confirmation and Workspace Trust behavior. Cross-connection diff and transfer actions belong in Compare mode.
+
+**Item Details.** In Browse mode, the bottom pane presents one item's metadata and field values, rather than a paired field comparison. Retain field visibility controls and shared/unversioned markers. Show ID, path, template, language and version, plus Open public page when available. The initial scope is read-only field inspection; direct field editing is not included. Explicit publishing and task actions remain available.
+
+**Browse to Compare.** Put the browsed connection on the left and reuse its last comparison partner when available. Remember this relationship per browsed connection across reloads, using saved connection identities rather than secrets. Restore the partner language as well, validating that the saved connection and language remain available. Keep the partner changeable. If no partner is remembered or the remembered connection was deleted, prompt the user to select one; do not choose an arbitrary connection. Cancelling leaves Browse intact. If a saved language is unavailable, request a valid selection rather than silently changing the comparison.
+
+**Same-connection comparison.** Allow the same connection on both sides with independently selected languages, for example English versus German. Keep language locking explicit in Compare mode and do not silently apply it in a way that overwrites a restored cross-language comparison.
+
+**Compare to Browse and state.** Let the user choose which comparison side to retain and remember that choice for subsequent switches, while allowing it to be changed. Preserve the retained side's connection, language, root and selected item. Preserve expansion and scroll state where practical, and keep mode-specific navigation state so switching does not unnecessarily restart browsing. New navigation or mode changes must supersede pending loads and prevent stale results from replacing the current view.
+
+**Implementation acceptance.** Verify opening with one configured connection; search and details in Browse; publishing and task availability; absence of diff/transfer controls; first-time partner selection and cancellation; remembered partner/language after reload; deleted partners and unavailable languages; same-connection cross-language comparison; explicit language-lock behavior; and state restoration during cancelled or superseded loading. Use domain tests and extension-host checks where appropriate, plus focused manual checks for tree layout, keyboard access and mode transitions. This plan records future behavior; no implementation has been performed in this planning task.
 
 ## Transfers and synchronization
 
