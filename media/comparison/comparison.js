@@ -24,6 +24,9 @@ const state = {
   expandedRows: new Set(),
   detailExpandedRows: new Set(),
   selectedRowKey: undefined,
+  languageRestore: undefined,
+  languageRestoreAnchor: undefined,
+  languageRestoreNotice: undefined,
   favoriteNavigationId: undefined,
   rootRowKey: undefined,
   loadedItems: {
@@ -228,7 +231,7 @@ function requestChildren(side, node) {
   if (connectionId) {
     node.loading = true;
     node.error = undefined;
-    vscode.postMessage({ type: "loadChildren", side, connectionId, itemId: node.itemId });
+    vscode.postMessage({ type: "loadChildren", side, connectionId, language: state.trees[side].language, itemId: node.itemId });
   }
 }
 
@@ -242,7 +245,7 @@ function requestItemDetails(side, node) {
   ) {
     node.detailsLoading = true;
     node.detailsError = undefined;
-    vscode.postMessage({ type: "loadItemDetails", side, connectionId, itemId: node.itemId });
+    vscode.postMessage({ type: "loadItemDetails", side, connectionId, language: state.trees[side].language, itemId: node.itemId });
   }
 }
 
@@ -508,6 +511,7 @@ function createLegendGroup(flags, kind) {
 }
 
 function togglePairExpansion(pair) {
+  cancelLanguageRestoration();
   if (!pairCanExpand(pair) || isPairRefreshing(pair)) {
     return;
   }
@@ -522,6 +526,7 @@ function togglePairExpansion(pair) {
 }
 
 function expandPairItem(pair) {
+  cancelLanguageRestoration();
   if (
     !pairCanExpand(pair) ||
     state.expandedRows.has(pair.key) ||
@@ -537,6 +542,7 @@ function expandPairItem(pair) {
 }
 
 function collapsePairItem(pair) {
+  cancelLanguageRestoration();
   if (!state.expandedRows.has(pair.key) || isPairRefreshing(pair)) {
     return;
   }
@@ -1007,6 +1013,7 @@ function showContextMenu(event, pair, clickedSide, forceDisabled = false) {
     ? "Field details are unavailable while this item is locked."
     : "Open the Field Diff panel for this item.";
   detailedDiff.addEventListener("click", () => {
+    cancelLanguageRestoration();
     state.selectedRowKey = pair.key;
     vscode.postMessage({
       type: "showDetailedFieldDiff",
@@ -1628,6 +1635,7 @@ function renderPair(pair, depth, ancestorRefreshing = false) {
     if (refreshing || !event.target.closest(".comparison-cell")) {
       return;
     }
+    cancelLanguageRestoration();
     state.selectedRowKey = pair.key;
     document.querySelector(".comparison-row.selected")?.classList.remove("selected");
     row.classList.add("selected");
@@ -1732,6 +1740,15 @@ function createComparisonWorkspace() {
     tree.append(renderPair(rootPair, 0));
   }
 
+  if (state.languageRestore || state.languageRestoreNotice) {
+    const status = document.createElement("div");
+    status.className = "language-restore-status";
+    status.setAttribute("role", "status");
+    status.textContent = state.languageRestore
+      ? "Restoring comparison position…"
+      : state.languageRestoreNotice;
+    comparison.append(status);
+  }
   comparison.append(tree, createConnectionFooter());
   return comparison;
 }
@@ -1763,9 +1780,179 @@ function render() {
   }
 
   workspace.replaceChildren(createComparisonWorkspace());
+  restoreLanguageScrollPosition();
+}
+
+// Keep identity chains rather than row keys: pairing can change with language data.
+function captureLanguageTreeState() {
+  refreshLoadedItemIndexes();
+  const snapshot = { selected: undefined, expanded: [], expandedIndex: 0, offset: undefined, selectionDone: false };
+  const selectedRow = [...document.querySelectorAll(".comparison-row[data-row-key]")]
+    .find((row) => row.dataset.rowKey === state.selectedRowKey);
+  snapshot.offset = selectedRow?.getBoundingClientRect().top;
+  const visited = new Set();
+  const visit = (pair, chain, visible) => {
+    if (visited.has(pair.key)) {
+      return;
+    }
+    visited.add(pair.key);
+    const identity = {};
+    for (const side of ["left", "right"]) {
+      if (pair[side]) {
+        identity[side] = normalizeItemId(pair[side].itemId);
+      }
+    }
+    const next = [...chain, identity];
+    if (pair.key === state.selectedRowKey) {
+      snapshot.selected = next;
+    }
+    const expanded = state.expandedRows.has(pair.key);
+    if (visible && expanded) {
+      snapshot.expanded.push(next);
+    }
+    for (const child of pairChildren(pair.left?.children ?? [], pair.right?.children ?? [])) {
+      visit(child, next, visible && expanded);
+    }
+  };
+  if (state.trees.left.root || state.trees.right.root) {
+    visit(createPair(state.trees.left.root, state.trees.right.root, "root"), [], true);
+  }
+  return snapshot;
+}
+
+function cancelLanguageRestoration() {
+  state.languageRestore = undefined;
+  state.languageRestoreAnchor = undefined;
+  state.languageRestoreNotice = undefined;
+}
+
+function matchesRestoreIdentity(pair, identity) {
+  return ["left", "right"].some((side) =>
+    identity[side] && pair[side] && normalizeItemId(pair[side].itemId) === identity[side],
+  );
+}
+
+function resolveRestoreChain(chain, expandTarget) {
+  let pair = createPair(state.trees.left.root, state.trees.right.root, "root");
+  if (!matchesRestoreIdentity(pair, chain[0])) {
+    return { missing: true };
+  }
+  for (let index = 0; index < chain.length; index += 1) {
+    if (index === chain.length - 1 && !expandTarget) {
+      return { pair };
+    }
+    state.expandedRows.add(pair.key);
+    state.detailExpandedRows.add(pair.key);
+    if (pairHasError(pair)) {
+      return { pair, missing: true };
+    }
+    if (!pairLevelsLoaded(pair)) {
+      // One ancestor level at a time; selection is processed before other branches.
+      loadMissingPairLevels(pair);
+      return { pending: true };
+    }
+    if (index === chain.length - 1) {
+      return { pair };
+    }
+    const child = pairChildren(pair.left?.children ?? [], pair.right?.children ?? [])
+      .find((candidate) => matchesRestoreIdentity(candidate, chain[index + 1]));
+    if (!child) {
+      return { pair, missing: true };
+    }
+    pair = child;
+  }
+  return { missing: true };
+}
+
+function advanceLanguageRestoration() {
+  const restore = state.languageRestore;
+  if (!restore) {
+    return;
+  }
+  if (["left", "right"].some((side) => state.trees[side].error && !state.trees[side].root)) {
+    state.languageRestore = undefined;
+    state.languageRestoreNotice = "Could not restore the previous position because a comparison root failed to load.";
+    return;
+  }
+  if (["left", "right"].some((side) => state.trees[side].connectionId && !state.trees[side].root)) {
+    return;
+  }
+  refreshLoadedItemIndexes();
+  state.rootRowKey = createPair(state.trees.left.root, state.trees.right.root, "root").key;
+  if (restore.selected) {
+    const result = resolveRestoreChain(restore.selected, false);
+    if (result.pending) {
+      return;
+    }
+    if (result.pair && (!restore.selectionDone || state.selectedRowKey !== result.pair.key)) {
+      state.selectedRowKey = result.pair.key;
+      state.languageRestoreAnchor = { key: result.pair.key, offset: restore.offset };
+      vscode.postMessage({
+        type: "selectFieldDiffItem",
+        comparisonKey: JSON.stringify([
+          state.trees.left.connectionId, state.trees.left.language,
+          state.trees.right.connectionId, state.trees.right.language,
+        ]),
+        leftItemId: result.pair.left?.itemId,
+        rightItemId: result.pair.right?.itemId,
+        leftName: result.pair.left?.displayName || result.pair.left?.name,
+        rightName: result.pair.right?.displayName || result.pair.right?.name,
+      });
+    }
+    restore.selectionDone = true;
+    if (result.missing) {
+      state.languageRestoreNotice = result.pair
+        ? "The previous item could not be restored. Selected its nearest available ancestor."
+        : "The previous item could not be restored in this comparison.";
+    }
+  }
+  while (restore.expandedIndex < restore.expanded.length) {
+    const result = resolveRestoreChain(restore.expanded[restore.expandedIndex], true);
+    if (result.pending) {
+      return;
+    }
+    if (result.missing) {
+      state.languageRestoreNotice ??= "Some previously expanded branches could not be restored.";
+    }
+    restore.expandedIndex += 1;
+  }
+  state.languageRestore = undefined;
+}
+
+function restoreLanguageScrollPosition() {
+  const anchor = state.languageRestoreAnchor;
+  if (!anchor) {
+    return;
+  }
+  requestAnimationFrame(() => {
+    if (state.languageRestoreAnchor !== anchor) {
+      return;
+    }
+    const row = [...document.querySelectorAll(".comparison-row[data-row-key]")]
+      .find((candidate) => candidate.dataset.rowKey === anchor.key);
+    if (row) {
+      if (Number.isFinite(anchor.offset)) {
+        window.scrollBy(0, row.getBoundingClientRect().top - anchor.offset);
+      } else {
+        row.scrollIntoView({ block: "nearest" });
+      }
+    }
+    if (!state.languageRestore) {
+      state.languageRestoreAnchor = undefined;
+    }
+  });
 }
 
 function updateTreeConnections() {
+  const sameConnections = ["left", "right"].every((side) =>
+    state.trees[side].connectionId === state.selection[`${side}ConnectionId`],
+  );
+  const languageChanged = ["left", "right"].some((side) =>
+    state.trees[side].language !== state.selection[`${side}Language`],
+  );
+  const restore = sameConnections && languageChanged
+    ? state.languageRestore ?? captureLanguageTreeState()
+    : undefined;
   let changed = false;
   for (const side of ["left", "right"]) {
     const connectionId = state.selection[`${side}ConnectionId`];
@@ -1787,6 +1974,8 @@ function updateTreeConnections() {
     }
   }
   if (changed) {
+    cancelLanguageRestoration();
+    state.languageRestore = restore ? { ...restore, expanded: [...restore.expanded], expandedIndex: 0, selectionDone: false } : undefined;
     state.expandedRows.clear();
     state.detailExpandedRows.clear();
     state.selectedRowKey = undefined;
@@ -1994,6 +2183,7 @@ window.addEventListener("message", (event) => {
       (message.side === "left" || message.side === "right") &&
       typeof message.path === "string"
     ) {
+      cancelLanguageRestoration();
       state.favoriteNavigationId = message.navigationId;
       state.selectedRowKey = undefined;
     }
@@ -2045,6 +2235,7 @@ window.addEventListener("message", (event) => {
   } else if (message?.type === "itemRefreshFinished") {
     state.refreshOperations.delete(message.rowKey);
   } else if (message?.type === "refreshAllRequested") {
+    cancelLanguageRestoration();
     startRefreshAll();
   } else if (message?.type === "subtreeLoadStarted") {
     const pair = findLoadedPair(message.rowKey);
@@ -2084,6 +2275,10 @@ window.addEventListener("message", (event) => {
   } else {
     return;
   }
+  if (["stateChanged", "treeLoaded", "treeLoadFailed"].includes(message?.type)) {
+    advanceLanguageRestoration();
+  }
+
   render();
 });
 

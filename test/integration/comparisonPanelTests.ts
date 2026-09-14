@@ -30,6 +30,59 @@ interface ComparisonPanelHarness {
 }
 
 export const comparisonPanelTests: readonly IntegrationTest[] = [{
+  name: "language-only selection changes load only changed sides and ignore stale child requests",
+  async execute(): Promise<void> {
+    let selection = { leftConnectionId: "left", rightConnectionId: "right", leftLanguage: "en", rightLanguage: "en" };
+    const loads: unknown[] = [];
+    let clears = 0;
+    const manager = Object.create(ComparisonPanelManager.prototype) as {
+      applySelection(next: typeof selection): Promise<void>;
+      handleMessage(message: unknown): Promise<void>;
+    };
+    Object.assign(manager, {
+      getSelection: () => selection,
+      normalizeSelection: (next: typeof selection) => next,
+      saveSelection: async (next: typeof selection) => { selection = next; },
+      postState: async () => undefined,
+      clearFieldDiffSelection: async () => { clears += 1; },
+      subtreeLoadControllers: new Map(),
+      favoriteNavigationGeneration: 0,
+      pendingFavoriteReveal: new Map(),
+      panel: {},
+      connectionStore: { list: () => [{ id: "left" }, { id: "right" }] },
+      loadAndPostLanguages: async () => undefined,
+      loadTreeLevel: async (side: string, connectionId: string, locator: unknown) => {
+        loads.push({ side, connectionId, locator });
+      },
+    });
+    await manager.applySelection({ ...selection, leftLanguage: "fr" });
+    deepStrictEqual(loads, [{ side: "left", connectionId: "left", locator: { path: "/sitecore" } }]);
+    strictEqual(clears, 1);
+    loads.length = 0;
+    await manager.applySelection({ ...selection });
+    strictEqual(loads.length, 0);
+    strictEqual(clears, 1);
+    await manager.handleMessage({ type: "loadChildren", side: "left", connectionId: "left", language: "en", itemId: "item" });
+    strictEqual(loads.length, 0);
+    await manager.handleMessage({ type: "loadChildren", side: "left", connectionId: "left", language: "fr", itemId: "item" });
+    strictEqual(loads.length, 1);
+    let fieldRefreshes = 0;
+    Object.assign(manager, {
+      fieldDiffViewProvider: { visible: true },
+      refreshFieldDiffView: async () => { fieldRefreshes += 1; },
+    });
+    await manager.handleMessage({ type: "selectFieldDiffItem", leftItemId: "item", comparisonKey: JSON.stringify(["left", "en", "right", "en"]) });
+    strictEqual(fieldRefreshes, 0);
+    await manager.handleMessage({ type: "selectFieldDiffItem", leftItemId: "item", comparisonKey: JSON.stringify(["left", "fr", "right", "en"]) });
+    strictEqual(fieldRefreshes, 1);
+    loads.length = 0;
+    await manager.applySelection({ ...selection, leftLanguage: "de", rightLanguage: "de" });
+    strictEqual(loads.length, 2);
+    loads.length = 0;
+    await manager.applySelection({ ...selection, leftConnectionId: "other" });
+    strictEqual(loads.length, 2);
+  },
+}, {
   name: "site and favorite loading icons survive refresh and remain source- and connection-scoped",
   async execute(): Promise<void> {
     const owner = connection("owner", "Owner");
@@ -209,6 +262,8 @@ export const comparisonPanelTests: readonly IntegrationTest[] = [{
       fieldDiffViewProvider: { clear: async () => undefined },
       comparisonStateEmitter: stateEmitter,
       warnedInvalidLanguageLock: undefined,
+      favoriteNavigationGeneration: 0,
+      pendingFavoriteReveal: new Map(),
     });
 
     try {

@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.14.0
+
+- Preserved comparison selection and expanded branches across language-only changes, restoring the selected item first and refreshing its open Field Diff.
+- Reused unchanged-side data, restored other expanded branches progressively, and added nearest-ancestor fallback with inline explanations when restoration is incomplete.
+- Prevented superseded restoration from overriding explicit navigation and rejected stale language-scoped child/detail requests.
+
 ## 0.13.1
 
 - Renamed comparison context actions to Tree Transfer Left > Right and Tree Transfer Right > Left.

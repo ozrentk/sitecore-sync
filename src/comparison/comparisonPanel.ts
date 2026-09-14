@@ -61,6 +61,7 @@ interface ComparisonSelection {
 }
 
 interface WebviewMessage {
+  readonly comparisonKey?: unknown;
   readonly type?: unknown;
   readonly side?: unknown;
   readonly connectionId?: unknown;
@@ -542,11 +543,26 @@ export class ComparisonPanelManager implements vscode.Disposable {
 
   private async applySelection(selection: ComparisonSelection): Promise<void> {
     this.warnedInvalidLanguageLock = undefined;
+    const previous = this.getSelection();
+    const next = this.normalizeSelection(selection);
+    const sameConnections = previous.leftConnectionId === next.leftConnectionId &&
+      previous.rightConnectionId === next.rightConnectionId;
+    const changedSides = (["left", "right"] as const).filter((side) =>
+      !sameConnections || previous[`${side}Language`] !== next[`${side}Language`]
+    );
     this.cancelSubtreeLoads();
-    await this.clearFieldDiffSelection();
-    await this.saveSelection(this.normalizeSelection(selection));
+    if (changedSides.length) {
+      this.favoriteNavigationGeneration += 1;
+      this.finishFavoriteNavigation();
+      this.pendingFavoriteNavigation = undefined;
+      this.resolvePendingFavoriteReveals(false);
+      await this.clearFieldDiffSelection();
+    }
+    await this.saveSelection(next);
     await this.postState();
-    await this.loadInitialTrees();
+    if (changedSides.length) {
+      await this.loadInitialTrees(changedSides);
+    }
   }
 
   private async rejectSelectionChange(): Promise<void> {
@@ -893,6 +909,10 @@ export class ComparisonPanelManager implements vscode.Disposable {
       typeof message.connectionId === "string" &&
       typeof message.itemId === "string"
     ) {
+      if (typeof message.language === "string" &&
+          !this.isCurrentSelection(message.side, message.connectionId, message.language)) {
+        return;
+      }
       await this.loadTreeLevel(
         message.side,
         message.connectionId,
@@ -908,6 +928,10 @@ export class ComparisonPanelManager implements vscode.Disposable {
       typeof message.connectionId === "string" &&
       typeof message.itemId === "string"
     ) {
+      if (typeof message.language === "string" &&
+          !this.isCurrentSelection(message.side, message.connectionId, message.language)) {
+        return;
+      }
       await this.loadAndPostItemDetails(message.side, message.connectionId, message.itemId);
       return;
     }
@@ -930,6 +954,16 @@ export class ComparisonPanelManager implements vscode.Disposable {
       (message.type === "selectFieldDiffItem" || message.type === "showDetailedFieldDiff") &&
       (typeof message.leftItemId === "string" || typeof message.rightItemId === "string")
     ) {
+      if (message.comparisonKey !== undefined) {
+        const selection = this.getSelection();
+        const currentKey = JSON.stringify([
+          selection.leftConnectionId, selection.leftLanguage,
+          selection.rightConnectionId, selection.rightLanguage,
+        ]);
+        if (message.comparisonKey !== currentKey) {
+          return;
+        }
+      }
       if (message.type === "selectFieldDiffItem" && !this.fieldDiffViewProvider.visible) {
         return;
       }
@@ -2659,7 +2693,7 @@ export class ComparisonPanelManager implements vscode.Disposable {
     }
   }
 
-  private async loadInitialTrees(): Promise<void> {
+  private async loadInitialTrees(sides: readonly TreeSide[] = ["left", "right"]): Promise<void> {
     if (!this.panel || this.connectionStore.list().length < 1) {
       return;
     }
@@ -2707,7 +2741,7 @@ export class ComparisonPanelManager implements vscode.Disposable {
     }
 
     const requests: Promise<void>[] = [];
-    if (selection.leftConnectionId) {
+    if (selection.leftConnectionId && sides.includes("left")) {
       requests.push(this.loadAndPostLanguages("left", selection.leftConnectionId));
       requests.push(
         this.loadTreeLevel(
@@ -2717,7 +2751,7 @@ export class ComparisonPanelManager implements vscode.Disposable {
         ),
       );
     }
-    if (selection.rightConnectionId) {
+    if (selection.rightConnectionId && sides.includes("right")) {
       requests.push(this.loadAndPostLanguages("right", selection.rightConnectionId));
       requests.push(
         this.loadTreeLevel(
