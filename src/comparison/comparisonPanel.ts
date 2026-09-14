@@ -1,4 +1,4 @@
-import { PublicPageService } from "../publicPages/publicPageService";
+import { PublicPageService, type PublicPagePreviewContext } from "../publicPages/publicPageService";
 import * as vscode from "vscode";
 import type { ConnectionStore } from "../connections/connectionStore";
 import {
@@ -2815,6 +2815,22 @@ export class ComparisonPanelManager implements vscode.Disposable {
       `${fieldName}: ${selection.leftLanguage} ↔ ${selection.rightLanguage}`,
       { preview: true },
     );
+  }
+
+  getPublicPagePreviewContext(): PublicPagePreviewContext {
+    const selection = this.getSelection();
+    const side: TreeSide = selection.leftConnectionId ? "left" : "right";
+    const connectionId = selection[`${side}ConnectionId`];
+    const language = selection[`${side}Language`];
+    const itemId = this.selectedFieldDiffItem?.[`${side}ItemId`];
+    const details = connectionId && itemId
+      ? this.itemDetailsCache.get(this.itemDetailsCacheKey(connectionId, language, itemId))
+      : undefined;
+    const loadedItem = connectionId && itemId ? [...this.treeLevelCache.entries()]
+      .filter(([key]) => key.startsWith(`${connectionId}:${language.toLowerCase()}:`))
+      .flatMap(([, level]) => [level.item, ...level.children])
+      .find(item => normalizeTransferId(item.itemId) === normalizeTransferId(itemId)) : undefined;
+    return { connectionId, language, itemPath: details?.path ?? loadedItem?.path };
   }
 
   private async openPublicPage(side: TreeSide, itemId: string): Promise<void> {
