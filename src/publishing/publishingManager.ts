@@ -1,3 +1,5 @@
+import { PublicPageService } from "../publicPages/publicPageService";
+import { suggestRoute } from "../publicPages/route";
 import { randomUUID } from "node:crypto";
 import * as vscode from "vscode";
 import type { ConnectionStore } from "../connections/connectionStore";
@@ -1873,12 +1875,17 @@ export class PublishingManager implements vscode.Disposable {
     const initialRoute = selectedSite
       ? suggestRoute(root.path, selectedSite.rootPath)
       : suggestRoute(root.path);
-    const initialApplicationUrl = prepared.profile.applicationBaseUrl
+    let initialApplicationUrl = prepared.profile.applicationBaseUrl
       ? new URL(
           initialRoute.replace(/^\//u, ""),
           ensureTrailingSlash(prepared.profile.applicationBaseUrl),
         ).toString()
       : undefined;
+    const publicPages = new PublicPageService(this.connections, this.authoring);
+    if (publicPages.configured) {
+      try { initialApplicationUrl = (await publicPages.resolve(connection.id, root.itemId, language, signal, root, selectedSiteName))?.url; }
+      catch (error: unknown) { initialApplicationUrl = undefined; this.output.appendLine(`Public-page URL could not be prefilled: ${errorMessage(error)}`); }
+    }
     let discoveredDetails: readonly AuthoringItemDetails[] = [root];
     const result = await showTracedPublishForm(
       this.extensionUri,
@@ -3064,50 +3071,6 @@ function normalizeId(value: string): string {
 function normalizeRoute(value: string): string {
   const route = value.trim().replace(/\\/gu, "/").replace(/\/{2,}/gu, "/");
   return route.startsWith("/") ? route : `/${route}`;
-}
-
-function suggestRoute(itemPath: string, siteRootPath?: string): string {
-  const itemSegments = pathSegments(itemPath);
-  const rootSegments = siteRootPath ? pathSegments(siteRootPath) : [];
-  const belongsToSite = rootSegments.length > 0 &&
-    itemSegments.length >= rootSegments.length &&
-    rootSegments.every((segment, index) =>
-      segment.localeCompare(itemSegments[index], undefined, { sensitivity: "base" }) === 0
-    );
-  let routeSegments = belongsToSite
-    ? itemSegments.slice(rootSegments.length)
-    : itemSegments.slice(-1);
-  let homeIndex = -1;
-  for (let index = routeSegments.length - 1; index >= 0; index -= 1) {
-    if (routeSegments[index].localeCompare("home", undefined, { sensitivity: "base" }) === 0) {
-      homeIndex = index;
-      break;
-    }
-  }
-  if (homeIndex >= 0) {
-    routeSegments = routeSegments.slice(homeIndex + 1);
-  }
-  const localDataIndex = routeSegments.findIndex((segment) =>
-    segment.localeCompare("data", undefined, { sensitivity: "base" }) === 0
-  );
-  if (localDataIndex > 0) {
-    routeSegments = routeSegments.slice(0, localDataIndex);
-  }
-  const slugSegments = routeSegments.map(slugSegment).filter(Boolean);
-  return slugSegments.length ? `/${slugSegments.join("/")}` : "/";
-}
-
-function pathSegments(value: string): readonly string[] {
-  return value.trim().replace(/\\/gu, "/").split("/").filter(Boolean);
-}
-
-function slugSegment(value: string): string {
-  return value
-    .normalize("NFKD")
-    .replace(/\p{Mark}+/gu, "")
-    .toLocaleLowerCase()
-    .replace(/[^\p{Letter}\p{Number}]+/gu, "-")
-    .replace(/^-+|-+$/gu, "");
 }
 
 function ensureTrailingSlash(value: string): string {

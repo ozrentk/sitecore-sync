@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.17.0
+
+- Added a shared public-page URL template, per-connection/site mappings, URL previews and public-page actions in comparison and Field Diff.
+- Resolve page-local datasources through their nearest page ancestor and prefill diagnostic publishing application URLs with the same resolver.
+
 ## 0.16.0
 
 - Added connection-wide exact item ID/path navigation with left-first lookup, cancellation, ancestor reveal and automatic scope widening.

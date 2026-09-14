@@ -1,3 +1,4 @@
+import { PublicPageService } from "./publicPages/publicPageService";
 import * as vscode from "vscode";
 import { ComparisonPanelManager } from "./comparison/comparisonPanel";
 import {
@@ -267,6 +268,10 @@ export function activate(context: vscode.ExtensionContext): void {
   );
 
   context.subscriptions.push(
+    vscode.commands.registerCommand("xmCloudSync.configurePublicPageUrls", async () => {
+      try { await new PublicPageService(connectionStore, authoringClient).configure(); }
+      catch (error: unknown) { await vscode.window.showErrorMessage(`Unable to configure public-page URLs: ${error instanceof Error ? error.message : String(error)}`); }
+    }),
     vscode.commands.registerCommand("xmCloudSync.addConnection", async () => {
       await addConnection(connectionStore, connectionProvider, authoringClient);
     }),

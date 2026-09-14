@@ -152,6 +152,20 @@ function createSummary(snapshot) {
       itemId.append(label, copy);
     }
     cell.append(title, meta, itemId);
+    const publicUrl = snapshot[`${side}PublicPageUrl`];
+    const publicError = snapshot[`${side}PublicPageError`];
+    if (publicUrl && details) {
+      const openPage = document.createElement("button");
+      openPage.type = "button";
+      openPage.textContent = `Open ${side} page`;
+      openPage.title = publicUrl;
+      openPage.addEventListener("click", () => vscode.postMessage({ type: "openPublicPage", side, itemId: details.itemId }));
+      cell.append(openPage);
+    } else if (publicError) {
+      const unavailable = document.createElement("div");
+      unavailable.textContent = publicError;
+      cell.append(unavailable);
+    }
     summary.append(cell);
     if (side === "left") summary.append(document.createElement("div"));
   }

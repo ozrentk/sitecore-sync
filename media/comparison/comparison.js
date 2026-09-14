@@ -1119,6 +1119,17 @@ function showContextMenu(event, pair, clickedSide, forceDisabled = false) {
       ? `The item does not exist on the ${clickedSide}.`
       : "Right-click the left or right item cell to choose the publishing target."
     : `Publish ${clickedItem.path} from the ${clickedSide} connection.`;
+  const openPage = document.createElement("button");
+  openPage.className = "context-menu-item";
+  openPage.type = "button";
+  openPage.textContent = "Open public page";
+  openPage.disabled = disabled || !clickedItem;
+  openPage.title = "Resolve and preview the public URL for this side's page or owning page.";
+  openPage.addEventListener("click", () => {
+    vscode.postMessage({ type: "openPublicPage", side: clickedSide, itemId: clickedItem?.itemId });
+    closeContextMenu();
+  });
+  menu.append(openPage);
   const publishFlyout = document.createElement("div");
   publishFlyout.className = "context-submenu-flyout";
   publishFlyout.setAttribute("role", "menu");
