@@ -1,6 +1,7 @@
 import * as vscode from "vscode";
 import type { XmCloudConnection } from "./connection";
 import type { ConnectionStore } from "./connectionStore";
+import type { FavoriteLoadingState } from "../comparison/comparisonPanel";
 import type { AuthoringSite } from "../sitecore/authoringClient";
 
 export type ConnectionTestStatus = "unknown" | "testing" | "success" | "failure";
@@ -72,8 +73,11 @@ export class FavoriteTreeItem extends vscode.TreeItem {
   constructor(
     readonly connection: XmCloudConnection,
     readonly path: string,
+    loading = false,
   ) {
     super(`☆ ${path.split("/").filter(Boolean).at(-1) ?? path}`, vscode.TreeItemCollapsibleState.None);
+    this.id = JSON.stringify(["favorite", connection.id, path]);
+    this.iconPath = loading ? new vscode.ThemeIcon("sync~spin") : undefined;
     this.description = path;
     this.contextValue = "xmCloudFavorite";
     this.tooltip = `${connection.name}\n${path}`;
@@ -108,6 +112,7 @@ export class ConnectionTreeProvider
   implements vscode.TreeDataProvider<ConnectionNode>, vscode.Disposable
 {
   private readonly changeEmitter = new vscode.EventEmitter<ConnectionNode | undefined | void>();
+  private favoriteLoading: FavoriteLoadingState | undefined;
   private readonly testStates = new Map<string, TestState>();
   private readonly storeSubscription: vscode.Disposable;
 
@@ -128,7 +133,12 @@ export class ConnectionTreeProvider
 
     if (element instanceof ConnectionTreeItem) {
       const favorites = this.store.listFavoritePaths(element.connection.id).map(
-        (path) => new FavoriteTreeItem(element.connection, path),
+        (path) => new FavoriteTreeItem(
+          element.connection,
+          path,
+          this.favoriteLoading?.connectionId === element.connection.id &&
+            this.favoriteLoading.path === path,
+        ),
       );
       const sites = (
         this.testStates.get(element.connection.id)?.sites ??
@@ -151,6 +161,15 @@ export class ConnectionTreeProvider
         this.store.listFavoritePaths(connection.id).length,
       );
     });
+  }
+
+  setFavoriteLoading(state: FavoriteLoadingState | undefined): void {
+    if (this.favoriteLoading?.connectionId === state?.connectionId &&
+        this.favoriteLoading?.path === state?.path) {
+      return;
+    }
+    this.favoriteLoading = state;
+    this.changeEmitter.fire();
   }
 
   setTestState(
