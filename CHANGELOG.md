@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.20.0
+
+- Offer optional shared URL-template setup after adding a connection when no shared template exists, with an explicit Not now action.
+
 ## 0.19.0
 
 - Simplified shared URL-template setup: no connection/site selection, mappings or preview input.

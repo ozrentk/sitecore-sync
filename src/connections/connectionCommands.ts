@@ -1,3 +1,4 @@
+import { notifyConnectionAdded } from "./connectionOnboarding";
 import * as vscode from "vscode";
 import { normalizeServerUrl, type XmCloudConnection } from "./connection";
 import type { ConnectionStore } from "./connectionStore";
@@ -72,13 +73,12 @@ export async function addConnection(
     clientSecret,
   });
 
-  const selection = await vscode.window.showInformationMessage(
-    `Added XM Cloud connection “${connection.name}”.`,
-    "Test Connection",
-  );
-  if (selection === "Test Connection") {
-    await testConnection(connection, store, provider, authoringClient);
-  }
+  await notifyConnectionAdded(connection.name, {
+    sharedTemplate: () => vscode.workspace.getConfiguration("xmCloudSync").get<unknown>("publicPageUrlTemplate"),
+    notify: async (message, ...actions) => vscode.window.showInformationMessage(message, ...actions),
+    testConnection: async () => testConnection(connection, store, provider, authoringClient),
+    configureTemplate: async () => { await vscode.commands.executeCommand("xmCloudSync.configurePublicPageUrls"); },
+  });
 }
 
 export async function testConnection(

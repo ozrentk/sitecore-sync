@@ -84,7 +84,7 @@ Each connection contains:
 
 The extension exchanges the automation client credentials for a short-lived JWT at Sitecore's OAuth endpoint. Access tokens remain in memory and are never persisted. Non-secret connection metadata is stored in VS Code global state.
 
-TODO: Allow a connection to store an optional public-site URL template, for example `https://staging.ineosgrenadier.com/{lang}/{region}/`. Supported placeholders and their required values must be validated explicitly. Publishing diagnostics should use the resolved template to prefill the exact application URL while keeping it editable, and must not guess or silently retain unresolved placeholders.
+The public-site URL template is shared across all connections and sites. After a connection is successfully persisted, its success notification offers optional **Set up URL template** and **Not now** actions only when that shared template is missing or blank. Declining or dismissing does not remove or disable the new connection. This checks only the shared template, not per-connection URL values, and also applies to the clipboard-prefilled add workflow. Template setup remains independent of connection creation and the existing **Test Connection** action.
 
 Connections can be tested after creation or from their context menu. A test obtains a JWT and executes a harmless query for configured sites against the Authoring and Management GraphQL endpoint. The exact returned site names, root paths, and root item IDs are shown beneath the tested connection and in a searchable list; this helps explain differences from the sites visible to a user in Channels.
 
