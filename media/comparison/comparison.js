@@ -24,6 +24,7 @@ const state = {
   expandedRows: new Set(),
   detailExpandedRows: new Set(),
   selectedRowKey: undefined,
+  favoriteNavigationId: undefined,
   rootRowKey: undefined,
   loadedItems: {
     left: new Map(),
@@ -36,6 +37,7 @@ const state = {
   syncOperations: new Map(),
   textNormalization: "none",
 };
+let itemIconRenderScheduled = false;
 
 let contextMenu;
 
@@ -631,6 +633,17 @@ function revealFavorite(side, path) {
     }
   });
   return true;
+}
+
+function scheduleItemIconRender() {
+  if (itemIconRenderScheduled) {
+    return;
+  }
+  itemIconRenderScheduled = true;
+  requestAnimationFrame(() => {
+    itemIconRenderScheduled = false;
+    render();
+  });
 }
 
 function expandLoadedSubtree(rowKey, includeDetails = false) {
@@ -1777,6 +1790,7 @@ function updateTreeConnections() {
     state.expandedRows.clear();
     state.detailExpandedRows.clear();
     state.selectedRowKey = undefined;
+    state.favoriteNavigationId = undefined;
     state.rootRowKey = undefined;
     state.refreshOperations.clear();
     state.subtreeLoadOperations.clear();
@@ -1958,12 +1972,27 @@ languageLock.addEventListener("change", () => {
 
 window.addEventListener("message", (event) => {
   const message = event.data;
-  if (message?.type === "tryRevealFavorite") {
-    const found = typeof message.path === "string" &&
+  if (message?.type === "favoriteNavigationStarted") {
+    if (
+      Number.isSafeInteger(message.navigationId) &&
+      (message.side === "left" || message.side === "right") &&
+      typeof message.path === "string"
+    ) {
+      state.favoriteNavigationId = message.navigationId;
+      state.selectedRowKey = undefined;
+    }
+  } else if (message?.type === "tryRevealFavorite") {
+    const found = message.navigationId === state.favoriteNavigationId &&
+      typeof message.path === "string" &&
       (message.side === "left" || message.side === "right")
       ? revealFavorite(message.side, message.path)
       : false;
-    vscode.postMessage({ type: "favoriteRevealResult", requestId: message.requestId, found });
+    vscode.postMessage({
+      type: "favoriteRevealResult",
+      requestId: message.requestId,
+      navigationId: message.navigationId,
+      found,
+    });
     return;
   } else if (message?.type === "stateChanged") {
     state.connections = message.connections;
@@ -1982,6 +2011,8 @@ window.addEventListener("message", (event) => {
     applyLoadedLevel(message);
   } else if (message?.type === "itemIconsLoaded") {
     applyItemIconsMessage(message);
+    scheduleItemIconRender();
+    return;
   } else if (message?.type === "itemIconsReset") {
     state.itemIconKeys.clear();
     state.itemIconData.clear();
