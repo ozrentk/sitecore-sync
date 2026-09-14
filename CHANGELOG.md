@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.21.0
+
+- Add Configure Public URL Values to each connection’s context menu, opening URL setup for that connection and its selected site.
+
 ## 0.20.1
 
 - Show internal field names alongside differing labels in comparison and Field Diff to distinguish repeated labels.
