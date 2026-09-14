@@ -1805,9 +1805,15 @@ function applyLoadedLevel(message) {
   }
 
   if (!message.requestedItemId) {
-    const root = createTreeNode(message.level.item);
-    root.children = message.level.children.map(createTreeNode);
+    const root = tree.root &&
+      normalizeItemId(tree.root.itemId) === normalizeItemId(message.level.item.itemId)
+      ? tree.root
+      : createTreeNode(message.level.item);
+    Object.assign(root, message.level.item);
+    root.children = mergeLoadedChildren(root.children, message.level.children);
     root.childrenLoaded = true;
+    root.loading = false;
+    root.error = undefined;
     tree.root = root;
     tree.loading = false;
     tree.error = undefined;
@@ -1819,10 +1825,20 @@ function applyLoadedLevel(message) {
     return;
   }
   Object.assign(node, message.level.item);
-  node.children = message.level.children.map(createTreeNode);
+  node.children = mergeLoadedChildren(node.children, message.level.children);
   node.childrenLoaded = true;
   node.loading = false;
   node.error = undefined;
+}
+
+function mergeLoadedChildren(previousChildren, items) {
+  const previousById = new Map(previousChildren.map((child) => [normalizeItemId(child.itemId), child]));
+  // Ancestor responses can overlap navigation/expansion. Keep loaded descendants
+  // attached to their identity while accepting the server's current order and metadata.
+  return items.map((item) => {
+    const node = previousById.get(normalizeItemId(item.itemId));
+    return node ? Object.assign(node, item) : createTreeNode(item);
+  });
 }
 
 function applyItemIconsMessage(message) {
