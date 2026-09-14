@@ -92,6 +92,7 @@ interface WebviewMessage {
 }
 
 interface FavoriteNavigation {
+  readonly source: "favorite" | "site";
   readonly navigationId: number;
   readonly connectionId: string;
   readonly path: string;
@@ -375,14 +376,28 @@ export class ComparisonPanelManager implements vscode.Disposable {
     await this.loadInitialTrees();
   }
 
+  async openSite(connectionId: string, path: string): Promise<void> {
+    await this.openConnectionPath(connectionId, path, "site");
+  }
+
   async openFavorite(connectionId: string, path: string): Promise<void> {
+    await this.openConnectionPath(connectionId, path, "favorite");
+  }
+
+  private async openConnectionPath(
+    connectionId: string,
+    path: string,
+    source: "favorite" | "site",
+  ): Promise<void> {
     if (!this.connectionStore.get(connectionId)) {
-      await vscode.window.showErrorMessage("The favorite's XM Cloud connection no longer exists.");
+      await vscode.window.showErrorMessage(`The ${source}'s XM Cloud connection no longer exists.`);
       return;
     }
     if (!this.panel) {
       await vscode.window.showWarningMessage(
-        "Open a comparison before navigating to a favorite. You can also right-click the favorite and choose Compare with…",
+        source === "site"
+          ? "Open a comparison and select this site's connection before navigating to its root item."
+          : "Open a comparison before navigating to a favorite. You can also right-click the favorite and choose Compare with…",
       );
       return;
     }
@@ -395,12 +410,14 @@ export class ComparisonPanelManager implements vscode.Disposable {
         : undefined;
     if (!side) {
       await vscode.window.showWarningMessage(
-        `${this.connectionStore.get(connectionId)?.name ?? "The favorite's connection"} is not open in the current comparison. Right-click the favorite and choose Compare with… to open it explicitly.`,
+        source === "site"
+          ? "Select this site's connection in the current comparison before navigating to its root item."
+          : `${this.connectionStore.get(connectionId)?.name ?? "The favorite's connection"} is not open in the current comparison. Right-click the favorite and choose Compare with… to open it explicitly.`,
       );
       return;
     }
 
-    const navigation = this.beginFavoriteNavigation(connectionId, path, side);
+    const navigation = this.beginFavoriteNavigation(connectionId, path, side, source);
     this.panel.reveal(vscode.ViewColumn.Active);
     await this.navigateToFavorite(navigation);
   }
@@ -1982,17 +1999,17 @@ export class ComparisonPanelManager implements vscode.Disposable {
       }
       const message = errorMessage(error);
       this.log.warn(
-        `Unable to open favorite ${navigation.path} on connection ${navigation.connectionId}: ${message}`,
+        `Unable to open ${navigation.source} ${navigation.path} on connection ${navigation.connectionId}: ${message}`,
       );
       const connectionName = this.connectionStore.get(navigation.connectionId)?.name ?? "the connection";
       const notFound = message.includes(" was not found.");
-      const choice = notFound
+      const choice = notFound && navigation.source === "favorite"
         ? await vscode.window.showErrorMessage(
             `Favorite path ${navigation.path} was not found on ${connectionName}.`,
             "Remove Favorite",
           )
         : await vscode.window.showErrorMessage(
-            `Unable to open favorite path ${navigation.path} on ${connectionName}: ${message}`,
+            `Unable to open ${navigation.source} path ${navigation.path} on ${connectionName}: ${message}`,
           );
       if (choice === "Remove Favorite") {
         await this.connectionStore.removeFavoritePath(navigation.connectionId, navigation.path);
@@ -2078,11 +2095,13 @@ export class ComparisonPanelManager implements vscode.Disposable {
     connectionId: string,
     path: string,
     side: TreeSide,
+    source: "favorite" | "site" = "favorite",
   ): FavoriteNavigation {
     this.favoriteNavigationGeneration += 1;
     this.resolvePendingFavoriteReveals(false);
     return {
       navigationId: this.favoriteNavigationGeneration,
+      source,
       connectionId,
       path,
       side,

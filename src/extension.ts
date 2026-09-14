@@ -12,6 +12,7 @@ import {
   ConnectionTreeItem,
   ConnectionTreeProvider,
   FavoriteTreeItem,
+  SiteTreeItem,
 } from "./connections/connectionTreeProvider";
 import { AuthoringContentClient } from "./sitecore/authoringClient";
 import { DeploymentClient } from "./sitecore/deploymentClient";
@@ -284,6 +285,11 @@ export function activate(context: vscode.ExtensionContext): void {
     }),
     vscode.commands.registerCommand("xmCloudSync.openComparison", async () => {
       await comparisonPanelManager.open();
+    }),
+    vscode.commands.registerCommand("xmCloudSync.openSite", async (argument) => {
+      if (argument instanceof SiteTreeItem) {
+        await comparisonPanelManager.openSite(argument.connection.id, argument.site.rootPath);
+      }
     }),
     vscode.commands.registerCommand("xmCloudSync.openFavorite", async (argument) => {
       if (argument instanceof FavoriteTreeItem) {
