@@ -91,7 +91,8 @@ interface WebviewMessage {
   readonly rightHasChildren?: unknown;
 }
 
-export interface FavoriteLoadingState {
+export interface NavigationLoadingState {
+  readonly source: "favorite" | "site";
   readonly connectionId: string;
   readonly path: string;
 }
@@ -169,9 +170,9 @@ export class ComparisonPanelManager implements vscode.Disposable {
   private readonly pendingSubtreeConfirmations = new Set<string>();
   private readonly copyingFieldIds = new Set<string>();
   private readonly fieldDiffProvider = new FieldDiffContentProvider();
-  private readonly favoriteLoadingEmitter = new vscode.EventEmitter<FavoriteLoadingState | undefined>();
+  private readonly navigationLoadingEmitter = new vscode.EventEmitter<NavigationLoadingState | undefined>();
   private activeFavoriteNavigation: FavoriteNavigation | undefined;
-  readonly onDidChangeFavoriteLoading = this.favoriteLoadingEmitter.event;
+  readonly onDidChangeNavigationLoading = this.navigationLoadingEmitter.event;
 
   private readonly comparisonStateEmitter = new vscode.EventEmitter<void>();
   private readonly pendingFavoriteReveal = new Map<string, (found: boolean) => void>();
@@ -1965,7 +1966,7 @@ export class ComparisonPanelManager implements vscode.Disposable {
   private finishFavoriteNavigation(navigation = this.activeFavoriteNavigation): void {
     if (navigation && this.activeFavoriteNavigation === navigation) {
       this.activeFavoriteNavigation = undefined;
-      this.favoriteLoadingEmitter.fire(undefined);
+      this.navigationLoadingEmitter.fire(undefined);
     }
   }
 
@@ -2143,7 +2144,7 @@ export class ComparisonPanelManager implements vscode.Disposable {
       side,
     };
     this.activeFavoriteNavigation = navigation;
-    this.favoriteLoadingEmitter.fire(source === "favorite" ? { connectionId, path } : undefined);
+    this.navigationLoadingEmitter.fire({ source, connectionId, path });
     return navigation;
   }
 
@@ -3380,7 +3381,7 @@ export class ComparisonPanelManager implements vscode.Disposable {
       disposable.dispose();
     }
     this.comparisonStateEmitter.dispose();
-    this.favoriteLoadingEmitter.dispose();
+    this.navigationLoadingEmitter.dispose();
   }
 }
 

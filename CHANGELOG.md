@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.13.0
+
+- Extended navigation loading indicators to sites: the globe becomes spinning arrows while loading and is restored afterward, independently of favorites with the same path.
+
 ## 0.12.0
 
 - Added a spinning loading indicator to favorites while their comparison navigation is in progress, with cleanup on completion, failure, cancellation, and supersession.

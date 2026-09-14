@@ -208,8 +208,8 @@ export function activate(context: vscode.ExtensionContext): void {
         : undefined;
       void updateConnectionRemovalContext();
     }),
-    comparisonPanelManager.onDidChangeFavoriteLoading((state) => {
-      connectionProvider.setFavoriteLoading(state);
+    comparisonPanelManager.onDidChangeNavigationLoading((state) => {
+      connectionProvider.setNavigationLoading(state);
     }),
     comparisonPanelManager.onDidChangeComparisonState(() => {
       void updateConnectionRemovalContext();

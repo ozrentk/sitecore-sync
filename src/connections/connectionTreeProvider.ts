@@ -1,7 +1,7 @@
 import * as vscode from "vscode";
 import type { XmCloudConnection } from "./connection";
 import type { ConnectionStore } from "./connectionStore";
-import type { FavoriteLoadingState } from "../comparison/comparisonPanel";
+import type { NavigationLoadingState } from "../comparison/comparisonPanel";
 import type { AuthoringSite } from "../sitecore/authoringClient";
 
 export type ConnectionTestStatus = "unknown" | "testing" | "success" | "failure";
@@ -48,8 +48,10 @@ export class SiteTreeItem extends vscode.TreeItem {
   constructor(
     readonly connection: XmCloudConnection,
     readonly site: AuthoringSite,
+    loading = false,
   ) {
     super(site.name, vscode.TreeItemCollapsibleState.None);
+    this.id = JSON.stringify(["site", connection.id, site.name, site.rootPath, site.rootItemId]);
     this.description = site.rootPath;
     this.contextValue = "xmCloudSite";
     this.command = {
@@ -57,7 +59,7 @@ export class SiteTreeItem extends vscode.TreeItem {
       title: "Open Site in Comparison",
       arguments: [this],
     };
-    this.iconPath = new vscode.ThemeIcon("globe");
+    this.iconPath = new vscode.ThemeIcon(loading ? "sync~spin" : "globe");
 
     const tooltip = new vscode.MarkdownString(undefined, true);
     tooltip.appendMarkdown(`**${escapeMarkdown(site.name)}**\n\n`);
@@ -112,7 +114,7 @@ export class ConnectionTreeProvider
   implements vscode.TreeDataProvider<ConnectionNode>, vscode.Disposable
 {
   private readonly changeEmitter = new vscode.EventEmitter<ConnectionNode | undefined | void>();
-  private favoriteLoading: FavoriteLoadingState | undefined;
+  private navigationLoading: NavigationLoadingState | undefined;
   private readonly testStates = new Map<string, TestState>();
   private readonly storeSubscription: vscode.Disposable;
 
@@ -136,15 +138,22 @@ export class ConnectionTreeProvider
         (path) => new FavoriteTreeItem(
           element.connection,
           path,
-          this.favoriteLoading?.connectionId === element.connection.id &&
-            this.favoriteLoading.path === path,
+          this.navigationLoading?.source === "favorite" &&
+            this.navigationLoading.connectionId === element.connection.id &&
+            this.navigationLoading.path === path,
         ),
       );
       const sites = (
         this.testStates.get(element.connection.id)?.sites ??
         this.store.listVerifiedSites(element.connection.id)
       ).map(
-        (site) => new SiteTreeItem(element.connection, site),
+        (site) => new SiteTreeItem(
+          element.connection,
+          site,
+          this.navigationLoading?.source === "site" &&
+            this.navigationLoading.connectionId === element.connection.id &&
+            this.navigationLoading.path === site.rootPath,
+        ),
       );
       return [...favorites, ...sites];
     }
@@ -163,12 +172,13 @@ export class ConnectionTreeProvider
     });
   }
 
-  setFavoriteLoading(state: FavoriteLoadingState | undefined): void {
-    if (this.favoriteLoading?.connectionId === state?.connectionId &&
-        this.favoriteLoading?.path === state?.path) {
+  setNavigationLoading(state: NavigationLoadingState | undefined): void {
+    if (this.navigationLoading?.source === state?.source &&
+        this.navigationLoading?.connectionId === state?.connectionId &&
+        this.navigationLoading?.path === state?.path) {
       return;
     }
-    this.favoriteLoading = state;
+    this.navigationLoading = state;
     this.changeEmitter.fire();
   }
 
