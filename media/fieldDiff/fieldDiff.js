@@ -194,7 +194,9 @@ function createFieldCell(field, pair) {
   const heading = document.createElement("div");
   heading.className = "field-heading";
   const name = document.createElement("strong");
-  name.textContent = field.label || field.name;
+  name.textContent = field.label && field.label !== field.name
+    ? `${field.label} (${field.name})`
+    : field.name;
   heading.append(name);
   const scope = scopeMarker(field);
   if (scope) heading.append(scope);

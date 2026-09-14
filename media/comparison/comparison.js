@@ -1513,7 +1513,9 @@ function createFieldCell(field, side, depth, fieldPair) {
   }
   const name = document.createElement("span");
   name.className = "field-name";
-  name.textContent = field.label || field.name;
+  name.textContent = field.label && field.label !== field.name
+    ? `${field.label} (${field.name})`
+    : field.name;
   if (field.scope !== "VERSIONED") {
     const scope = document.createElement("span");
     scope.className = `field-scope ${field.scope.toLowerCase()}`;
