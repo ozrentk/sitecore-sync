@@ -11,6 +11,10 @@ export interface FieldDiffSelection {
 }
 
 export interface FieldDiffSnapshot extends FieldDiffSelection {
+  readonly leftPublicPageUrl?: string;
+  readonly rightPublicPageUrl?: string;
+  readonly leftPublicPageError?: string;
+  readonly rightPublicPageError?: string;
   readonly leftConnectionName?: string;
   readonly rightConnectionName?: string;
   readonly leftDetails?: AuthoringItemDetails;
@@ -44,6 +48,7 @@ export class FieldDiffViewProvider implements vscode.WebviewViewProvider, vscode
       side: "left" | "right",
       itemId: string,
     ) => Promise<boolean>,
+    private readonly onOpenPublicPage?: (side: "left" | "right", itemId: string) => Promise<void>,
   ) {}
 
   resolveWebviewView(view: vscode.WebviewView): void {
@@ -61,7 +66,9 @@ export class FieldDiffViewProvider implements vscode.WebviewViewProvider, vscode
         }
       }),
       view.webview.onDidReceiveMessage(async (message: FieldDiffMessage) => {
-        if (message.type === "ready" && view.visible) {
+        if (message.type === "openPublicPage" && (message.side === "left" || message.side === "right") && typeof message.itemId === "string") {
+          await this.onOpenPublicPage?.(message.side, message.itemId);
+        } else if (message.type === "ready" && view.visible) {
           this.onBecameVisible();
         } else if (message.type === "openTextDiff" && typeof message.fieldId === "string") {
           await this.onOpenTextDiff(message.fieldId);

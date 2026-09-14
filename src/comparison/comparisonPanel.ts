@@ -1,3 +1,4 @@
+import { PublicPageService } from "../publicPages/publicPageService";
 import * as vscode from "vscode";
 import type { ConnectionStore } from "../connections/connectionStore";
 import {
@@ -158,6 +159,7 @@ class FieldDiffContentProvider implements vscode.TextDocumentContentProvider {
 }
 
 export class ComparisonPanelManager implements vscode.Disposable {
+  private publicPageController: AbortController | undefined;
   private lookupController: AbortController | undefined;
   private panel: vscode.WebviewPanel | undefined;
   private panelDisposables: vscode.Disposable[] = [];
@@ -222,6 +224,9 @@ export class ComparisonPanelManager implements vscode.Disposable {
         await this.copySelectedFieldValue(fieldId, direction);
       },
       async (side, itemId) => await this.copySelectedItemId(side, itemId),
+      async (side, itemId) => {
+        if (this.selectedFieldDiffItem?.[`${side}ItemId`] === itemId) { await this.openPublicPage(side, itemId); }
+      },
     );
     this.disposables.push(
       this.fieldDiffViewProvider,
@@ -822,6 +827,10 @@ export class ComparisonPanelManager implements vscode.Disposable {
   }
 
   private async handleMessage(message: WebviewMessage): Promise<void> {
+    if (message.type === "openPublicPage" && (message.side === "left" || message.side === "right") && typeof message.itemId === "string") {
+      if (!this.pendingLanguageView) { await this.openPublicPage(message.side, message.itemId); }
+      return;
+    }
     if (message.type === "cancelItemLookup") {
       this.lookupController?.abort();
       this.favoriteNavigationGeneration += 1;
@@ -2725,7 +2734,26 @@ export class ComparisonPanelManager implements vscode.Disposable {
     );
   }
 
+  private async openPublicPage(side: TreeSide, itemId: string): Promise<void> {
+    const selection = this.getSelection();
+    const connectionId = selection[`${side}ConnectionId`];
+    if (!connectionId || this.pendingLanguageView) { return; }
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 30_000);
+    this.requestControllers.add(controller);
+    try {
+      const target = await new PublicPageService(this.connectionStore, this.authoringClient).resolve(connectionId, itemId, selection[`${side}Language`], controller.signal);
+      if (!this.isCurrentSelection(side, connectionId, selection[`${side}Language`])) { return; }
+      if (!target) { await vscode.window.showInformationMessage("Configure Public Page URLs to enable public-page links."); return; }
+      const choice = await vscode.window.showQuickPick([{ label: "Open public page", description: target.url, detail: `${target.site.name}: ${target.page.path}` }], { title: `Open ${side} public page`, placeHolder: target.url });
+      if (choice && !controller.signal.aborted) { await vscode.env.openExternal(vscode.Uri.parse(target.url)); }
+    } catch (error: unknown) {
+      if (!controller.signal.aborted) { await vscode.window.showInformationMessage(`Public page unavailable: ${errorMessage(error)}`); }
+    } finally { clearTimeout(timeout); this.requestControllers.delete(controller); }
+  }
+
   private async refreshFieldDiffView(): Promise<void> {
+    this.publicPageController?.abort();
     if (!this.fieldDiffViewProvider.visible) {
       return;
     }
@@ -2764,7 +2792,25 @@ export class ComparisonPanelManager implements vscode.Disposable {
       if (selected !== this.selectedFieldDiffItem || !this.fieldDiffViewProvider.visible) {
         return;
       }
+      const service = new PublicPageService(this.connectionStore, this.authoringClient);
+      const controller = new AbortController();
+      this.publicPageController = controller;
+      this.requestControllers.add(controller);
+      const timeout = setTimeout(() => controller.abort(), 30_000);
+      const pages = await Promise.allSettled((["left", "right"] as const).map(async side => {
+        const details = side === "left" ? leftDetails : rightDetails;
+        const connectionId = selection[`${side}ConnectionId`];
+        if (!service.configured || !details || !connectionId) { return undefined; }
+        return service.resolve(connectionId, details.itemId, selection[`${side}Language`], controller.signal, details);
+      }));
+      clearTimeout(timeout);
+      this.requestControllers.delete(controller);
+      if (controller.signal.aborted || selected !== this.selectedFieldDiffItem || !this.fieldDiffViewProvider.visible) { return; }
       await this.fieldDiffViewProvider.showSnapshot({
+        leftPublicPageUrl: pages[0].status === "fulfilled" ? pages[0].value?.url : undefined,
+        rightPublicPageUrl: pages[1].status === "fulfilled" ? pages[1].value?.url : undefined,
+        leftPublicPageError: pages[0].status === "rejected" ? errorMessage(pages[0].reason) : undefined,
+        rightPublicPageError: pages[1].status === "rejected" ? errorMessage(pages[1].reason) : undefined,
         ...selected,
         leftConnectionName: selection.leftConnectionId
           ? this.connectionStore.get(selection.leftConnectionId)?.name

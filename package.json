@@ -2,7 +2,7 @@
   "name": "sitecore-xm-cloud-sync",
   "displayName": "XM Cloud Sync",
   "description": "Compare and synchronize Sitecore XM Cloud authoring content from VS Code.",
-  "version": "0.16.0",
+  "version": "0.17.0",
   "publisher": "OzrenTK",
   "license": "MIT",
   "engines": {
@@ -246,6 +246,10 @@
       {
         "command": "xmCloudSync.openSequenceRun",
         "title": "Open Sequence Run"
+      },
+      {
+        "command": "xmCloudSync.configurePublicPageUrls",
+        "title": "XM Cloud Sync: Configure Public Page URLs"
       }
     ],
     "viewsContainers": {
@@ -610,6 +614,18 @@
           ],
           "default": "none",
           "description": "Controls normalization used for text comparison. It never changes synchronized values."
+        },
+        "xmCloudSync.publicPageUrlTemplate": {
+          "type": "string",
+          "default": "",
+          "scope": "application",
+          "description": "One shared public-page URL template for all connections. Tokens: {publicBaseUrl}, {deploymentBaseUrl}, {language}, {country}, {route}. Empty disables links."
+        },
+        "xmCloudSync.publicPageValues": {
+          "type": "object",
+          "default": {},
+          "scope": "application",
+          "description": "Connection IDs mapped to {defaultSite, sites: {siteName: {publicBaseUrl, deploymentBaseUrl, languages: {SitecoreLanguage: {language, country}}}}}. Use Configure Public Page URLs for preview and editing. Country is never inferred."
         }
       }
     }
