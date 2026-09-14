@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.10.1
+
+- Fixed intermittent favorite reveal failures caused by overlapping ancestor loads discarding already-loaded descendants in the comparison tree.
+
 ## 0.10.0
 
 - Added safe operation replay from completed or failed Operations records. Replay persists semantic input while rebuilding current field fingerprints, subtree inspection context, Authoring snapshots, descendants, publishing batches, route identity, and Power Publish reference graphs.
