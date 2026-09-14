@@ -1,5 +1,7 @@
 import { deepStrictEqual, strictEqual, rejects } from "node:assert/strict";
 import * as vscode from "vscode";
+import { mock } from "node:test";
+import { PublicPageService } from "../../src/publicPages/publicPageService";
 import { ComparisonPanelManager } from "../../src/comparison/comparisonPanel";
 import {
   SiteTreeItem,
@@ -19,6 +21,7 @@ import { MemoryMemento, type IntegrationTest } from "./testSupport";
 const selectionKey = "sitecoreXmCloudSync.comparisonSelection.v1";
 
 interface ComparisonPanelHarness {
+  openPublicPage(side: "left" | "right", itemId: string): Promise<void>;
   handleMessage(message: unknown): Promise<void>;
   openSite(connectionId: string, path: string): Promise<void>;
   openFavorite(connectionId: string, path: string): Promise<void>;
@@ -31,6 +34,40 @@ interface ComparisonPanelHarness {
 }
 
 export const comparisonPanelTests: readonly IntegrationTest[] = [{
+  name: "public pages open directly and cancelled or stale resolutions do not launch",
+  async execute(): Promise<void> {
+    const manager = Object.create(ComparisonPanelManager.prototype) as ComparisonPanelHarness;
+    const controllers = new Set<AbortController>();
+    const opened: string[] = [];
+    let current = true;
+    let cancel = false;
+    Object.assign(manager, {
+      requestControllers: controllers,
+      getSelection: () => ({ leftConnectionId: "left", leftLanguage: "en" }),
+      isCurrentSelection: () => current,
+    });
+    const resolve = mock.method(PublicPageService.prototype, "resolve", async () => {
+      if (cancel) { for (const controller of controllers) controller.abort(); }
+      return { url: "https://example.test/page" };
+    });
+    const open = mock.method(vscode.env, "openExternal", async (uri: vscode.Uri) => { opened.push(uri.toString()); return true; });
+    const picker = mock.method(vscode.window, "showQuickPick", async () => undefined);
+    try {
+      await manager.openPublicPage("left", "page");
+      deepStrictEqual(opened, ["https://example.test/page"]);
+      strictEqual(picker.mock.callCount(), 0);
+      current = false;
+      await manager.openPublicPage("left", "page");
+      current = true;
+      cancel = true;
+      await manager.openPublicPage("left", "page");
+      strictEqual(opened.length, 1);
+      strictEqual(controllers.size, 0);
+    } finally {
+      resolve.mock.restore(); open.mock.restore(); picker.mock.restore();
+    }
+  },
+}, {
   name: "name search falls back on empty left results, paginates only the chosen connection and blocks stale selections",
   async execute(): Promise<void> {
     const manager = Object.create(ComparisonPanelManager.prototype) as ComparisonPanelHarness;

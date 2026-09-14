@@ -2844,8 +2844,7 @@ export class ComparisonPanelManager implements vscode.Disposable {
       const target = await new PublicPageService(this.connectionStore, this.authoringClient).resolve(connectionId, itemId, selection[`${side}Language`], controller.signal);
       if (!this.isCurrentSelection(side, connectionId, selection[`${side}Language`])) { return; }
       if (!target) { await vscode.window.showInformationMessage("Configure Public Page URLs to enable public-page links."); return; }
-      const choice = await vscode.window.showQuickPick([{ label: "Open public page", description: target.url, detail: `${target.site.name}: ${target.page.path}` }], { title: `Open ${side} public page`, placeHolder: target.url });
-      if (choice && !controller.signal.aborted) { await vscode.env.openExternal(vscode.Uri.parse(target.url)); }
+      if (!controller.signal.aborted) { await vscode.env.openExternal(vscode.Uri.parse(target.url)); }
     } catch (error: unknown) {
       if (!controller.signal.aborted) { await vscode.window.showInformationMessage(`Public page unavailable: ${errorMessage(error)}`); }
     } finally { clearTimeout(timeout); this.requestControllers.delete(controller); }

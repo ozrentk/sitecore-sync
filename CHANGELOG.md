@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.21.1
+
+- Open public-page links directly from comparison and Field Diff without a redundant confirmation dropdown.
+
 ## 0.21.0
 
 - Add Configure Public URL Values to each connection’s context menu, opening URL setup for that connection and its selected site.
