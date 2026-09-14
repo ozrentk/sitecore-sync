@@ -1,12 +1,19 @@
+import { notifyConnectionAdded } from "./connectionOnboarding";
 import * as vscode from "vscode";
 import { normalizeServerUrl, type XmCloudConnection } from "./connection";
 import type { ConnectionStore } from "./connectionStore";
 import { ConnectionTreeItem, type ConnectionTreeProvider } from "./connectionTreeProvider";
-import { testAuthoringConnection, type AuthoringSite } from "../sitecore/authoringClient";
+import {
+  type AuthoringContentClient,
+  type AuthoringSite,
+} from "../sitecore/authoringClient";
+import { DeploymentClient } from "../sitecore/deploymentClient";
 
 export async function addConnection(
   store: ConnectionStore,
   provider: ConnectionTreeProvider,
+  authoringClient: AuthoringContentClient,
+  initialServerUrl?: string,
 ): Promise<void> {
   const name = await vscode.window.showInputBox({
     title: "Add XM Cloud Connection (1/4)",
@@ -29,6 +36,7 @@ export async function addConnection(
     title: "Add XM Cloud Connection (2/4)",
     prompt: "Enter the XM Cloud CM server URL, without an API path.",
     placeHolder: "https://example.sitecorecloud.io",
+    value: initialServerUrl,
     ignoreFocusOut: true,
     validateInput: validateServerUrl,
   });
@@ -65,19 +73,19 @@ export async function addConnection(
     clientSecret,
   });
 
-  const selection = await vscode.window.showInformationMessage(
-    `Added XM Cloud connection “${connection.name}”.`,
-    "Test Connection",
-  );
-  if (selection === "Test Connection") {
-    await testConnection(connection, store, provider);
-  }
+  await notifyConnectionAdded(connection.name, {
+    sharedTemplate: () => vscode.workspace.getConfiguration("xmCloudSync").get<unknown>("publicPageUrlTemplate"),
+    notify: async (message, ...actions) => vscode.window.showInformationMessage(message, ...actions),
+    testConnection: async () => testConnection(connection, store, provider, authoringClient),
+    configureTemplate: async () => { await vscode.commands.executeCommand("xmCloudSync.configurePublicPageUrls"); },
+  });
 }
 
 export async function testConnection(
   argument: ConnectionTreeItem | XmCloudConnection | undefined,
   store: ConnectionStore,
   provider: ConnectionTreeProvider,
+  authoringClient: AuthoringContentClient,
 ): Promise<void> {
   const connection = resolveConnection(argument, store);
   if (!connection) {
@@ -107,7 +115,11 @@ export async function testConnection(
         const controller = new AbortController();
         const subscription = token.onCancellationRequested(() => controller.abort());
         try {
-          return await testAuthoringConnection(connection, clientSecret, controller.signal);
+          return await authoringClient.testConnection(
+            connection,
+            clientSecret,
+            controller.signal,
+          );
         } finally {
           subscription.dispose();
         }
@@ -118,6 +130,7 @@ export async function testConnection(
       ? `; omitted ${result.duplicateSiteCount} duplicate API record(s)`
       : "";
     const message = `Connected in ${result.elapsedMilliseconds} ms; found ${result.sites.length} unique configured site(s)${duplicateSummary}.`;
+    await store.storeVerifiedSites(connection.id, result.sites);
     provider.setTestState(connection.id, "success", message, result.sites);
     const selection = await vscode.window.showInformationMessage(
       `${connection.name}: ${message}`,
@@ -130,6 +143,73 @@ export async function testConnection(
     const message = errorMessage(error);
     provider.setTestState(connection.id, "failure", message);
     await vscode.window.showErrorMessage(`${connection.name}: ${message}`);
+  }
+}
+
+export async function configureDeploymentMonitoring(
+  argument: ConnectionTreeItem | XmCloudConnection | undefined,
+  store: ConnectionStore,
+  deploymentClient: DeploymentClient,
+): Promise<void> {
+  const connection = resolveConnection(argument, store);
+  if (!connection) {
+    await vscode.window.showErrorMessage("The XM Cloud connection no longer exists.");
+    return;
+  }
+  const clientId = await vscode.window.showInputBox({
+    title: `Configure Deployment Monitoring for ${connection.name} (1/2)`,
+    prompt: "Enter an organization automation client ID with Deploy API access.",
+    value: connection.deploymentClientId,
+    ignoreFocusOut: true,
+    validateInput: required("Organization automation client ID"),
+  });
+  if (clientId === undefined) {
+    return;
+  }
+  const clientSecret = await vscode.window.showInputBox({
+    title: `Configure Deployment Monitoring for ${connection.name} (2/2)`,
+    prompt: "Enter its secret. It will be stored in VS Code SecretStorage.",
+    password: true,
+    ignoreFocusOut: true,
+    validateInput: required("Organization automation client secret"),
+  });
+  if (clientSecret === undefined) {
+    return;
+  }
+  const controller = new AbortController();
+  try {
+    const baseline = await vscode.window.withProgress(
+      {
+        location: vscode.ProgressLocation.Notification,
+        title: `Matching ${connection.name} to its deployment environment`,
+        cancellable: true,
+      },
+      async (_progress, token) => {
+        const subscription = token.onCancellationRequested(() => controller.abort());
+        try {
+          return await deploymentClient.resolveEnvironment(
+            connection,
+            { clientId: clientId.trim(), clientSecret },
+            controller.signal,
+          );
+        } finally {
+          subscription.dispose();
+        }
+      },
+    );
+    await store.configureDeploymentMonitoring(
+      connection.id,
+      clientId.trim(),
+      clientSecret,
+      baseline.environmentId,
+    );
+    await vscode.window.showInformationMessage(
+      `${connection.name}: deployment monitoring configured.`,
+    );
+  } catch (error: unknown) {
+    await vscode.window.showErrorMessage(
+      `${connection.name}: ${errorMessage(error)}`,
+    );
   }
 }
 
@@ -155,9 +235,16 @@ async function showSites(
 export async function removeConnection(
   argument: ConnectionTreeItem | XmCloudConnection | undefined,
   store: ConnectionStore,
+  isInOpenComparison?: (connectionId: string) => boolean,
 ): Promise<void> {
   const connection = resolveConnection(argument, store);
   if (!connection) {
+    return;
+  }
+  if (isInOpenComparison?.(connection.id)) {
+    await vscode.window.showInformationMessage(
+      `Close the comparison or select another connection on both sides before deleting “${connection.name}”.`,
+    );
     return;
   }
 
@@ -171,6 +258,26 @@ export async function removeConnection(
   }
 
   await store.remove(connection.id);
+}
+
+export async function pasteAsConnectionUrl(
+  store: ConnectionStore,
+  provider: ConnectionTreeProvider,
+  authoringClient: AuthoringContentClient,
+): Promise<void> {
+  const clipboard = (await vscode.env.clipboard.readText()).trim();
+  if (!clipboard) {
+    await vscode.window.showInformationMessage("The clipboard does not contain a connection URL.");
+    return;
+  }
+  let serverUrl: string;
+  try {
+    serverUrl = normalizeServerUrl(new URL(clipboard).origin);
+  } catch (error: unknown) {
+    await vscode.window.showErrorMessage(`Clipboard URL is invalid: ${errorMessage(error)}`);
+    return;
+  }
+  await addConnection(store, provider, authoringClient, serverUrl);
 }
 
 function resolveConnection(

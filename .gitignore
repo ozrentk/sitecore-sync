@@ -1,6 +1,8 @@
 node_modules/
 out/
 dist/
+.test-out/
+.vscode-test/
 *.vsix
 *.log
 *.tsbuildinfo

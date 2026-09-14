@@ -2,7 +2,7 @@
 
 XM Cloud Sync is an early-stage VS Code extension for comparing and synchronizing Sitecore XM Cloud authoring content.
 
-The current build supports multiple saved XM Cloud connections, automation-client authentication, and authenticated connection testing. It also contributes placeholder Left Content Tree, Right Content Tree, and Sync Operations views for the next milestones.
+The current build supports multiple saved XM Cloud connections, automation-client authentication, authenticated connection testing, a document-style comparison workspace, and a durable asynchronous Operations queue for transfers and publishing.
 
 ## Add and test a connection
 
@@ -13,11 +13,201 @@ Create an environment automation client for the XM Cloud environment in Sitecore
 3. Enter a unique name, the CM server URL, client ID, and client secret.
 4. Select **Test Connection**, or use the play button beside the saved connection later.
 
+After the connection is saved, a missing shared public-page URL template adds optional **Set up URL template** and **Not now** actions to the success notification. Declining or dismissing leaves the connection saved and usable. If the shared template already exists, this offer is omitted even when the new connection has no individual public URL values. The same behavior applies to **Paste as Connection URL**.
+
 The client secret is stored in VS Code `SecretStorage`. OAuth access tokens are kept in memory only.
+
+Deployment monitoring is optional. The extension first tries the connection's existing credentials; if they already have Deploy API access, no setup is needed. Otherwise subtree transfers continue normally without monitoring. To enable the additional guard explicitly, right-click a connection and select **Configure Deployment Monitoring**, then enter an organization automation client with Deploy API access. The extension matches the saved CM hostname to its deployment environment and stores the additional secret in `SecretStorage`.
 
 After a successful test, expand the connection to see every configured site returned by the Authoring API, including its root path and root item ID. The success notification also provides a searchable **Show Sites** list. This API list can include sites that are not shown as ordinary site tiles in Channels.
 
 If the Authoring API returns identical site records, the extension displays the site once and reports the number of duplicate records omitted. Records are considered identical only when their name, root path, and root item ID all match exactly.
+
+## Open a comparison
+
+Run **XM Cloud Sync: Open Comparison** from the Command Palette or use the diff icon in the XM Cloud Sync activity view. The comparison opens as a document-style tab with left and right connection and language selectors plus swap and **Lock languages** controls. Choices are remembered per workspace.
+
+Changing only comparison languages keeps the current tree visible while preparing a replacement in the background. A label centered at the top of each reloading side shows its target language, for example "Switching to en-CA...". Once the selected item, previously expanded branches, and their required details are ready, the view updates in one step, preserving selection and scroll position; collapsed branches stay collapsed. The unchanged comparison side reuses its loaded data. Field Diff follows the committed selection. Tree transfer, publishing, and editing actions are unavailable during preparation, while scrolling, language choices, and item selection remain available. A failed load retains the previous view and offers Retry; choosing its displayed language restores it immediately. New language choices supersede pending preparation, and favorite or site navigation takes precedence. If an item no longer exists, the prepared view selects its nearest available ancestor with an explanation. Connection changes retain the full reset behavior.
+
+Enable **Lock languages** to keep both sides on the same configured Sitecore language. If the current languages differ, choose which current language should be used on both sides. A language or connection change that cannot preserve the lock is blocked and offers an explicit unlock action; after unlocking for a connection change, the new side uses `en` when available or its first configured language. The lock never treats Sitecore language fallback or an item-level fallback version as proof that a language is configured.
+
+One XM Cloud connection is sufficient. Select the same connection on both sides to compare languages such as `en` and `de`, or select different connections to compare environments. **Compare with…** also offers the selected connection itself for cross-language comparison.
+
+Selecting a connection reveals a trash action beside **Add Connection** and **Open Comparison**. A connection used by the open comparison cannot be deleted. **Paste as Connection URL** is available by right-clicking a connection and as an action in the empty Connections view; it accepts a full XM Cloud URL copied from Content Editor, extracts its HTTPS origin, and prefills the connection wizard.
+
+Clicking a configured site beneath a connection reveals its root item using the same navigation behavior as favorites. A comparison must already be open with that connection selected on either side; clicking a site preserves the connection selections. Loaded rows are reused, missing ancestor levels are loaded as needed, and newer site or favorite clicks supersede earlier navigation. The site globe changes to spinning arrows while its root is loading and returns on completion, failure, cancellation, or superseding navigation. Site and favorite indicators remain separate even when they point to the same path. An unavailable site root reports an error without offering to remove a favorite.
+
+Right-click a comparison item and choose **Add to Favorites** to save its Sitecore path beneath one or both participating connections. Favorites are marked with `☆` in the Connections view and can be removed from their context action. Clicking a favorite navigates only when a comparison is already open and its connection is selected on the left or right; it never changes either selection implicitly. A newer favorite click supersedes navigation still in progress and clears the previous tree highlight while the requested path is resolved. Right-click a favorite and choose **Compare with…** to place its connection on the left, choose the right connection explicitly, and then reveal the saved item. Already-loaded rows are revealed without an API request; otherwise the extension resolves the path with Authoring GraphQL and loads the ancestor chain needed to display it. The favorite shows the same spinning arrows used during connection testing while navigation is loading. The indicator clears on completion, failure, cancellation, or a superseding site or favorite navigation. Overlapping ancestor loads preserve already-loaded descendants by item ID, keeping favorite navigation stable while other branches expand. If the saved path is unavailable, the error prompt offers to remove the stale favorite.
+
+The comparison tab loads the authoring root and its immediate children on both sides. Expanding an item loads its latest numbered version, complete field set, template metadata, and direct children using paginated Authoring GraphQL requests. Loaded details are cached for the lifetime of the extension, while clicking an item only selects it and never causes a refresh. Expanded rows contain child items only, keeping the structural tree compact.
+
+Right-click an item and choose **Show Detailed Field Diff** to open the **Field Diff** tab in VS Code's bottom panel. The panel follows item selection only while it is visible and stops synchronizing when closed. It displays the complete paired field table with item, connection, language, template, path, and latest-version context. Each available item ID is visible beneath that context and copies to the system clipboard with one click. Fields are paired by normalized field ID. Shared fields carry an `S` marker, unversioned fields carry `U`, and the common versioned fields are unmarked. The sticky visibility toolbar classifies every row once: names beginning with `__` are system fields, remaining Standard Template fields form the second category, and all remaining rows are content fields. Content fields can show all rows or differences; Standard Template and system fields can be hidden, limited to differences, or shown in full. The default profile shows content and Standard Template differences while hiding system fields. One profile is retained across item selections and webview restoration rather than stored per item. Populated local overrides are marked on field rows, and textual fields can open VS Code's native text diff. When both sides contain a field with different values, the arrows above and below its **Value** indicator add a confirmed field transfer in either direction. Processing uses one Authoring `updateItem` mutation. An inherited or Standard Value becomes an explicit stored target value; fallback-derived values are not eligible.
+
+Loaded items are displayed in one paired-row tree so the left and right sides share selection, expansion, and scrolling. Items are matched by normalized Sitecore item ID. The comparison marks left-only and right-only items, same-path items with different IDs, and differences in path, name, or child presence. The left hierarchy supplies the primary row order; right-only items are inserted near their closest loaded right-side neighbour.
+
+Tree rows show the item display name with the item's configured Sitecore theme icon when the selected connection's authenticated icon handler returns a supported raster image. An icon set directly or through Standard Values takes precedence; otherwise, the extension uses the icon configured on the item's data-template definition. Icons load asynchronously and progressively after the tree level, so completed icons appear without waiting for slower icons in the same level, and are cached; an unobtrusive fallback remains when the icon is absent, unsafe, unsupported, or temporarily unavailable. The tooltip contains the full path, item ID, and field-comparison lifecycle state: not loaded, loading, equal, different, or failed. Equal, unchecked, and background field-loading states remain visually unmarked. When the display name differs from the underlying item name, the display name is blue and the tooltip also includes the item name. A single red `⚠` marker identifies field-detail or child-loading failures; its tooltip lists the affected side, failure category, and error message.
+
+Right-click a paired row and choose **Refresh Item** to re-read only its template, latest version, and fields without replacing its loaded child tree. Choose **Refresh Subtree** to invalidate and re-read that item plus every descendant level already present in the lazy snapshot. Subtree refresh proceeds from parent levels to child levels so the visible hierarchy remains coherent. The affected rows are temporarily locked; a refresh in a completely disjoint subtree can run at the same time. Unloaded descendants remain lazy and are not fetched solely because of a subtree refresh. If the visible **Field Diff** panel is showing an item covered by either command, it refreshes immediately from the new field snapshot.
+
+Use the toolbar refresh button or **XM Cloud Sync: Refresh All** to greedily re-read every item and field beneath the configured root on both sides. Because this can be expensive for large trees, VS Code asks for confirmation first and shows cancellable progress. The complete comparison is locked during the operation, while independent left and right traversal remains concurrent.
+
+For large Sitecore trees, right-click a paired item and choose **Expand All…**. The ellipsis indicates that a native VS Code warning asks for confirmation before any requests begin. After confirmation, only descendants of that item are fetched and progressively expanded. The selected subtree is locked while it loads, but unrelated parts of the comparison remain usable. Left-only and right-only rows load only their existing side. Disjoint subtree operations may run concurrently; overlapping operations are disabled. Use the cancellable VS Code notification or right-click the operation root and choose **Cancel Expand All** to stop it.
+
+The paired-row context menu shows **Expand Item** or **Collapse Item** according to the selected row's current state, followed by **Expand Loaded Items** and **Expand All…**. A separator groups **Refresh Item** and **Refresh Subtree**. **Expand Loaded Items** recursively expands complete cached levels beneath the selected item without issuing Authoring API requests and does not change expansion elsewhere in the comparison. Partially loaded branches remain lazy.
+
+## Queue and process transfers
+
+Right-click an item and choose **Tree Transfer Left > Right** or **Tree Transfer Right > Left**. Choose **Add missing content** to preserve matching target items, **Synchronize from source** to replace matching items while retaining target-only descendants, or **Exact mirror** to replace the complete target subtree and delete target-only descendants. The last selected type is remembered globally and offered first next time.
+
+Every tree transfer confirmation states that transferred items include all source languages and versions, regardless of the selected comparison language. Before confirmation, a cancellable structural preflight enumerates both subtrees and reports source and target counts plus how many items will be added, overwritten, or removed. Exact mirror uses a short **Replace target tree?** warning that states the target subtree will be deleted and recreated, then reports matching, source-only, and target-only item counts. There is no separate production-target checkbox. After confirmation, the extension adds the subtree and its transfer type to the workspace's FIFO queue. Field Diff arrows add field-value transfers to the same queue. Duplicate pending requests are not added twice.
+
+Open **Operations** in the activity view and select Play to process transfer and publishing records one at a time in insertion order. Pause stops before the next operation or at an operation-specific safe boundary; an already-issued request is allowed to reach that boundary. Queue contents, order, processing state, publishing runs, and remote checkpoints survive VS Code restarts. Completed records move to **Recent Operations** after their secret-free journal is written; the newest 30 are retained and the newest 10 are shown initially. A failure remains at the queue head, pauses processing, and can be retried or removed.
+
+Completed or failed rows can be replayed with current runtime state, or used to create and extend a reusable **Operation Sequence**. Sequences are ordered definitions rather than another queue: **Run Sequence** starts one explicitly and only one sequence may run at a time. A paused sequence releases Operations so standalone work or another sequence can run. Sequence failures show **Paused on operation** and offer Retry, Skip, or Stop; running and paused definitions remain immutable and can be duplicated for future changes. The newest ten terminal runs appear under **Recent Sequence Runs**.
+
+Subtree rows show six phases: queued, freshness checking, content export, chunk copying, Sitecore import, and verification. Chunk copying uses the actual Content Transfer count, for example `copying chunks (4/6, chunk 7/23)`. The Sitecore phase reports completed transfer blobs and elapsed phase time, for example `Sitecore (5/6, blob 0/1 imported, 8m 15s)`. Item Transfer polling starts near two-second intervals, backs off to 5, 10, and finally 15 seconds for long-running imports, and applies small jitter. Field-value rows show four phases from queued through verification. Detailed subtree progress is persisted with the queue record and remains visible on failure.
+
+Subtree processing uses Content Transfer and Item Transfer with `KeepExistingItem`, `OverrideExistingItem`, or `OverrideExistingTree` according to the selected transfer type, preserving IDs and transferring every language and numbered version. It is disabled for the same XM Cloud environment and the complete `/sitecore` root. Same-path/different-ID conflicts block add-missing and synchronize transfers; exact mirror resolves them by removing the target identities and writing the source identities. Only explicit `TransferState: Finished` is success; unknown consumed history remains pending and is polled over as many windows as necessary. Field transfers re-read both endpoints, reject changed source or target state, issue one non-retried Authoring mutation, and verify the result. Finished work refreshes affected loaded comparison data.
+
+When deployment information is available for both sides, the processor records the latest source and destination deployment IDs at subtree start. It checks those IDs during long-running Content and Item Transfer polling, throttled to at most once every 15 seconds, and persists the baselines for restart recovery. If either ID changes, the transfer fails, the queue pauses, and retry discards the old remote checkpoint and starts a fresh transfer. Missing permissions and temporary monitoring errors are logged but never block or fail a transfer.
+
+## Publish with tracing
+
+Right-click the left or right item cell in the comparison and open **Publish**:
+
+- **Standard publish…** performs an ordinary Sitecore Smart or Full publish for the selected language, with optional descendants and related items. It monitors the Sitecore operation to completion and reports through a notification and the **XM Cloud Publish** output channel.
+- **Traced publish…** additionally snapshots authoring content and verifies propagation through raw Experience Edge items, optional rendered route layout, and an optional public application response.
+- **Power publish…** reuses the grouped Traced Publish configuration and continues into a **collapsed scope graph**. Each graph node represents one structural Sitecore scope and exposes only references leaving that boundary. Selecting or expanding an external scope scans it on demand, so dependency discovery proceeds only where the user chooses. Selected dependency scopes publish before the selected route root, followed by the single configured route/application trace.
+
+Traced publishing asks for the Experience Edge GraphQL endpoint and API token on first use. Before storing a new or replacement token, the extension queries Edge and displays the accessible site names, hostnames, and root paths beside the selected connection's CM host. It compares this scope with the connection's verified Authoring sites; a mismatch requires an explicit **Use Anyway** confirmation. The token is stored per connection in VS Code Secret Storage, reused automatically, and deleted with the connection. A replacement-token prompt can be left empty to retain and revalidate the stored value. Site names returned by **Test Connection** are retained with the connection: a single site is selected automatically, while multiple sites are presented by exact name and root path. If no verified site catalog exists, the extension retrieves it again; manual site-name entry is used only when the API returns no sites. Site and route are optional unless rendered-layout verification is wanted. Right-click a saved connection and choose **Configure Traced Publishing**, or run **XM Cloud Sync: Configure Traced Publishing**, to replace or verify the endpoint, token, or default site later.
+
+For route verification, the extension prefills an editable Sitecore route from the selected item's path relative to the chosen site's verified root path. The prefix through a conventional `Home` route-start item is omitted and remaining item-name segments are converted to URL slugs, so both `Home/Station Wagon` and `Global/Home/Station Wagon` become `/station-wagon`. This is a suggestion only: it can be changed for custom URL rules or cleared to skip route verification.
+
+When the selected item is beneath a conventional page-local `Data` subtree, the suggested route stops at the owning page. For example, `Station Wagon/Data/…/See More` suggests `/station-wagon`.
+
+The application URL is always optional. When supplied, the extension makes a normal public HTTPS request and records status plus cache headers such as `Age`, `Cache-Control`, `x-vercel-cache`, and `x-vercel-id`. This requires no Vercel credentials. A successful response containing the selected text is matched; a successful response without it is **inconclusive**, not failed, because the plain probe cannot see text added by browser-side rendering or hydration. If the URL is omitted or inaccessible, only that stage is skipped or marked unavailable; Sitecore and Experience Edge tracing still run.
+
+When a route is configured, Traced publish offers an optional searchable field picker. It includes the selected item's non-standard fields and, only when **Descendants** is selected, fields from structural descendants in the same publish tree. **Related items** can still be sent to Sitecore as ordinary publishing scope, but referenced-item fields are intentionally excluded from Traced verification. Selected values are shown explicitly in the Authoring, raw Edge, rendered-layout, and optional application-response evidence. A selected field that is absent from rendered layout data is reported as not observable and makes that stage diverge.
+
+Power Publish uses the same field picker and keeps assertions limited to the configured structural scope. It has no **Include related items** switch. Layout fields contribute only component datasources; supported item-link and media fields contribute their actual targets. Content and media outside the current collapsed scope appear as opt-in child scopes. Template, layout, system, unsupported, and external-URL references are omitted from the tree and retained only as aggregate evidence. Selected scopes must scan completely before queueing. A scan pauses after a 500-item or 200-unique-external-scope work chunk and can be continued without losing cached results; internal and non-publishable references do not consume the external-scope budget. Traced Publish records supported references outside its structural scope as advisory Authoring evidence only.
+
+When an application URL is supplied, selected assertions can optionally be associated with CSS selectors for a separate **Browser DOM** stage. Selectors can be entered before the URL, but queueing requires and focuses the exact application URL whenever any selector is present. The grouped configuration page shows that URL beside the selectors so that an environment mismatch can be caught before publishing. The extension launches an isolated headless Google Chrome or Microsoft Edge instance, waits for JavaScript hydration and the selector, then checks normalized element `textContent` for the selected field value using locale-independent, case-insensitive containment. Punctuation remains significant. Matching any selected element is sufficient when a selector returns multiple elements. A found element with different text diverges; an invalid or missing selector is inconclusive. Browser profiles, cookies, and authenticated sessions are not reused. Prefer stable IDs or `data-*` attributes because browser-generated `nth-child` selectors can break when page structure changes.
+
+Traced- and Power-publish preparation use the same editor-area configuration page rather than a chain of prompts. Publishing mode and applicable scope, verified Sitecore site, editable route, exact application URL, field assertions, and optional per-field CSS selectors are reviewed together before queueing. Fields are added through the searchable picker; only selected assertions remain in the compact list, where they can receive a CSS selector or be removed. Traced Publish loads structural descendant fields after descendants are enabled; Power Publish loads them automatically because every collapsed scope always represents its structural subtree. For Power Publish, **Publish structural descendants through Sitecore** controls execution only: enabled delegation sends each selected scope root to Sitecore with descendants, while disabled delegation sends every inspected item in the selected scopes explicitly. Power Publish continues into collapsed-scope review, while Traced Publish queues directly. First-time Experience Edge endpoint and token setup remains separate so the token can be validated and stored in VS Code Secret Storage without entering the webview.
+
+If saved monitoring state becomes stale, run **XM Cloud Sync: Abandon Current Publish Tracking**. The same recovery is offered as **Abandon and Continue** when a new publish is blocked. It aborts local monitoring, marks incomplete traces as locally abandoned with unknown server status, and releases the extension lock. It cannot cancel a publishing operation that is still running in XM Cloud.
+
+Completed Publish Traces provide contextual recovery actions when appropriate. **Retry failed verification** reruns diagnostic reads from the first failed Edge, layout, or application stage without publishing again. A Power Publish Edge divergence additionally offers **Force republish missing items**, which creates a new durable Full-publish operation containing only the missing or mismatched observed items. **Publish again…** starts the normal, newly confirmed publish flow after a publishing failure or an abandoned trace with no operation ID. **Check status again** polls only the saved operation IDs from an abandoned trace; it never starts a batch that has no operation ID. Up to ten previous attempts and their stage evidence remain expandable in the same trace.
+
+Traced and Power operations use one progressive **Publish Trace** document. Evidence and selected-scope reference details stay collapsed until opened. Standard publish normally uses only progress notifications; the trace opens if it fails. Run **XM Cloud Sync: Show Latest Publish Trace** to reopen recent evidence or **XM Cloud Sync: Show Publish Output** for low-level polling details.
+
+Power dependencies are grouped by dependency layer and sent to Sitecore in batches of up to 20 independent IDs; cyclic components remain together and the selected page root stays in a final batch. With Sitecore descendant delegation enabled, those IDs are selected collapsed-scope roots. Without delegation, they are the inspected concrete items contained by the selected scopes. The Sitecore publishing stage exposes live per-batch submission, state, processed-item, and completion progress. Every Sitecore batch completes before one aggregate Raw Experience Edge verification checks every observable item identity plus selected and graph-forming reference fields. Authoring snapshots with version `0` in the requested language are not Edge-observable and are recorded as skipped evidence instead of failures. The verifier reports incremental checked and matched counts; after its first complete pass, it rechecks only the items that have not matched, using a 30-second propagation retry window. A missing or mismatched observable item does not suppress later diagnostics; it appears in the final verification evidence. Batch operation IDs and the final Edge result are persisted for restart recovery and targeted repair.
+
+Publish operations and their Sitecore operation IDs are persisted so monitoring can resume after VS Code restarts. Redacted JSON journals are written beneath VS Code extension storage. Publish mutations are not retried automatically.
+
+## Item task plug-ins
+
+Right-click a comparison item and choose **Run task…** to run a matching workspace JavaScript or PowerShell plug-in. Create each plug-in beneath `.xm-cloud-sync/tasks/<task-name>/` with a `task.json` manifest and a script contained in the same directory. Tasks can match an item by template ID, item ID, exact immediate-parent path, or exact ancestor path; rules within a manifest are OR conditions. When both comparison sides match, the picker identifies the side, connection, language, and path.
+
+```json
+{
+  "id": "validate-product",
+  "name": "Validate product",
+  "description": "Checks product content.",
+  "script": "validate-product.js",
+  "execution": {
+    "type": "javascript"
+  },
+  "inputs": [
+    {
+      "id": "market",
+      "type": "pick",
+      "label": "Market",
+      "required": true,
+      "options": [
+        { "label": "United Kingdom", "value": "uk" },
+        { "label": "Germany", "value": "de" }
+      ]
+    }
+  ],
+  "matches": {
+    "templateIds": ["{TEMPLATE-ID}"],
+    "itemIds": [],
+    "parentPaths": [],
+    "ancestorPaths": ["/sitecore/content/Products"]
+  }
+}
+```
+
+Inputs support `text`, `number`, `pick`, and `boolean`. Common properties are `id`, `type`, `label`, optional `description`, `required`, and `default`. Text inputs can provide `placeholder`; number inputs can provide `minimum` and `maximum`; pick inputs require scalar options or `{ "label", "value", "description" }` objects. Collected values are available as `context.inputs.<id>`.
+
+JavaScript is the recommended execution type for XM Cloud content automation. Set `execution.type` to `javascript` and use a `.js`, `.cjs`, or `.mjs` script that exports an asynchronous `run(context, sitecore, log)` function. The script runs in an isolated Node child process. Its `sitecore` object sends a restricted set of operations back to the extension, where the existing authenticated Authoring API client executes them. Client secrets and access tokens never enter the task process.
+
+```js
+exports.run = async function run(context, sitecore, log) {
+  const item = await sitecore.items.get({
+    itemId: context.item.itemId,
+    language: context.language,
+    version: context.item.version
+  });
+
+  log.info(`Updating ${item.path}`);
+  const updated = await sitecore.items.update({
+    itemId: item.itemId,
+    language: item.language,
+    version: item.version,
+    fields: {
+      Title: "Updated title"
+    }
+  });
+
+  return { status: "ok", message: `Updated ${updated.path}.` };
+};
+```
+
+The brokered item API supports:
+
+- `sitecore.items.get({ itemId | path, language?, version? })` — returns complete item details.
+- `sitecore.items.getChildren({ itemId | path, language? })` — returns the item and its immediate children.
+- `sitecore.items.create({ name, templateId, parent, language?, fields? })` — creates an item and returns complete details. `parent` accepts an item ID or path.
+- `sitecore.items.update({ itemId, language?, version, fields })` — updates named string field values and returns refreshed details. A version is required to avoid accidentally updating a different version.
+- `sitecore.items.delete({ itemId | path, permanently? })` — deletes to the recycle bin by default; permanent deletion must be explicit.
+
+All operations are scoped to the connection on the clicked comparison side and the `master` database. A task cannot request another saved connection. Omitting `language` uses the clicked language. Authoring mutations are not retried automatically. Cancellation terminates the worker and aborts any in-flight Authoring request. The task can return `{ "status": "ok", "message": "Done." }` or `{ "status": "error", "message": "Reason." }`; returning a string is shorthand for a successful message. See `examples/item-task-javascript` for a read-only working plug-in.
+
+`examples/modal-slide-in-authoring` contains the JavaScript port of the modal slide-in inspection and update task. It retains the configured product-page rendering lookup and changes only the selected button's linked Table items. The update task can update, create, and recycle Table items and keeps the TableContainer multilist synchronized. Version 0.9.3 deliberately reports an error instead of guessing when an existing Table child needs a new language version, because adding item versions is not yet part of the brokered API.
+
+Local PowerShell is the default execution type. Its script receives `-ContextPath` and `-ResultPath`. Context JSON includes schema version, task identity, collected inputs, comparison side, connection identity without credentials, language, parent and ancestor paths, and complete item details including template, versions, and fields. Standard output and error stream live to **XM Cloud Tasks**. The script can write `{"status":"ok","message":"Done."}` or `{"status":"error","message":"Reason."}` to the result path; a non-zero exit code is always failure. See `examples/item-task` for a working plug-in that can be copied into a workspace.
+
+Set `execution.type` to `spe-remoting` for a server-side Sitecore PowerShell Extensions task. Before asking for task inputs or credentials, the extension checks whether the selected PowerShell host can discover the local `SPE` remoting module. If it is missing, execution stops and the notification can copy `Install-Module -Name SPE -Scope CurrentUser` or open the SPE package page. The extension uses the clicked side's connection URL and language, asks for a Sitecore username and password only on first use, and stores the credential per connection in VS Code Secret Storage. A read-only authentication probe must succeed before the actual task script is sent; authentication failure offers credential replacement. Deleting the connection also deletes its SPE credential. The workspace script executes inside Sitecore and receives one `Context` object parameter. SPE Remoting must also be enabled and authorized on the CM environment.
+
+Tasks run only on an explicit click and only in trusted workspaces. JavaScript tasks run in a dedicated child process supplied by the extension. Local tasks use `pwsh -NoLogo -NoProfile -NonInteractive`, falling back to Windows PowerShell when PowerShell 7 is unavailable. SPE remoting tasks use Windows PowerShell on Windows for compatibility with the SPE client module. Scripts run under the machine's normal PowerShell execution policy. Temporary context and result files are deleted after execution. Sitecore credentials are never included in the manifest, context file, command line, or logs.
+
+## Difference legend
+
+| Badge | Meaning |
+| --- | --- |
+| `L` | The item ID exists only on the left side within the currently loaded comparison data. |
+| `R` | The item ID exists only on the right side within the currently loaded comparison data. |
+| `LR` | Both left-only and right-only identity states apply. The two symbols are rendered as one group while retaining separate tooltips. |
+| `ID` | Items have the same path but different item IDs. This badge replaces the otherwise redundant `LR` group for that row. |
+| `P` | The same item ID has different paths on the left and right sides. |
+| `N` | The same item ID has a different item name or display name. |
+| `C` | The two items disagree about whether they have child items. |
+| `T` | The paired items use different templates. |
+| `V` | Selected-language version availability differs between the items. |
+| `*` | At least one field differs between these items. |
+| `⚠` | Field-detail or child loading failed. This is an operational state, not a content difference. |
+
+Identity symbols (`L`, `R`, or `ID`) form one blue group. Structural and content symbols form one orange group. Operational failure uses a separate red `⚠` marker and does not affect difference filtering or synchronization. Each symbol retains its own tooltip, and multiple symbols can coexist. Field rows use descriptive badges such as `Type`, `Scope`, `Source`, and `≠`; these are independent of the compact item-level symbols.
+
+Connection secrets, access tokens, and Authoring API requests remain in the extension host and are never exposed to the webview.
+
+All Sitecore OAuth and Authoring GraphQL traffic passes through a shared request client. A transient network failure or HTTP 408, 429, 500, 502, 503, or 504 response is retried up to three times after the initial attempt. Retries use exponential backoff starting near 500 ms with jitter. When Sitecore supplies `Retry-After` as seconds or an HTTP date, that delay takes precedence and also pauses other requests to the same endpoint origin. Retry waits can be cancelled. Permanent client and authorization responses, GraphQL errors, and missing items are returned immediately instead of being retried.
+
+Run **XM Cloud Sync: Show Logs** to open the extension's diagnostic log. It records comparison loading, caching, errors, retry attempts, and cooldown waits without recording client secrets, access tokens, request bodies, or query parameters.
+
+The comparison webview is separated into `media/comparison/comparison.html`, `comparison.css`, and `comparison.js`. The bottom-panel field view lives in `media/fieldDiff`, with its provider in `src/comparison/fieldDiffView.ts`. Extension-host lifecycle and state messaging remain in `src/comparison/comparisonPanel.ts`.
 
 ## Debug during development
 
@@ -30,6 +220,36 @@ If the Authoring API returns identical site records, the extension displays the 
 Set breakpoints in `src/extension.ts`; VS Code uses the generated source maps when debugging.
 
 For continuous compilation, run `npm run watch` in a terminal. You still reload the Extension Development Host after compiled code changes.
+
+## Run tests
+
+```powershell
+npm test
+```
+
+The unit-test harness uses Node's built-in test runner with `tsx` for TypeScript execution. Tests live under `test/unit/`. Current coverage exercises XM Cloud server URL normalization, persisted operation, transfer, and publishing-run validation, item-task manifest parsing, matching, path containment, and input validation, publishing form validation and webview asset contracts, publishing retry and status-recheck transitions, publishing snapshot expectations, version observability, and trace conclusion classification, Raw Experience Edge, rendered-layout, application-response, and Browser DOM observation and result evaluation, Power Publish dependency and repair-batch planning, field-state fingerprints, operation-intent preparation and sequence-runner transitions, Sitecore reference discovery, collapsed Power Publish scope graph planning, Sitecore HTTP transport behavior, and Authoring, Publishing, and Experience Edge client response parsing and validation.
+
+Run `npm run check` to type-check both the extension source and the test suite.
+
+Run the extension-host suite separately:
+
+```powershell
+npm run test:integration
+```
+
+The first integration run downloads VS Code 1.100.0 into `.vscode-test/`, then launches an isolated Extension Development Host against an empty temporary workspace. It verifies activation, contributed-command registration, the default extension configuration, connection and credential persistence, queue and operation-sequence persistence, item-task discovery and isolated JavaScript worker execution, publishing configuration webview messaging and lifecycle, PublishingManager batch execution, restart recovery, diagnostic handoff, failure persistence, and queue recovery, and transfer-processor lifecycle, field-transfer, subtree-checkpoint, and deployment-monitoring behavior without contacting Sitecore. Run `npm run test:all` to execute both unit and extension-host suites.
+
+GitHub Actions runs the complete validation cycle on Windows Server 2025 with Node.js 24 for pull requests and pushes targeting `develop` or `main`. The workflow can also be started manually. It installs the checked-in dependency graph with `npm ci`, type-checks the extension and tests, runs both test suites, and builds the VSIX without publishing it. Successful runs expose `sitecore-xm-cloud-sync.vsix` as a downloadable workflow artifact for 14 days. CI also scans Git history and the packaged extension for secrets with a checksum-verified Gitleaks binary; a finding fails the run.
+
+## Download and release
+
+Download the VSIX from [GitHub Releases](https://github.com/ozrentk/sitecore-sync/releases/latest), then run **Extensions: Install from VSIX…** in VS Code. Install newer release files manually to update. No Marketplace account or publishing is involved.
+
+To publish a version, prepare `release/<version>` from `develop`, align `package.json` and `package-lock.json`, and update `CHANGELOG.md`. Merge into `main` with a non-fast-forward merge, tag that commit `v<version>`, and merge the release branch back into `develop`. Push `main` and `develop` before pushing the tag. The tag must match the package version and its commit must belong to `main`.
+
+A `vMAJOR.MINOR.PATCH` tag push runs the same validation and packaging as CI, including secret scans. Only after all checks pass does a separate job with `contents: write` publish a GitHub Release and attach the tested VSIX. Branch, pull-request, and manually dispatched CI runs only produce temporary artifacts. Existing releases are not overwritten; rerunning a published tag fails at release creation. Fix a failed validation before publishing a new version; do not move published tags.
+
+The workflow uses its built-in GitHub token, so no personal access token or Marketplace credential is required. For a local scan on Windows, run `./scripts/scan-secrets.ps1 -Mode History` and, after packaging, `./scripts/scan-secrets.ps1 -Mode Package`. These scans use redacted output and cannot guarantee detection of every secret format.
 
 ## Build an installable extension
 
@@ -56,3 +276,25 @@ Increase the `version` in `package.json`, run `npm run package`, and install the
 ## Product specification
 
 See `PRODUCT_SPEC.md` in the extension source or run **XM Cloud Sync: Open Product Specification**.
+
+### Exact item navigation
+
+The comparison lookup accepts trimmed GUIDs (compact, dashed, or braced) and absolute Sitecore paths. Enter searches the entire left connection first and uses the right only when the item is absent; connection failures are reported. The input badge updates locally while typing: Go to ID, Go to path, or Search. Other nonempty text performs indexed name search. Lookup preserves connection/language selections and unrelated expansion, loading only ancestor levels needed to reveal the paired row. The default root is `/`; a result outside a narrower displayed root widens that scope to `/` with an inline explanation. Cancel or a newer lookup supersedes pending navigation.
+
+### Public-page URLs
+
+Run **XM Cloud Sync: Configure Public Page URLs** to edit the single application-wide template for every connection and site. Saving requires no connection/site selection or mappings. Supported optional placeholders are `{publicBaseUrl}`, `{deploymentBaseUrl}`, `{language}`, `{country}`, and `{route}`. Language and region are inferred from the selected Sitecore language tag: `en-US` becomes `en` and `US`; `zh-Hant-TW` becomes `zh` and `TW`. A language without a region, such as `en`, leaves country unavailable; omit `{country}` or use an optional override. Existing explicit mappings continue to override inference.
+
+After saving, an optional **Open homepage** action uses route `/` and the current comparison's left connection/language (right when left is unset), with the selected item's site or the configured default. It asks for neither a language nor a path. A skipped or unavailable preview does not undo the saved template. Literal-origin templates can preview without per-site values.
+
+If the template uses `{publicBaseUrl}` or `{deploymentBaseUrl}`, run **XM Cloud Sync: Configure Connection/Site Public URL Values** separately to assign those origins. Alternatively, right-click a connection in **Connections** and choose **Configure Public URL Values…** to skip the connection picker and select its site. The Command Palette entry selects the connection/site whose values are being edited and leaves the global template unchanged. The deployment value can be a configured Vercel origin. Settings `xmCloudSync.publicPageUrlTemplate` and `xmCloudSync.publicPageValues` allow advanced editing, including optional language/country overrides and a default site for ambiguous roots.
+
+**Open public page** uses the clicked comparison side. The Field Diff summaries offer **Open left page** and **Open right page**, with the URL in each tooltip. Opening launches the resolved URL directly in the default browser without an additional confirmation. Field headings show the internal field name alongside a differing display label, so repeated labels remain distinguishable. Pages are recognized from a device layout assignment or a rendering assignment in shared/final presentation fields, including final-layout deltas whose layout is inherited from Standard Values. If Authoring returns neither assignment, page detection is unavailable. Datasources resolve through the nearest page ancestor within their site; shared datasources outside page ancestry are unsupported. Ancestry does not prove exclusive usage. Traced/Power Publish reuse this resolver for their editable initial application URL. Without a template, existing publishing URL behavior is preserved.
+
+Route calculation currently uses the existing Home-relative, slug-based suggestion. Custom routing, aliases and rewrites may require editing the publishing URL or adapting the shared template; automatic Vercel discovery is not performed. Presentation inheritance is described in [Sitecore's layout documentation](https://doc.sitecore.com/xp/en/users/104/sitecore-experience-platform/edit-the-layout-of-an-item.html).
+
+### Indexed name search
+
+Enter other text in the same comparison input to search item names containing that text, using the selected language. Scope is visibly **Entire connection**, independent of the displayed tree root. Results list the name, full path and connection. Left is queried first; only an empty left result set triggers right-side lookup. Selecting a result uses exact navigation on the result's connection. Arrow keys move between results, Enter selects, Escape cancels, and Tab reaches results and Load more. New input, connection/language changes and explicit site/favorite navigation supersede older searches.
+
+Search uses the documented Authoring `search` query on `sitecore_master_index` (`_name` CONTAINS and selected `_language`), with 50 index records per page and at most ten pages. Item IDs are deduplicated across versions. Index freshness and API/index permissions affect results; unsupported or failed queries show an error without scanning the tree or silently falling back to the other connection. See [Sitecore's Authoring search examples](https://doc.sitecore.com/xp/en/developers/103/sitecore-experience-manager/query-examples-for-authoring-operations.html). Refine the query if the 500-record limit is reached.

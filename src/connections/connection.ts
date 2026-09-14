@@ -3,6 +3,8 @@ export interface XmCloudConnection {
   readonly name: string;
   readonly serverUrl: string;
   readonly clientId: string;
+  readonly deploymentClientId?: string;
+  readonly deploymentEnvironmentId?: string;
   readonly createdAt: string;
 }
 

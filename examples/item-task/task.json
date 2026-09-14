@@ -1,0 +1,11 @@
+{
+  "id": "inspect-item",
+  "name": "Inspect item",
+  "description": "Writes a short summary of the selected item to the task log.",
+  "script": "inspect-item.ps1",
+  "matches": {
+    "ancestorPaths": [
+      "/sitecore"
+    ]
+  }
+}

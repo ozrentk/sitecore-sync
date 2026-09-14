@@ -1,0 +1,15 @@
+{
+  "id": "inspect-item-javascript",
+  "name": "Inspect item (JavaScript)",
+  "description": "Reads the selected item and its immediate children through the Authoring API.",
+  "script": "inspect-item.js",
+  "execution": {
+    "type": "javascript"
+  },
+  "matches": {
+    "templateIds": [],
+    "itemIds": [],
+    "parentPaths": [],
+    "ancestorPaths": ["/sitecore"]
+  }
+}

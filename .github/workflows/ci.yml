@@ -1,0 +1,106 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - develop
+      - main
+    tags:
+      - 'v*'
+  pull_request:
+    branches:
+      - develop
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    name: Windows / Node.js 24
+    runs-on: windows-2025
+    timeout-minutes: 30
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Scan Git history for secrets
+        shell: pwsh
+        run: ./scripts/scan-secrets.ps1 -Mode History
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Validate release tag and main ancestry
+        if: startsWith(github.ref, 'refs/tags/')
+        run: node scripts/validate-release.mjs
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Type-check extension and tests
+        run: npm run check
+
+      - name: Run unit tests
+        run: npm run test:unit
+
+      - name: Run extension-host tests
+        run: npm run test:integration
+
+      - name: Build VSIX
+        run: npm run package
+
+      - name: Scan packaged VSIX for secrets
+        shell: pwsh
+        run: ./scripts/scan-secrets.ps1 -Mode Package
+
+      - name: Upload installable VSIX
+        uses: actions/upload-artifact@v7
+        with:
+          path: dist/sitecore-xm-cloud-sync.vsix
+          if-no-files-found: error
+          retention-days: 14
+          archive: false
+
+  release:
+    name: Publish GitHub Release
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')
+    needs: verify
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - name: Download verified VSIX
+        uses: actions/download-artifact@v8
+        with:
+          name: sitecore-xm-cloud-sync.vsix
+          path: dist
+
+      - name: Publish release with installable extension
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_TAG: ${{ github.ref_name }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat > release-notes.md <<'NOTES'
+          Download `sitecore-xm-cloud-sync.vsix` below. In VS Code, run **Extensions: Install from VSIX…**, select the file, and reload when prompted.
+
+          This extension is distributed through GitHub Releases; it is not published to the VS Code Marketplace. Install newer VSIX releases manually to update.
+
+          This asset passed Git-history and package secret scans, type checking, unit tests, and extension-host tests in CI.
+          NOTES
+          gh release create "$RELEASE_TAG" dist/sitecore-xm-cloud-sync.vsix --verify-tag --title "XM Cloud Sync $RELEASE_TAG" --notes-file release-notes.md --generate-notes

@@ -1,6 +1,7 @@
 import * as vscode from "vscode";
 import type { XmCloudConnection } from "./connection";
 import type { ConnectionStore } from "./connectionStore";
+import type { NavigationLoadingState } from "../comparison/comparisonPanel";
 import type { AuthoringSite } from "../sitecore/authoringClient";
 
 export type ConnectionTestStatus = "unknown" | "testing" | "success" | "failure";
@@ -15,10 +16,11 @@ export class ConnectionTreeItem extends vscode.TreeItem {
   constructor(
     readonly connection: XmCloudConnection,
     testState: TestState,
+    favoriteCount: number,
   ) {
     super(
       connection.name,
-      testState.sites?.length
+      testState.sites?.length || favoriteCount
         ? vscode.TreeItemCollapsibleState.Collapsed
         : vscode.TreeItemCollapsibleState.None,
     );
@@ -32,6 +34,9 @@ export class ConnectionTreeItem extends vscode.TreeItem {
     tooltip.appendMarkdown(`**${escapeMarkdown(connection.name)}**\n\n`);
     tooltip.appendMarkdown(`${escapeMarkdown(connection.serverUrl)}\n\n`);
     tooltip.appendMarkdown(`Client ID: \`${escapeMarkdown(connection.clientId)}\``);
+    tooltip.appendMarkdown(
+      `\n\nDeployment monitoring: ${connection.deploymentEnvironmentId ? "configured" : "automatic when permitted"}`,
+    );
     if (testState.message) {
       tooltip.appendMarkdown(`\n\n${escapeMarkdown(testState.message)}`);
     }
@@ -40,11 +45,21 @@ export class ConnectionTreeItem extends vscode.TreeItem {
 }
 
 export class SiteTreeItem extends vscode.TreeItem {
-  constructor(readonly site: AuthoringSite) {
+  constructor(
+    readonly connection: XmCloudConnection,
+    readonly site: AuthoringSite,
+    loading = false,
+  ) {
     super(site.name, vscode.TreeItemCollapsibleState.None);
+    this.id = JSON.stringify(["site", connection.id, site.name, site.rootPath, site.rootItemId]);
     this.description = site.rootPath;
     this.contextValue = "xmCloudSite";
-    this.iconPath = new vscode.ThemeIcon("globe");
+    this.command = {
+      command: "xmCloudSync.openSite",
+      title: "Open Site in Comparison",
+      arguments: [this],
+    };
+    this.iconPath = new vscode.ThemeIcon(loading ? "sync~spin" : "globe");
 
     const tooltip = new vscode.MarkdownString(undefined, true);
     tooltip.appendMarkdown(`**${escapeMarkdown(site.name)}**\n\n`);
@@ -56,7 +71,27 @@ export class SiteTreeItem extends vscode.TreeItem {
   }
 }
 
-type ConnectionNode = ConnectionTreeItem | SiteTreeItem;
+export class FavoriteTreeItem extends vscode.TreeItem {
+  constructor(
+    readonly connection: XmCloudConnection,
+    readonly path: string,
+    loading = false,
+  ) {
+    super(`☆ ${path.split("/").filter(Boolean).at(-1) ?? path}`, vscode.TreeItemCollapsibleState.None);
+    this.id = JSON.stringify(["favorite", connection.id, path]);
+    this.iconPath = loading ? new vscode.ThemeIcon("sync~spin") : undefined;
+    this.description = path;
+    this.contextValue = "xmCloudFavorite";
+    this.tooltip = `${connection.name}\n${path}`;
+    this.command = {
+      command: "xmCloudSync.openFavorite",
+      title: "Open Favorite in Comparison",
+      arguments: [this],
+    };
+  }
+}
+
+type ConnectionNode = ConnectionTreeItem | SiteTreeItem | FavoriteTreeItem;
 
 function iconForStatus(status: ConnectionTestStatus): vscode.ThemeIcon {
   switch (status) {
@@ -79,6 +114,7 @@ export class ConnectionTreeProvider
   implements vscode.TreeDataProvider<ConnectionNode>, vscode.Disposable
 {
   private readonly changeEmitter = new vscode.EventEmitter<ConnectionNode | undefined | void>();
+  private navigationLoading: NavigationLoadingState | undefined;
   private readonly testStates = new Map<string, TestState>();
   private readonly storeSubscription: vscode.Disposable;
 
@@ -93,23 +129,57 @@ export class ConnectionTreeProvider
   }
 
   getChildren(element?: ConnectionNode): ConnectionNode[] {
-    if (element instanceof SiteTreeItem) {
+    if (element instanceof SiteTreeItem || element instanceof FavoriteTreeItem) {
       return [];
     }
 
     if (element instanceof ConnectionTreeItem) {
-      return (this.testStates.get(element.connection.id)?.sites ?? []).map(
-        (site) => new SiteTreeItem(site),
+      const favorites = this.store.listFavoritePaths(element.connection.id).map(
+        (path) => new FavoriteTreeItem(
+          element.connection,
+          path,
+          this.navigationLoading?.source === "favorite" &&
+            this.navigationLoading.connectionId === element.connection.id &&
+            this.navigationLoading.path === path,
+        ),
       );
+      const sites = (
+        this.testStates.get(element.connection.id)?.sites ??
+        this.store.listVerifiedSites(element.connection.id)
+      ).map(
+        (site) => new SiteTreeItem(
+          element.connection,
+          site,
+          this.navigationLoading?.source === "site" &&
+            this.navigationLoading.connectionId === element.connection.id &&
+            this.navigationLoading.path === site.rootPath,
+        ),
+      );
+      return [...favorites, ...sites];
     }
 
-    return this.store.list().map(
-      (connection) =>
-        new ConnectionTreeItem(
-          connection,
-          this.testStates.get(connection.id) ?? { status: "unknown" },
-        ),
-    );
+    return this.store.list().map((connection) => {
+      const storedSites = this.store.listVerifiedSites(connection.id);
+      const testState = this.testStates.get(connection.id) ?? {
+        status: "unknown" as const,
+        sites: storedSites,
+      };
+      return new ConnectionTreeItem(
+        connection,
+        testState,
+        this.store.listFavoritePaths(connection.id).length,
+      );
+    });
+  }
+
+  setNavigationLoading(state: NavigationLoadingState | undefined): void {
+    if (this.navigationLoading?.source === state?.source &&
+        this.navigationLoading?.connectionId === state?.connectionId &&
+        this.navigationLoading?.path === state?.path) {
+      return;
+    }
+    this.navigationLoading = state;
+    this.changeEmitter.fire();
   }
 
   setTestState(
