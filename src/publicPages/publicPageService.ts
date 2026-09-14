@@ -64,16 +64,20 @@ export class PublicPageService {
     });
   }
 
-  async configureValues(): Promise<void> {
+  async configureValues(connectionId?: string): Promise<void> {
     const settings = vscode.workspace.getConfiguration("xmCloudSync");
     const template = settings.get<string>("publicPageUrlTemplate", "");
     if (!/\{(?:publicBaseUrl|deploymentBaseUrl)\}/u.test(template)) {
       await vscode.window.showInformationMessage("The shared template does not use a base URL placeholder, so no connection/site URL values are needed.");
       return;
     }
-    const chosen = await vscode.window.showQuickPick(this.connections.list().map(connection => ({ label: connection.name, description: connection.serverUrl, connection })), { title: "Connection-specific public-page values" });
-    if (!chosen) { return; }
-    const connection = chosen.connection;
+    let connection = connectionId ? this.connections.get(connectionId) : undefined;
+    if (connectionId && !connection) { throw new Error("The selected connection is no longer available."); }
+    if (!connection) {
+      const chosen = await vscode.window.showQuickPick(this.connections.list().map(value => ({ label: value.name, description: value.serverUrl, connection: value })), { title: "Connection-specific public-page values" });
+      if (!chosen) { return; }
+      connection = chosen.connection;
+    }
     const secret = await this.connections.getClientSecret(connection.id);
     if (!secret) { throw new Error("The connection's client secret is missing."); }
     const sites = this.connections.listVerifiedSites(connection.id);

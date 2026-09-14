@@ -17,6 +17,7 @@ interface ExtensionManifest {
     readonly commands?: readonly {
       readonly command?: unknown;
     }[];
+    readonly menus?: Readonly<Record<string, readonly { readonly command?: string; readonly when?: string }[]>>;
   };
 }
 
@@ -26,6 +27,17 @@ interface IntegrationTest {
 }
 
 const integrationTests: readonly IntegrationTest[] = [
+  {
+    name: "exposes public URL configuration on connection context menus",
+    async execute(): Promise<void> {
+      const extension = requireExtension();
+      await extension.activate();
+      const manifest = extension.packageJSON as ExtensionManifest;
+      const entries = manifest.contributes?.menus?.["view/item/context"] ?? [];
+      const entry = entries.find(value => value.command === "xmCloudSync.configurePublicPageValues");
+      strictEqual(entry?.when, "view == xmCloudSync.connections && viewItem == xmCloudConnection");
+    },
+  },
   {
     name: "activates the extension in an empty workspace",
     async execute(): Promise<void> {
