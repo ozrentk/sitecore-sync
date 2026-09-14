@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.20.1
+
+- Show internal field names alongside differing labels in comparison and Field Diff to distinguish repeated labels.
+- Recognize public pages from final-layout rendering assignments when the layout ID is inherited from Standard Values and absent from the returned fields.
+- Clarify that failed page detection can reflect missing inherited presentation, rather than necessarily a shared datasource.
+
 ## 0.20.0
 
 - Offer optional shared URL-template setup after adding a connection when no shared template exists, with an explicit Not now action.

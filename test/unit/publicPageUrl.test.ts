@@ -25,10 +25,42 @@ test("effective inherited layout identifies pages and resolves nearest owning pa
   const target = await resolvePublicPage("{publicBaseUrl}/{country}/{route}", { sites: { site: values } }, [site], item(`${page.path}/Data/Text`), "en-CA", async path => { requested.push(path); return path === page.path ? page : item(path); }, new AbortController().signal);
   strictEqual(target.url, "https://public.example/ca/article");
   strictEqual(requested.length, 2);
-  await rejects(resolvePublicPage("{publicBaseUrl}{route}", { sites: { site: values } }, [site], item(`${site.rootPath}/Data/Shared`), "en", async path => item(path), new AbortController().signal), /No owning page/);
+  await rejects(resolvePublicPage("{publicBaseUrl}{route}", { sites: { site: values } }, [site], item(`${site.rootPath}/Data/Shared`), "en", async path => item(path), new AbortController().signal), /No page presentation/);
   await rejects(resolvePublicPage("{publicBaseUrl}{route}", {}, [site], page, "en", async () => { throw new Error("offline"); }, AbortSignal.abort()), /abort/i);
   await rejects(resolvePublicPage("{publicBaseUrl}{route}", {}, [site, { ...site, name: "another" }], page, "en", async path => item(path), new AbortController().signal), /Several sites/);
   await rejects(resolvePublicPage("{publicBaseUrl}{route}", {}, [site], item(`${page.path}/Data/Text`), "en", async () => { throw new Error("offline"); }, new AbortController().signal), /offline/);
+});
+
+test("final-layout delta identifies the selected page without returned shared layout", async () => {
+  const site = { name: "site", rootPath: "/sitecore/content/Example/global" };
+  const base = item(`${site.rootPath}/home/50 States 50 Trails`, true);
+  const page = { ...base, fields: [{ ...base.fields[0], name: "__Final Renderings", value:
+    '<r xmlns:p="p" xmlns:s="s" p:p="1"><d id="{11111111-1111-1111-1111-111111111111}">' +
+    '<r uid="{22222222-2222-2222-2222-222222222222}"><p:d /></r>' +
+    '<r uid="{33333333-3333-3333-3333-333333333333}" p:before="*" s:ds="{44444444-4444-4444-4444-444444444444}" s:id="{55555555-5555-5555-5555-555555555555}" s:ph="/main/content" />' +
+    '</d></r>' }] };
+  strictEqual(hasPagePresentation(page), true);
+  const target = await resolvePublicPage("https://example.test{route}", {}, [site], page, "en-US",
+    async () => { throw new Error("Selected page must resolve without walking ancestors"); }, new AbortController().signal);
+  strictEqual(target.page, page);
+  strictEqual(target.url, "https://example.test/50-states-50-trails");
+  const datasource = await resolvePublicPage("https://example.test{route}", {}, [site], item(`${page.path}/Data/Text`), "en-US",
+    async path => path === page.path ? page : item(path), new AbortController().signal);
+  strictEqual(datasource.page, page);
+});
+
+test("presentation detection excludes empty, deletion-only and unrelated fields", () => {
+  const base = item("/sitecore/content/Site/home/Page", true);
+  const guid = "{11111111-1111-1111-1111-111111111111}";
+  for (const value of ["", "<r />", `<r><d id="${guid}" /></r>`,
+    `<r><d id="${guid}"><r uid="${guid}"><p:d /></r></d></r>`,
+    '<r><d><r s:id="invalid" /></d></r>', `<r id="${guid}" />`]) {
+    strictEqual(hasPagePresentation({ ...base, fields: [{ ...base.fields[0], name: "__Final Renderings", value }] }), false);
+  }
+  strictEqual(hasPagePresentation({ ...base, fields: [{ ...base.fields[0], name: "Text" }] }), false);
+  for (const value of [`<r><d s:l="${guid}" /></r>`, `<r><d><r id="${guid}" /></d></r>`]) {
+    strictEqual(hasPagePresentation({ ...base, fields: [{ ...base.fields[0], value }] }), true);
+  }
 });
 
 

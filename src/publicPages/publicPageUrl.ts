@@ -89,10 +89,16 @@ function safeUrl(value: string): URL {
 }
 
 export function hasPagePresentation(item: AuthoringItemDetails): boolean {
-  // Authoring fields include effective inherited and Standard Values. Require an actual
-  // device layout assignment; a rendering-only delta is not enough to classify a page.
-  return item.fields.some(field => ["__renderings", "__final renderings"].includes(field.name.toLowerCase()) &&
-    /\bl\s*=\s*["']\{?[a-f0-9]{8}(?:-?[a-f0-9]{4}){3}-?[a-f0-9]{12}\}?["']/iu.test(field.value));
+  // Authoring can return a final-layout delta without the layout assignment inherited
+  // from Standard Values. A rendering assignment is also presentation evidence;
+  // device IDs and rendering UIDs alone (including deletion patches) are not.
+  return item.fields.some(field => {
+    if (!["__renderings", "__final renderings"].includes(field.name.toLowerCase())) { return false; }
+    const layout = /<d\b[^>]*\s(?:s:)?l\s*=\s*["']\{?[a-f0-9]{8}(?:-?[a-f0-9]{4}){3}-?[a-f0-9]{12}\}?["']/iu;
+    const rendering = /<r\b[^>]*\s(?:s:)?id\s*=\s*["']\{?[a-f0-9]{8}(?:-?[a-f0-9]{4}){3}-?[a-f0-9]{12}\}?["']/iu;
+    return layout.test(field.value) || [...field.value.matchAll(/<d\b[^>]*>([\s\S]*?)<\/d\s*>/giu)]
+      .some(device => rendering.test(device[1]));
+  });
 }
 
 export async function resolvePublicPage(
@@ -120,7 +126,7 @@ export async function resolvePublicPage(
     if (parent === page.path || !isWithinPath(parent, site.rootPath)) { break; }
     page = await loadPath(parent);
   }
-  throw new Error("No owning page with presentation was found in this site's ancestry. Shared datasources outside page ancestry cannot be opened.");
+  throw new Error("No page presentation was detected on this item or its ancestors within the site. Presentation inherited from Standard Values may not be returned by Authoring. Shared datasources outside page ancestry are unsupported.");
 }
 
 export function parsePublicPageConnectionValues(value: unknown): PublicPageConnectionValues {
