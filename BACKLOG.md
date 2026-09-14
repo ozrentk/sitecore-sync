@@ -2,7 +2,7 @@
 
 Consolidated planning inventory as of 2026-09-14, reviewed against version 0.20.0. Unchecked entries are outstanding, not a commitment to implement them in this order. Product requirements remain in [PRODUCT_SPEC.md](PRODUCT_SPEC.md); completed release details are in [CHANGELOG.md](CHANGELOG.md).
 
-Status: B01–B06 are explicit TODOs; B07–B15 are deferred enhancements; B16 is a known limitation; B17 is documentation cleanup. Grouping does not change their priority or scope.
+Status: B01–B06 are explicit TODOs; B07–B15 are deferred enhancements; B16 is a known limitation; B17 is documentation cleanup; B18 is an initial idea requiring planning. Grouping does not change their priority or scope.
 
 ## Publishing and delivery verification
 
@@ -26,6 +26,7 @@ Status: B01–B06 are explicit TODOs; B07–B15 are deferred enhancements; B16 i
 - [ ] **B07 — Specific item-version selection.** Allow comparison of selected numbered versions instead of only the latest version in each selected language.
 - [ ] **B08 — Expand All size preflight.** Estimate unique left/right subtree items without materializing the webview tree. Support cancellation and either an exact count or a configurable warning threshold before expansion.
 - [ ] **B10 — ID-first/path-fallback comparison identity.** Add an alternative identity mode for matching items between environments. This is separate from the completed ID/path navigation feature.
+- [ ] **B18 — Single-tree browsing mode (idea; needs planning).** Show one connection's content tree using the same visual style and navigation behavior as the existing comparison tree, without a second tree or difference indicators. Expose only actions meaningful for a single tree. This records an exploratory requirement, not an approved implementation plan. Planning should decide how users enter this mode and switch to comparison, which connection/language/root and navigation state are retained, how single-item fields are presented, and the exact action set. Candidate actions for discussion include expand/refresh, ID/path lookup and name search, favorites, item details, public-page navigation, publishing and item task plug-ins; cross-connection diff and transfer actions do not belong in this mode. Direct field editing is not implied by this idea.
 
 ## Transfers and synchronization
 
