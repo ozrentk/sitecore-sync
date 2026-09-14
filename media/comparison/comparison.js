@@ -1803,8 +1803,8 @@ function comparisonLanguageKey() {
 
 function updateLanguageSwitchStatus() {
   const pending = state.languageSwitch;
-  languageSwitchStatus.hidden = !pending;
-  languageSwitchStatusRight.hidden = !pending;
+  languageSwitchStatus.hidden = !pending || pending.previous.trees.left.language === state.selection.leftLanguage;
+  languageSwitchStatusRight.hidden = !pending || pending.previous.trees.right.language === state.selection.rightLanguage;
   workspace.setAttribute("aria-busy", String(Boolean(pending)));
   if (!pending) {
     return;
