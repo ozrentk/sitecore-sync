@@ -2,13 +2,17 @@ import { deepStrictEqual, strictEqual } from "node:assert/strict";
 import * as vscode from "vscode";
 import { ComparisonPanelManager } from "../../src/comparison/comparisonPanel";
 import type { XmCloudConnection } from "../../src/connections/connection";
-import type { AuthoringLanguage } from "../../src/sitecore/authoringClient";
+import type {
+  AuthoringLanguage,
+  AuthoringTreeLevel,
+} from "../../src/sitecore/authoringClient";
 import { MemoryMemento, type IntegrationTest } from "./testSupport";
 
 const selectionKey = "sitecoreXmCloudSync.comparisonSelection.v1";
 
 interface ComparisonPanelHarness {
   handleMessage(message: unknown): Promise<void>;
+  openFavorite(connectionId: string, path: string): Promise<void>;
   loadAndPostItemIcons(
     side: "left" | "right",
     connectionId: string,
@@ -84,6 +88,109 @@ export const comparisonPanelTests: readonly IntegrationTest[] = [{
     } finally {
       stateEmitter.dispose();
     }
+  },
+}, {
+  name: "newer favorite navigation supersedes an older in-flight reveal",
+  async execute(): Promise<void> {
+    const left = connection("left", "Left");
+    const firstPath = "/sitecore/content/First";
+    const secondPath = "/sitecore/content/Second";
+    const revealAttempts = new Map<string, number>();
+    const navigationStarts: Array<Record<string, unknown>> = [];
+    const loadedLevels: Array<Record<string, unknown>> = [];
+    let sitecoreLevelCalls = 0;
+    let reportFirstAncestor: (() => void) | undefined;
+    let releaseFirstAncestor: (() => void) | undefined;
+    const firstAncestorStarted = new Promise<void>((resolve) => {
+      reportFirstAncestor = resolve;
+    });
+    const firstAncestor = new Promise<AuthoringTreeLevel>((resolve) => {
+      releaseFirstAncestor = () => resolve(treeLevel("/sitecore", "stale-item"));
+    });
+    const manager = Object.create(
+      ComparisonPanelManager.prototype,
+    ) as unknown as ComparisonPanelHarness;
+    Object.assign(manager, {
+      panel: {
+        reveal: () => undefined,
+        webview: {
+          postMessage: async (message: Record<string, unknown>) => {
+            if (message.type === "favoriteNavigationStarted") {
+              navigationStarts.push(message);
+            } else if (message.type === "treeLoaded") {
+              loadedLevels.push(message);
+            } else if (
+              message.type === "tryRevealFavorite" &&
+              typeof message.requestId === "string" &&
+              typeof message.path === "string"
+            ) {
+              const attempt = (revealAttempts.get(message.path) ?? 0) + 1;
+              revealAttempts.set(message.path, attempt);
+              setImmediate(() => {
+                void manager.handleMessage({
+                  type: "favoriteRevealResult",
+                  requestId: message.requestId,
+                  navigationId: message.navigationId,
+                  found: attempt > 1,
+                });
+              });
+            }
+            return true;
+          },
+        },
+      },
+      workspaceState: new MemoryMemento({
+        [selectionKey]: {
+          leftConnectionId: left.id,
+          leftLanguage: "en",
+        },
+      }),
+      connectionStore: {
+        list: () => [left],
+        get: (id: string) => id === left.id ? left : undefined,
+      },
+      getTreeLevel: async (
+        _connectionId: string,
+        _language: string,
+        locator: { readonly path?: string },
+      ) => {
+        if (locator.path === "/sitecore") {
+          sitecoreLevelCalls += 1;
+          if (sitecoreLevelCalls === 1) {
+            reportFirstAncestor?.();
+            return firstAncestor;
+          }
+        }
+        return treeLevel(locator.path ?? secondPath);
+      },
+      loadAndPostItemIcons: async () => undefined,
+      log: { debug: () => undefined, warn: () => undefined },
+      pendingFavoriteReveal: new Map(),
+      nextFavoriteRevealId: 1,
+      favoriteNavigationGeneration: 0,
+    });
+
+    const firstNavigation = manager.openFavorite(left.id, firstPath);
+    await firstAncestorStarted;
+    await manager.openFavorite(left.id, secondPath);
+    releaseFirstAncestor?.();
+    await firstNavigation;
+
+    deepStrictEqual(navigationStarts.map((message) => ({
+      navigationId: message.navigationId,
+      path: message.path,
+    })), [{
+      navigationId: 1,
+      path: firstPath,
+    }, {
+      navigationId: 2,
+      path: secondPath,
+    }]);
+    strictEqual(revealAttempts.get(firstPath), 1);
+    strictEqual(revealAttempts.get(secondPath), 2);
+    strictEqual(loadedLevels.some((message) => (
+      message.level as AuthoringTreeLevel | undefined
+    )?.item.itemId === "stale-item"), false);
   },
 }, {
   name: "loads comparison item icons once and reuses the bounded caches",
@@ -319,4 +426,17 @@ function connection(id: string, name: string): XmCloudConnection {
 
 function language(name: string): AuthoringLanguage {
   return { name, displayName: name, englishName: name, nativeName: name };
+}
+
+function treeLevel(path: string, itemId = `{${path}}`): AuthoringTreeLevel {
+  return {
+    item: {
+      itemId,
+      path,
+      name: path.split("/").at(-1) ?? path,
+      displayName: path.split("/").at(-1) ?? path,
+      hasChildren: false,
+    },
+    children: [],
+  };
 }

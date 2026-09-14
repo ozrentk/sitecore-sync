@@ -41,6 +41,9 @@ test("comparison webview assets preserve language-lock and item-icon contracts",
   match(script, /languageLock\.checked = state\.selection\.languagesLocked === true/);
   match(script, /message\?\.type === "itemIconsLoaded"/);
   match(script, /message\?\.type === "itemIconsReset"/);
+  match(script, /message\?\.type === "favoriteNavigationStarted"/);
+  match(script, /message\.navigationId === state\.favoriteNavigationId/);
+  match(script, /scheduleItemIconRender\(\)/);
   match(script, /isItemIconDataUri\(icon\.dataUri\)/);
   match(script, /createFallbackItemIcon\(\)/);
   match(style, /\.item-icon\.fallback/);
