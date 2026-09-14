@@ -35,10 +35,13 @@
       <button id="language-switch-retry-right" type="button" hidden>Retry</button>
     </div>
     <form id="item-navigation" class="item-navigation" title="Search the entire connection, regardless of displayed root. Look on the left first; use the right only when no left match exists.">
-      <input id="item-navigation-input" aria-label="Go to item ID or absolute path" placeholder="Item ID or /sitecore/path (name search coming later)" maxlength="2048">
+      <input id="item-navigation-input" aria-label="Find an item by ID, path or name" placeholder="Item ID, /sitecore/path or name" maxlength="2048">
       <button id="item-navigation-mode" type="submit">Go to ID / path</button>
       <button id="item-navigation-cancel" type="button" hidden>Cancel</button>
+      <span class="navigation-scope">Entire connection</span>
       <span id="item-navigation-status" role="status"></span>
+      <div id="item-navigation-results" class="navigation-results" aria-label="Matching items" hidden></div>
+      <button id="item-navigation-more" type="button" hidden>Load more</button>
     </form>
   </header>
   <main id="workspace" class="workspace" aria-live="polite"></main>

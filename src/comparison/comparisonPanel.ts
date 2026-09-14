@@ -65,6 +65,7 @@ interface ComparisonSelection {
 }
 
 interface WebviewMessage {
+  readonly searchRequestId?: unknown;
   readonly query?: unknown;
   readonly roots?: unknown;
   readonly comparisonKey?: unknown;
@@ -113,6 +114,20 @@ interface FavoriteNavigation {
   readonly side: TreeSide;
 }
 
+interface ItemSearchSession {
+  readonly requestId: string;
+  readonly query: string;
+  readonly side: TreeSide;
+  readonly connectionId: string;
+  readonly language: string;
+  readonly generation: number;
+  readonly controller: AbortController;
+  readonly items: Map<string, AuthoringTreeItem>;
+  page: number;
+  hasMore: boolean;
+  loading: boolean;
+}
+
 interface RefreshPlanEntry {
   readonly itemId: string;
   readonly path: string;
@@ -159,6 +174,7 @@ class FieldDiffContentProvider implements vscode.TextDocumentContentProvider {
 }
 
 export class ComparisonPanelManager implements vscode.Disposable {
+  private itemSearchSession: ItemSearchSession | undefined;
   private publicPageController: AbortController | undefined;
   private lookupController: AbortController | undefined;
   private panel: vscode.WebviewPanel | undefined;
@@ -831,7 +847,20 @@ export class ComparisonPanelManager implements vscode.Disposable {
       if (!this.pendingLanguageView) { await this.openPublicPage(message.side, message.itemId); }
       return;
     }
+    if (message.type === "moreItemResults" && message.requestId === this.itemSearchSession?.requestId) {
+      await this.loadMoreItemResults();
+      return;
+    }
+    if (message.type === "revealItemResult" && typeof message.itemId === "string" && typeof message.requestId === "string") {
+      const session = this.itemSearchSession;
+      const item = session?.items.get(normalizeTransferId(message.itemId));
+      if (session && message.searchRequestId === session.requestId && item && !session.controller.signal.aborted && session.generation === this.favoriteNavigationGeneration) {
+        await this.navigateItem(item.path, message.requestId, message.roots, session.side);
+      }
+      return;
+    }
     if (message.type === "cancelItemLookup") {
+      this.itemSearchSession = undefined;
       this.lookupController?.abort();
       this.favoriteNavigationGeneration += 1;
       this.resolvePendingFavoriteReveals(false);
@@ -1254,7 +1283,7 @@ export class ComparisonPanelManager implements vscode.Disposable {
       await vscode.window.showErrorMessage("Both comparison connections are required for transfer.");
       return;
     }
-    if (sourcePath.replace(/\/$/u, "").toLowerCase() === authoringRootPath) {
+    if (["", authoringRootPath].includes(sourcePath.replace(/\/$/u, "").toLowerCase())) {
       await vscode.window.showInformationMessage(
         "The complete /sitecore root cannot be synchronized as one subtree.",
       );
@@ -2039,7 +2068,57 @@ export class ComparisonPanelManager implements vscode.Disposable {
     );
   }
 
-  private async navigateItem(query: string, requestId: string, roots: unknown): Promise<void> {
+  private async searchItems(query: string, requestId: string, generation: number, controller: AbortController): Promise<void> {
+    const selection = this.getSelection();
+    for (const side of ["left", "right"] as const) {
+      const connectionId = selection[`${side}ConnectionId`];
+      if (!connectionId) { continue; }
+      const connection = this.connectionStore.get(connectionId);
+      const secret = await this.connectionStore.getClientSecret(connectionId);
+      if (!connection || !secret) { throw new Error("The connection or its client secret is unavailable."); }
+      const result = await this.authoringClient.searchItemsByName(connection, secret, query, selection[`${side}Language`], 0, controller.signal);
+      if (controller.signal.aborted || generation !== this.favoriteNavigationGeneration) { return; }
+      if (!result.items.length && result.totalCount === 0) { continue; }
+      const session: ItemSearchSession = { requestId, query, side, connectionId, language: selection[`${side}Language`], generation, controller, items: new Map(), page: 0, hasMore: result.hasMore, loading: false };
+      this.itemSearchSession = session;
+      await this.postItemSearchResults(session, result, false);
+      return;
+    }
+    if (!controller.signal.aborted && generation === this.favoriteNavigationGeneration) {
+      await this.panel?.webview.postMessage({ type: "itemLookupStatus", requestId, text: "No matching item names on either selected connection." });
+    }
+  }
+
+  private async loadMoreItemResults(): Promise<void> {
+    const session = this.itemSearchSession;
+    if (!session || session.loading || !session.hasMore || session.controller.signal.aborted || session.generation !== this.favoriteNavigationGeneration) { return; }
+    session.loading = true;
+    try {
+      const connection = this.connectionStore.get(session.connectionId);
+      const secret = await this.connectionStore.getClientSecret(session.connectionId);
+      if (!connection || !secret) { throw new Error("The connection or its client secret is unavailable."); }
+      const result = await this.authoringClient.searchItemsByName(connection, secret, session.query, session.language, session.page + 1, session.controller.signal);
+      if (this.itemSearchSession !== session || session.controller.signal.aborted || session.generation !== this.favoriteNavigationGeneration) { return; }
+      session.page += 1;
+      await this.postItemSearchResults(session, result, true);
+    } catch (error: unknown) {
+      if (this.itemSearchSession === session && !session.controller.signal.aborted) {
+        await this.panel?.webview.postMessage({ type: "itemSearchError", requestId: session.requestId, text: `Could not load more results: ${errorMessage(error)}` });
+      }
+    } finally { session.loading = false; }
+  }
+
+  private async postItemSearchResults(session: ItemSearchSession, result: { readonly items: readonly AuthoringTreeItem[]; readonly totalCount: number; readonly hasMore: boolean }, append: boolean): Promise<void> {
+    const items = result.items.filter(item => !session.items.has(normalizeTransferId(item.itemId)));
+    items.forEach(item => session.items.set(normalizeTransferId(item.itemId), item));
+    session.hasMore = result.hasMore;
+    await this.panel?.webview.postMessage({ type: "itemSearchResults", requestId: session.requestId, append, items,
+      connectionName: this.connectionStore.get(session.connectionId)?.name ?? session.side, side: session.side,
+      hasMore: result.hasMore, text: `${session.items.size} item(s) · Entire connection · ${session.language}${session.page === 9 && result.totalCount > 500 ? " · Limit reached; refine the name." : ""}` });
+  }
+
+  private async navigateItem(query: string, requestId: string, roots: unknown, resultSide?: TreeSide): Promise<void> {
+    this.itemSearchSession = undefined;
     this.lookupController?.abort();
     const controller = new AbortController();
     this.lookupController = controller;
@@ -2052,10 +2131,13 @@ export class ComparisonPanelManager implements vscode.Disposable {
     const input = classifyNavigationInput(query);
     if (input.kind === "empty") { await status(""); return; }
     if (input.kind === "invalid") { await status(input.message); return; }
-    if (input.kind === "name") { await status("Name search is coming later. Enter an item ID or absolute path."); return; }
     try {
+      if (input.kind === "name") {
+        await this.searchItems(input.text, requestId, generation, controller);
+        return;
+      }
       const selection = this.getSelection();
-      for (const side of ["left", "right"] as const) {
+      for (const side of resultSide ? [resultSide] : ["left", "right"] as const) {
         const connectionId = selection[`${side}ConnectionId`];
         if (!connectionId) { continue; }
         let level: AuthoringTreeLevel;
@@ -2084,7 +2166,7 @@ export class ComparisonPanelManager implements vscode.Disposable {
       }
       await status("Item not found on either selected connection.");
     } catch (error: unknown) {
-      await status(`Unable to navigate: ${errorMessage(error)}`);
+      await status(`${input.kind === "name" ? "Indexed name search unavailable" : "Unable to navigate"}: ${errorMessage(error)}`);
     }
   }
 
@@ -2109,6 +2191,7 @@ export class ComparisonPanelManager implements vscode.Disposable {
     }
     await this.panel.webview.postMessage({
       type: "favoriteNavigationStarted",
+      source: navigation.source,
       navigationId: navigation.navigationId,
       side: navigation.side,
       path: navigation.path,
@@ -2792,7 +2875,25 @@ export class ComparisonPanelManager implements vscode.Disposable {
       if (selected !== this.selectedFieldDiffItem || !this.fieldDiffViewProvider.visible) {
         return;
       }
+      const snapshot = {
+        ...selected,
+        leftConnectionName: selection.leftConnectionId
+          ? this.connectionStore.get(selection.leftConnectionId)?.name
+          : undefined,
+        rightConnectionName: selection.rightConnectionId
+          ? this.connectionStore.get(selection.rightConnectionId)?.name
+          : undefined,
+        leftDetails,
+        rightDetails,
+        leftError,
+        rightError,
+        textNormalization: vscode.workspace
+          .getConfiguration("xmCloudSync")
+          .get<"none" | "lineEndings">("textNormalization", "none"),
+      };
+      await this.fieldDiffViewProvider.showSnapshot(snapshot);
       const service = new PublicPageService(this.connectionStore, this.authoringClient);
+      if (!service.configured) { return; }
       const controller = new AbortController();
       this.publicPageController = controller;
       this.requestControllers.add(controller);
@@ -2811,20 +2912,7 @@ export class ComparisonPanelManager implements vscode.Disposable {
         rightPublicPageUrl: pages[1].status === "fulfilled" ? pages[1].value?.url : undefined,
         leftPublicPageError: pages[0].status === "rejected" ? errorMessage(pages[0].reason) : undefined,
         rightPublicPageError: pages[1].status === "rejected" ? errorMessage(pages[1].reason) : undefined,
-        ...selected,
-        leftConnectionName: selection.leftConnectionId
-          ? this.connectionStore.get(selection.leftConnectionId)?.name
-          : undefined,
-        rightConnectionName: selection.rightConnectionId
-          ? this.connectionStore.get(selection.rightConnectionId)?.name
-          : undefined,
-        leftDetails,
-        rightDetails,
-        leftError,
-        rightError,
-        textNormalization: vscode.workspace
-          .getConfiguration("xmCloudSync")
-          .get<"none" | "lineEndings">("textNormalization", "none"),
+        ...snapshot,
       });
     } catch (error: unknown) {
       if (selected === this.selectedFieldDiffItem) {

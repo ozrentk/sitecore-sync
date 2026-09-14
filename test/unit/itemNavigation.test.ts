@@ -9,7 +9,7 @@ test("navigation recognizes exact GUID forms and paths, rejecting malformed IDs"
   deepStrictEqual(classifyNavigationInput(" /sitecore/content/ "), { kind: "path", locator: { path: "/sitecore/content" } });
   strictEqual(classifyNavigationInput("  ").kind, "empty");
   strictEqual(classifyNavigationInput("Vehicle Prices").kind, "name");
-  for (const value of ["{bad-id}", "0123456789abcdef0123456789abcde", "/sitecore/../x", "x".repeat(2049)]) {
+  for (const value of ["01234567-89ab-cdef-0123-456789abcdeg", "{bad-id}", "0123456789abcdef0123456789abcde", "/sitecore/../x", "x".repeat(2049)]) {
     strictEqual(classifyNavigationInput(value).kind, "invalid");
   }
   strictEqual(isWithinPath("/sitecore/content", "/"), true);

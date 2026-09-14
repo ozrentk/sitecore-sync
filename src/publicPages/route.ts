@@ -41,4 +41,3 @@ function slugSegment(value: string): string {
     .replace(/[^\p{Letter}\p{Number}]+/gu, "-")
     .replace(/^-+|-+$/gu, "");
 }
-
