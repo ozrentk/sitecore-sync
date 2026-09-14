@@ -239,7 +239,17 @@ npm run test:integration
 
 The first integration run downloads VS Code 1.100.0 into `.vscode-test/`, then launches an isolated Extension Development Host against an empty temporary workspace. It verifies activation, contributed-command registration, the default extension configuration, connection and credential persistence, queue and operation-sequence persistence, item-task discovery and isolated JavaScript worker execution, publishing configuration webview messaging and lifecycle, PublishingManager batch execution, restart recovery, diagnostic handoff, failure persistence, and queue recovery, and transfer-processor lifecycle, field-transfer, subtree-checkpoint, and deployment-monitoring behavior without contacting Sitecore. Run `npm run test:all` to execute both unit and extension-host suites.
 
-GitHub Actions runs the complete validation cycle on Windows Server 2025 with Node.js 24 for pull requests and pushes targeting `develop` or `main`. The workflow can also be started manually. It installs the checked-in dependency graph with `npm ci`, type-checks the extension and tests, runs both test suites, and builds the VSIX without publishing it. Successful runs expose `sitecore-xm-cloud-sync.vsix` as a downloadable workflow artifact for 14 days.
+GitHub Actions runs the complete validation cycle on Windows Server 2025 with Node.js 24 for pull requests and pushes targeting `develop` or `main`. The workflow can also be started manually. It installs the checked-in dependency graph with `npm ci`, type-checks the extension and tests, runs both test suites, and builds the VSIX without publishing it. Successful runs expose `sitecore-xm-cloud-sync.vsix` as a downloadable workflow artifact for 14 days. CI also scans Git history and the packaged extension for secrets with a checksum-verified Gitleaks binary; a finding fails the run.
+
+## Download and release
+
+Download the VSIX from [GitHub Releases](https://github.com/ozrentk/sitecore-sync/releases/latest), then run **Extensions: Install from VSIX…** in VS Code. Install newer release files manually to update. No Marketplace account or publishing is involved.
+
+To publish a version, prepare `release/<version>` from `develop`, align `package.json` and `package-lock.json`, and update `CHANGELOG.md`. Merge into `main` with a non-fast-forward merge, tag that commit `v<version>`, and merge the release branch back into `develop`. Push `main` and `develop` before pushing the tag. The tag must match the package version and its commit must belong to `main`.
+
+A `vMAJOR.MINOR.PATCH` tag push runs the same validation and packaging as CI, including secret scans. Only after all checks pass does a separate job with `contents: write` publish a GitHub Release and attach the tested VSIX. Branch, pull-request, and manually dispatched CI runs only produce temporary artifacts. Existing releases are not overwritten; rerunning a published tag fails at release creation. Fix a failed validation before publishing a new version; do not move published tags.
+
+The workflow uses its built-in GitHub token, so no personal access token or Marketplace credential is required. For a local scan on Windows, run `./scripts/scan-secrets.ps1 -Mode History` and, after packaging, `./scripts/scan-secrets.ps1 -Mode Package`. These scans use redacted output and cannot guarantee detection of every secret format.
 
 ## Build an installable extension
 
