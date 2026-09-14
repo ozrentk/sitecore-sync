@@ -91,6 +91,11 @@ interface WebviewMessage {
   readonly rightHasChildren?: unknown;
 }
 
+export interface FavoriteLoadingState {
+  readonly connectionId: string;
+  readonly path: string;
+}
+
 interface FavoriteNavigation {
   readonly source: "favorite" | "site";
   readonly navigationId: number;
@@ -164,6 +169,10 @@ export class ComparisonPanelManager implements vscode.Disposable {
   private readonly pendingSubtreeConfirmations = new Set<string>();
   private readonly copyingFieldIds = new Set<string>();
   private readonly fieldDiffProvider = new FieldDiffContentProvider();
+  private readonly favoriteLoadingEmitter = new vscode.EventEmitter<FavoriteLoadingState | undefined>();
+  private activeFavoriteNavigation: FavoriteNavigation | undefined;
+  readonly onDidChangeFavoriteLoading = this.favoriteLoadingEmitter.event;
+
   private readonly comparisonStateEmitter = new vscode.EventEmitter<void>();
   private readonly pendingFavoriteReveal = new Map<string, (found: boolean) => void>();
   private connectionSignature: string;
@@ -438,16 +447,21 @@ export class ComparisonPanelManager implements vscode.Disposable {
     }
     await this.saveSelection(selection);
     const navigation = this.beginFavoriteNavigation(favoriteConnectionId, path, "left");
-    if (!this.panel) {
-      this.pendingFavoriteNavigation = navigation;
-      await this.open();
-      return;
-    }
+    try {
+      if (!this.panel) {
+        this.pendingFavoriteNavigation = navigation;
+        await this.open();
+        return;
+      }
 
-    this.panel.reveal(vscode.ViewColumn.Active);
-    await this.postState();
-    await this.loadInitialTrees();
-    await this.navigateToFavorite(navigation);
+      this.panel.reveal(vscode.ViewColumn.Active);
+      await this.postState();
+      await this.loadInitialTrees();
+      await this.navigateToFavorite(navigation);
+    } catch (error: unknown) {
+      this.finishFavoriteNavigation(navigation);
+      throw error;
+    }
   }
 
   async refreshAll(): Promise<boolean> {
@@ -780,12 +794,18 @@ export class ComparisonPanelManager implements vscode.Disposable {
 
   private async handleMessage(message: WebviewMessage): Promise<void> {
     if (message.type === "ready") {
-      await this.postState();
-      await this.loadInitialTrees();
       const navigation = this.pendingFavoriteNavigation;
       this.pendingFavoriteNavigation = undefined;
-      if (navigation) {
-        await this.navigateToFavorite(navigation);
+      try {
+        await this.postState();
+        await this.loadInitialTrees();
+        if (navigation) {
+          await this.navigateToFavorite(navigation);
+        }
+      } finally {
+        if (navigation) {
+          this.finishFavoriteNavigation(navigation);
+        }
       }
       return;
     }
@@ -1935,6 +1955,21 @@ export class ComparisonPanelManager implements vscode.Disposable {
   }
 
   private async navigateToFavorite(navigation: FavoriteNavigation): Promise<void> {
+    try {
+      await this.revealFavoriteNavigation(navigation);
+    } finally {
+      this.finishFavoriteNavigation(navigation);
+    }
+  }
+
+  private finishFavoriteNavigation(navigation = this.activeFavoriteNavigation): void {
+    if (navigation && this.activeFavoriteNavigation === navigation) {
+      this.activeFavoriteNavigation = undefined;
+      this.favoriteLoadingEmitter.fire(undefined);
+    }
+  }
+
+  private async revealFavoriteNavigation(navigation: FavoriteNavigation): Promise<void> {
     if (!this.panel || !this.isCurrentFavoriteNavigation(navigation)) {
       return;
     }
@@ -1997,6 +2032,7 @@ export class ComparisonPanelManager implements vscode.Disposable {
       if (!this.isCurrentFavoriteNavigation(navigation)) {
         return;
       }
+      this.finishFavoriteNavigation(navigation);
       const message = errorMessage(error);
       this.log.warn(
         `Unable to open ${navigation.source} ${navigation.path} on connection ${navigation.connectionId}: ${message}`,
@@ -2099,13 +2135,16 @@ export class ComparisonPanelManager implements vscode.Disposable {
   ): FavoriteNavigation {
     this.favoriteNavigationGeneration += 1;
     this.resolvePendingFavoriteReveals(false);
-    return {
+    const navigation: FavoriteNavigation = {
       navigationId: this.favoriteNavigationGeneration,
       source,
       connectionId,
       path,
       side,
     };
+    this.activeFavoriteNavigation = navigation;
+    this.favoriteLoadingEmitter.fire(source === "favorite" ? { connectionId, path } : undefined);
+    return navigation;
   }
 
   private resolvePendingFavoriteReveals(found: boolean): void {
@@ -3302,6 +3341,8 @@ export class ComparisonPanelManager implements vscode.Disposable {
   private cancelRequests(): void {
     this.itemIconGeneration += 1;
     this.favoriteNavigationGeneration += 1;
+    this.finishFavoriteNavigation();
+    this.pendingFavoriteNavigation = undefined;
     this.cancelSubtreeLoads();
     for (const controller of this.requestControllers) {
       controller.abort();
@@ -3339,6 +3380,7 @@ export class ComparisonPanelManager implements vscode.Disposable {
       disposable.dispose();
     }
     this.comparisonStateEmitter.dispose();
+    this.favoriteLoadingEmitter.dispose();
   }
 }
 

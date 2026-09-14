@@ -1,8 +1,9 @@
-import { deepStrictEqual, strictEqual } from "node:assert/strict";
+import { deepStrictEqual, strictEqual, rejects } from "node:assert/strict";
 import * as vscode from "vscode";
 import { ComparisonPanelManager } from "../../src/comparison/comparisonPanel";
 import {
   SiteTreeItem,
+  FavoriteTreeItem,
   ConnectionTreeProvider,
   ConnectionTreeItem,
 } from "../../src/connections/connectionTreeProvider";
@@ -29,6 +30,92 @@ interface ComparisonPanelHarness {
 }
 
 export const comparisonPanelTests: readonly IntegrationTest[] = [{
+  name: "favorite loading icons survive refresh and remain connection-scoped",
+  async execute(): Promise<void> {
+    const owner = connection("owner", "Owner");
+    const other = connection("other", "Other");
+    const path = "/sitecore/content/Example";
+    const emitter = new vscode.EventEmitter<void>();
+    const provider = new ConnectionTreeProvider({
+      onDidChange: emitter.event,
+      list: () => [owner, other],
+      listFavoritePaths: () => [path],
+      listVerifiedSites: () => [],
+    } as unknown as ConnectionStore);
+    const favorite = (index: number): FavoriteTreeItem => {
+      const item = provider.getChildren(provider.getChildren()[index])[0];
+      if (!(item instanceof FavoriteTreeItem)) {
+        throw new Error("Missing favorite");
+      }
+      return item;
+    };
+    try {
+      const original = favorite(0);
+      strictEqual(original.iconPath, undefined);
+      provider.setFavoriteLoading({ connectionId: owner.id, path });
+      strictEqual((favorite(0).iconPath as vscode.ThemeIcon).id, "sync~spin");
+      strictEqual(favorite(1).iconPath, undefined);
+      emitter.fire();
+      strictEqual((favorite(0).iconPath as vscode.ThemeIcon).id, "sync~spin");
+      strictEqual(favorite(0).id, original.id);
+      strictEqual(favorite(0).command?.command, "xmCloudSync.openFavorite");
+      provider.setFavoriteLoading(undefined);
+      strictEqual(favorite(0).iconPath, undefined);
+    } finally {
+      provider.dispose();
+      emitter.dispose();
+    }
+  },
+}, {
+  name: "favorite loading clears on completion, errors and cancellation without stale cleanup",
+  async execute(): Promise<void> {
+    interface Navigation { readonly navigationId: number }
+    const states: unknown[] = [];
+    const manager = Object.create(ComparisonPanelManager.prototype) as {
+      beginFavoriteNavigation(connectionId: string, path: string, side: string): Navigation;
+      finishFavoriteNavigation(navigation: Navigation): void;
+      navigateToFavorite(navigation: Navigation): Promise<void>;
+      cancelRequests(): void;
+      handleMessage(message: unknown): Promise<void>;
+    };
+    Object.assign(manager, {
+      favoriteNavigationGeneration: 0,
+      favoriteLoadingEmitter: { fire: (state: unknown) => states.push(state) },
+      pendingFavoriteReveal: new Map(),
+      revealFavoriteNavigation: async () => undefined,
+      itemIconGeneration: 0,
+      subtreeLoadControllers: new Map(),
+      requestControllers: new Set(),
+      pendingTreeLevels: new Map(),
+      pendingLanguages: new Map(),
+      pendingItemDetails: new Map(),
+      pendingItemIconReferences: new Map(),
+      pendingItemIcons: new Map(),
+    });
+    const first = manager.beginFavoriteNavigation("owner", "/first", "left");
+    const second = manager.beginFavoriteNavigation("owner", "/second", "left");
+    manager.finishFavoriteNavigation(first);
+    deepStrictEqual(states.at(-1), { connectionId: "owner", path: "/second" });
+    await manager.navigateToFavorite(second);
+    strictEqual(states.at(-1), undefined);
+    const failed = manager.beginFavoriteNavigation("owner", "/failed", "left");
+    Object.assign(manager, {
+      revealFavoriteNavigation: async () => { throw new Error("Navigation failed"); },
+    });
+    await rejects(manager.navigateToFavorite(failed), /Navigation failed/);
+    strictEqual(states.at(-1), undefined);
+    manager.beginFavoriteNavigation("owner", "/cancelled", "left");
+    manager.cancelRequests();
+    strictEqual(states.at(-1), undefined);
+    const initializing = manager.beginFavoriteNavigation("owner", "/initializing", "left");
+    Object.assign(manager, {
+      pendingFavoriteNavigation: initializing,
+      postState: async () => { throw new Error("Initialization failed"); },
+    });
+    await rejects(manager.handleMessage({ type: "ready" }), /Initialization failed/);
+    strictEqual(states.at(-1), undefined);
+  },
+}, {
   name: "site entries retain their connection and expose root navigation",
   async execute(): Promise<void> {
     const owner = connection("owner", "Owner");
@@ -134,6 +221,7 @@ export const comparisonPanelTests: readonly IntegrationTest[] = [{
     const secondPath = "/sitecore/content/Second";
     const revealAttempts = new Map<string, number>();
     const navigationStarts: Array<Record<string, unknown>> = [];
+    const loadingStates: unknown[] = [];
     const loadedLevels: Array<Record<string, unknown>> = [];
     let sitecoreLevelCalls = 0;
     let reportFirstAncestor: (() => void) | undefined;
@@ -206,13 +294,16 @@ export const comparisonPanelTests: readonly IntegrationTest[] = [{
       pendingFavoriteReveal: new Map(),
       nextFavoriteRevealId: 1,
       favoriteNavigationGeneration: 0,
+      favoriteLoadingEmitter: { fire: (state: unknown) => loadingStates.push(state) },
     });
 
     const firstNavigation = manager.openFavorite(left.id, firstPath);
     await firstAncestorStarted;
+    deepStrictEqual(loadingStates, [{ connectionId: left.id, path: firstPath }]);
     await manager.openSite(left.id, secondPath);
     releaseFirstAncestor?.();
     await firstNavigation;
+    strictEqual(loadingStates.at(-1), undefined);
 
     deepStrictEqual(navigationStarts.map((message) => ({
       navigationId: message.navigationId,

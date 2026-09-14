@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.12.0
+
+- Added a spinning loading indicator to favorites while their comparison navigation is in progress, with cleanup on completion, failure, cancellation, and supersession.
+
 ## 0.11.0
 
 - Added site-click navigation in Connections: reveal the site root in an existing comparison using the same cached and lazy ancestor-loading behavior as favorites.
