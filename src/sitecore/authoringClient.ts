@@ -21,6 +21,8 @@ import {
   resolveSitecoreIconUrl,
 } from "./itemIcon";
 
+export class AuthoringItemNotFoundError extends Error {}
+
 const tokenEndpoint = "https://auth.sitecorecloud.io/oauth/token";
 const audience = "https://api.sitecorecloud.io";
 const requestTimeoutMilliseconds = 30_000;
@@ -1522,7 +1524,7 @@ export class AuthoringContentClient {
     throwForGraphQlErrors(payload.errors);
     if (!payload.data?.item) {
       const identifier = "path" in locator ? locator.path : locator.itemId;
-      throw new Error(`Authoring item “${identifier}” was not found.`);
+      throw new AuthoringItemNotFoundError(`Authoring item “${identifier}” was not found.`);
     }
 
     const item = parseTreeItem(payload.data.item);

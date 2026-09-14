@@ -401,3 +401,7 @@ Secrets, bearer tokens, client secrets, and authorization headers must never be 
 - Authenticated Vercel project APIs, protected-deployment bypass, cache invalidation, and deployment logs.
 - Browser DOM and interactive-component verification.
 - Automatic undo or compensating rollback.
+
+### Exact item navigation
+
+The comparison lookup accepts trimmed GUIDs (compact, dashed, or braced) and absolute Sitecore paths. Enter searches the entire left connection first and uses the right only when the item is absent; connection failures are reported. The input badge updates while typing. Name search is coming later. Lookup preserves connection/language selections and unrelated expansion, loading only ancestor levels needed to reveal the paired row. The default root is `/`; a result outside a narrower displayed root widens that scope to `/` with an inline explanation. Cancel or a newer lookup supersedes pending navigation.

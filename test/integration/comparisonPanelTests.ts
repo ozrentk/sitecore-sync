@@ -9,6 +9,7 @@ import {
 } from "../../src/connections/connectionTreeProvider";
 import type { ConnectionStore } from "../../src/connections/connectionStore";
 import type { XmCloudConnection } from "../../src/connections/connection";
+import { AuthoringItemNotFoundError } from "../../src/sitecore/authoringClient";
 import type {
   AuthoringLanguage,
   AuthoringTreeLevel,
@@ -30,6 +31,44 @@ interface ComparisonPanelHarness {
 }
 
 export const comparisonPanelTests: readonly IntegrationTest[] = [{
+  name: "exact navigation falls back only on not-found and ignores cancelled lookups",
+  async execute(): Promise<void> {
+    const manager = Object.create(ComparisonPanelManager.prototype) as ComparisonPanelHarness;
+    const calls: string[] = [];
+    const messages: Array<Record<string, unknown>> = [];
+    let failure: Error | undefined;
+    let cancel = false;
+    Object.assign(manager, {
+      favoriteNavigationGeneration: 0,
+      pendingFavoriteReveal: new Map(),
+      getSelection: () => ({ leftConnectionId: "left", rightConnectionId: "right", leftLanguage: "en", rightLanguage: "fr" }),
+      panel: { webview: { postMessage: async (message: Record<string, unknown>) => { messages.push(message); return true; } } },
+      getTreeLevel: async (connectionId: string) => {
+        calls.push(connectionId);
+        if (cancel) { await manager.handleMessage({ type: "cancelItemLookup" }); }
+        if (connectionId === "left" && failure) { throw failure; }
+        return treeLevel("/sitecore/content/Page");
+      },
+      revealFavoriteNavigation: async () => { calls.push("reveal"); },
+    });
+    const run = () => manager.handleMessage({ type: "navigateItem", query: "/sitecore/content/Page", requestId: "1" });
+    await run();
+    deepStrictEqual(calls.splice(0), ["left", "reveal"]);
+    failure = new AuthoringItemNotFoundError("not found");
+    await run();
+    deepStrictEqual(calls.splice(0), ["left", "right", "reveal"]);
+    failure = new Error("offline");
+    await run();
+    deepStrictEqual(calls.splice(0), ["left"]);
+    strictEqual(String(messages.at(-1)?.text).includes("offline"), true);
+    failure = undefined;
+    cancel = true;
+    const before = messages.length;
+    await run();
+    deepStrictEqual(calls, ["left"]);
+    strictEqual(messages.length, before);
+  },
+}, {
   name: "language-only selection changes load only changed sides and ignore stale child requests",
   async execute(): Promise<void> {
     let selection = { leftConnectionId: "left", rightConnectionId: "right", leftLanguage: "en", rightLanguage: "en" };
@@ -56,7 +95,7 @@ export const comparisonPanelTests: readonly IntegrationTest[] = [{
       },
     });
     await manager.applySelection({ ...selection, leftLanguage: "fr" });
-    deepStrictEqual(loads, [{ side: "left", connectionId: "left", locator: { path: "/sitecore" } }]);
+    deepStrictEqual(loads, [{ side: "left", connectionId: "left", locator: { path: "/" } }]);
     strictEqual(clears, 1);
     for (const type of ["standardPublish", "tracedPublish", "powerPublish"]) {
       await manager.handleMessage({ type, side: "left", itemId: "item", path: "/sitecore/content" });
