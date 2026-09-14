@@ -55,6 +55,9 @@ const workspace = document.getElementById("workspace");
 const languageSwitchStatus = document.getElementById("language-switch-status");
 const languageSwitchText = document.getElementById("language-switch-text");
 const languageSwitchRetry = document.getElementById("language-switch-retry");
+const languageSwitchStatusRight = document.getElementById("language-switch-status-right");
+const languageSwitchTextRight = document.getElementById("language-switch-text-right");
+const languageSwitchRetryRight = document.getElementById("language-switch-retry-right");
 
 function normalizeItemId(itemId) {
   return itemId.replace(/[{}-]/g, "").toLowerCase();
@@ -1801,17 +1804,21 @@ function comparisonLanguageKey() {
 function updateLanguageSwitchStatus() {
   const pending = state.languageSwitch;
   languageSwitchStatus.hidden = !pending;
+  languageSwitchStatusRight.hidden = !pending;
   workspace.setAttribute("aria-busy", String(Boolean(pending)));
   if (!pending) {
     return;
   }
-  const displayed = pending.previous.trees;
-  const target = `Left ${state.selection.leftLanguage} / Right ${state.selection.rightLanguage}`;
-  const current = `Left ${displayed.left.language} / Right ${displayed.right.language}`;
-  languageSwitchText.textContent = pending.failed
-    ? `Could not switch to ${target}. Still showing ${current}.`
-    : `Switching to ${target}… Still showing ${current}.`;
-  languageSwitchRetry.hidden = !pending.failed;
+  for (const [side, text, retry] of [
+    ["left", languageSwitchText, languageSwitchRetry],
+    ["right", languageSwitchTextRight, languageSwitchRetryRight],
+  ]) {
+    const target = state.selection[`${side}Language`];
+    text.textContent = pending.failed
+      ? `Could not switch to ${target}. Still showing ${pending.previous.trees[side].language}.`
+      : `Switching to ${target}...`;
+    retry.hidden = !pending.failed;
+  }
 }
 
 function retryBackgroundLanguageSwitch() {
@@ -2284,6 +2291,7 @@ function applyItemDetailsMessage(message, status) {
 }
 
 languageSwitchRetry.addEventListener("click", retryBackgroundLanguageSwitch);
+languageSwitchRetryRight.addEventListener("click", retryBackgroundLanguageSwitch);
 for (const eventName of ["click", "dblclick", "contextmenu", "keydown"]) {
   workspace.addEventListener(eventName, (event) => {
     if (state.languageSwitch) {

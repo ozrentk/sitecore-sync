@@ -605,8 +605,9 @@ select:focus {
 .language-switch-status {
   position: absolute;
   top: 100%;
-  right: 12px;
-  max-width: min(560px, 80vw);
+  transform: translateX(-50%);
+  max-width: calc(50% - 24px);
+  text-align: center;
   padding: 8px 12px;
   border: 1px solid var(--vscode-widget-border, var(--vscode-panel-border));
   background: var(--vscode-editorWidget-background, var(--vscode-editor-background));
@@ -615,3 +616,6 @@ select:focus {
   z-index: 20;
 }
 .language-switch-status[hidden] { display: none; }
+
+.language-switch-left { left: 25%; }
+.language-switch-right { left: 75%; }

@@ -26,9 +26,13 @@
       <select id="right-connection" aria-label="Right XM Cloud connection"></select>
       <select id="right-language" aria-label="Right content language"></select>
     </div>
-    <div id="language-switch-status" class="language-switch-status" role="status" hidden>
+    <div id="language-switch-status" class="language-switch-status language-switch-left" role="status" hidden>
       <span id="language-switch-text"></span>
       <button id="language-switch-retry" type="button" hidden>Retry</button>
+    </div>
+    <div id="language-switch-status-right" class="language-switch-status language-switch-right" role="status" hidden>
+      <span id="language-switch-text-right"></span>
+      <button id="language-switch-retry-right" type="button" hidden>Retry</button>
     </div>
   </header>
   <main id="workspace" class="workspace" aria-live="polite"></main>

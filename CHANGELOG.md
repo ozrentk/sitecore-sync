@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.15.1
+
+- Centered language-switch labels above both comparison sides and shortened each label to its target language.
+
 ## 0.15.0
 
 - Prepared language changes in the background while keeping the displayed tree stable, swapping the new view in only when its branches and required item details are ready.
