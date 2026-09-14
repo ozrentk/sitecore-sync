@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.21.2
+
+- Distribute installable VSIX files through GitHub Releases, with version-tag and main-branch validation.
+- Gate CI and releases on redacted Git-history and packaged-extension secret scans.
+- Include all features and fixes through 0.21.1 in the first GitHub download.
+
 ## 0.21.1
 
 - Open public-page links directly from comparison and Field Diff without a redundant confirmation dropdown.
