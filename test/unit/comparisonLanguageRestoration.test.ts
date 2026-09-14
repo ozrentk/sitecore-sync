@@ -6,10 +6,11 @@ import { createContext, Script } from "node:vm";
 
 async function webview() {
   const messages: Array<Record<string, unknown>> = [];
+  const replacements: unknown[] = [];
   const context = createContext({
     acquireVsCodeApi: () => ({ postMessage: (message: Record<string, unknown>) => messages.push(message) }),
     document: {
-      getElementById: () => ({ addEventListener: () => undefined }),
+      getElementById: () => ({ addEventListener: () => undefined, setAttribute: () => undefined, replaceChildren: (value: unknown) => replacements.push(value) }),
       addEventListener: () => undefined,
       querySelectorAll: () => [],
     },
@@ -19,6 +20,7 @@ async function webview() {
   new Script(await readFile(resolve("media/comparison/comparison.js"), "utf8")).runInContext(context);
   const run = (code: string): unknown => new Script(code).runInContext(context);
   run(`
+    const productionRender = render;
     render = () => refreshLoadedItemIndexes();
     const items = {
       aa: { itemId: 'aa', path: '/sitecore', name: 'root', hasChildren: true },
@@ -36,6 +38,7 @@ async function webview() {
         level: { item: { ...items[id], displayName: language + ':' + items[id].name },
           children: childIds.map((child) => ({ ...items[child], displayName: language + ':' + items[child].name })) } });
       advanceLanguageRestoration();
+      finishBackgroundLanguageSwitch();
     }
     state.selection = { leftConnectionId: 'left', rightConnectionId: 'right', leftLanguage: 'en', rightLanguage: 'en' };
     for (const side of ['left', 'right']) {
@@ -57,15 +60,18 @@ async function webview() {
     while (cursor < messages.length) {
       if (++attempts > 100) { throw new Error("Restoration did not terminate"); }
       const message = messages[cursor++];
+      if (message.type === "loadItemDetails") {
+        run(`applyItemDetailsMessage({ side: ${JSON.stringify(message.side)}, connectionId: ${JSON.stringify(message.connectionId)}, language: ${JSON.stringify(message.language)}, itemId: ${JSON.stringify(message.itemId)}, details: { fields: [], template: { templateId: "template" }, availableVersions: [], language: ${JSON.stringify(message.language)} } }, "loaded"); advanceLanguageRestoration(); finishBackgroundLanguageSwitch();`);
+      }
       if (message.type === "loadChildren") {
         run(`respond(${JSON.stringify(message.side)}, ${JSON.stringify(message.itemId)}, ${JSON.stringify(message.language)})`);
       }
     }
   };
-  return { run, messages, drain };
+  return { run, messages, drain, replacements };
 }
 
-test("language changes restore selection before other branches and preserve the unchanged side", async () => {
+test("language changes prepare selection and branches before committing and preserve the unchanged side", async () => {
   const view = await webview();
   view.run("const originalRight = state.trees.right; change('fr'); respond('left', 'aa');");
   strictEqual(view.run("state.trees.right === originalRight"), true);
@@ -84,7 +90,8 @@ test("language changes restore selection before other branches and preserve the 
   ]);
   const selectionIndex = view.messages.findIndex((message) => message.type === "selectFieldDiffItem");
   const siblingIndex = view.messages.findIndex((message) => message.type === "loadChildren" && message.itemId === "cc");
-  strictEqual(selectionIndex < siblingIndex, true);
+  strictEqual(selectionIndex > siblingIndex, true);
+  strictEqual(view.run("state.languageSwitch"), undefined);
 });
 
 test("locked language changes restore both sides and fall back by identity instead of selecting a replacement path", async () => {
@@ -128,8 +135,8 @@ test("branch and root failures stop restoration without retry loops", async () =
     advanceLanguageRestoration();
   `);
   view.drain();
-  strictEqual(view.run("state.languageRestore"), undefined);
-  strictEqual(view.run("Boolean(state.languageRestoreNotice)"), true);
+  strictEqual(view.run("state.languageSwitch.failed"), true);
+  strictEqual(view.run("state.languageSwitch.previous.trees.left.language"), "en");
   const failedRoot = await webview();
   failedRoot.run(`change('fr'); applyLoadFailure({ side: 'left', connectionId: 'left', language: 'fr', message: 'offline' }); advanceLanguageRestoration();`);
   strictEqual(failedRoot.run("state.languageRestore"), undefined);
@@ -173,4 +180,64 @@ test("selection follows a pairing-key change when the counterpart appears in a l
   view.drain();
   strictEqual(view.run("state.selectedRowKey"), "id:ee");
   strictEqual(view.run("state.languageRestore"), undefined);
+});
+
+
+test("background preparation retains the displayed snapshot and defers Field Diff until commit", async () => {
+  const view = await webview();
+  view.run("const displayed = state.trees.left; change('fr'); respond('left', 'aa');");
+  strictEqual(view.run("state.languageSwitch.previous.trees.left === displayed"), true);
+  strictEqual(view.run("state.languageSwitch.previous.selectedRowKey"), "id:ee");
+  strictEqual(view.run("state.languageSwitch.previous.trees.left.language"), "en");
+  strictEqual(view.run("state.trees.left.language"), "fr");
+  strictEqual(view.messages.some(message => message.type === "selectFieldDiffItem"), false);
+  view.drain();
+  strictEqual(view.run("state.languageSwitch"), undefined);
+  strictEqual(view.messages.at(-1)?.type, "selectFieldDiffItem");
+});
+
+test("failed preparation keeps the original view and Retry prepares it afresh", async () => {
+  const view = await webview();
+  view.run(`
+    change('fr');
+    applyLoadFailure({ side: 'left', connectionId: 'left', language: 'fr', message: 'offline' });
+    advanceLanguageRestoration(); finishBackgroundLanguageSwitch();
+  `);
+  strictEqual(view.run("state.languageSwitch.failed"), true);
+  strictEqual(view.run("state.languageSwitch.previous.trees.left.language"), "en");
+  view.run("retryBackgroundLanguageSwitch(); respond('left', 'aa');");
+  strictEqual(view.messages.some(message => message.type === "retryLanguageSwitch"), true);
+  view.drain();
+  strictEqual(view.run("state.languageSwitch"), undefined);
+  strictEqual(view.run("state.selectedRowKey"), "id:ee");
+});
+
+test("returning to the displayed language reuses its snapshot immediately", async () => {
+  const view = await webview();
+  view.run("const original = state.trees.left; change('fr'); change('en');");
+  strictEqual(view.run("state.trees.left === original"), true);
+  strictEqual(view.run("state.languageSwitch"), undefined);
+  strictEqual(view.run("state.selectedRowKey"), "id:ee");
+});
+
+
+test("render leaves the existing DOM untouched until preparation commits", async () => {
+  const view = await webview();
+  view.run(`
+    state.connections = [{ id: 'left' }, { id: 'right' }];
+    renderOptions = () => undefined;
+    renderLanguageOptions = () => undefined;
+    createComparisonWorkspace = () => ({ snapshot: 'replacement' });
+    change('fr'); productionRender(); respond('left', 'aa'); productionRender();
+  `);
+  strictEqual(view.replacements.length, 0);
+  view.drain();
+  view.run("productionRender();");
+  strictEqual(view.replacements.length, 1);
+  view.run(`
+    change('de');
+    applyLoadFailure({ side: 'left', connectionId: 'left', language: 'de', message: 'offline' });
+    advanceLanguageRestoration(); finishBackgroundLanguageSwitch(); productionRender();
+  `);
+  strictEqual(view.replacements.length, 1, "A failed switch keeps the last displayed DOM");
 });

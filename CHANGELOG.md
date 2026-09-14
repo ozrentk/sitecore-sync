@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.15.0
+
+- Prepared language changes in the background while keeping the displayed tree stable, swapping the new view in only when its branches and required item details are ready.
+- Added requested/displayed-language status and Retry after loading failure, with preserved selection and scroll position.
+- Blocked content-changing comparison actions during preparation and deferred Field Diff until the replacement view commits.
+
 ## 0.14.0
 
 - Preserved comparison selection and expanded branches across language-only changes, restoring the selected item first and refreshing its open Field Diff.

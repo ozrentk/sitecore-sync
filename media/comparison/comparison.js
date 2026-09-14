@@ -24,6 +24,7 @@ const state = {
   expandedRows: new Set(),
   detailExpandedRows: new Set(),
   selectedRowKey: undefined,
+  languageSwitch: undefined,
   languageRestore: undefined,
   languageRestoreAnchor: undefined,
   languageRestoreNotice: undefined,
@@ -51,6 +52,9 @@ const rightLanguageSelect = document.getElementById("right-language");
 const swapButton = document.getElementById("swap");
 const languageLock = document.getElementById("language-lock");
 const workspace = document.getElementById("workspace");
+const languageSwitchStatus = document.getElementById("language-switch-status");
+const languageSwitchText = document.getElementById("language-switch-text");
+const languageSwitchRetry = document.getElementById("language-switch-retry");
 
 function normalizeItemId(itemId) {
   return itemId.replace(/[{}-]/g, "").toLowerCase();
@@ -1763,6 +1767,7 @@ function render() {
   languageLock.checked = state.selection.languagesLocked === true;
   languageLock.disabled = !state.selection.leftConnectionId || !state.selection.rightConnectionId;
 
+  updateLanguageSwitchStatus();
   if (state.connections.length < 1) {
     const empty = document.createElement("div");
     empty.className = "empty comparison-empty";
@@ -1779,14 +1784,110 @@ function render() {
     return;
   }
 
+  if (state.languageSwitch) {
+    return;
+  }
   workspace.replaceChildren(createComparisonWorkspace());
   restoreLanguageScrollPosition();
+}
+
+function comparisonLanguageKey() {
+  return JSON.stringify([
+    state.selection.leftConnectionId, state.selection.leftLanguage,
+    state.selection.rightConnectionId, state.selection.rightLanguage,
+  ]);
+}
+
+function updateLanguageSwitchStatus() {
+  const pending = state.languageSwitch;
+  languageSwitchStatus.hidden = !pending;
+  workspace.setAttribute("aria-busy", String(Boolean(pending)));
+  if (!pending) {
+    return;
+  }
+  const displayed = pending.previous.trees;
+  const target = `Left ${state.selection.leftLanguage} / Right ${state.selection.rightLanguage}`;
+  const current = `Left ${displayed.left.language} / Right ${displayed.right.language}`;
+  languageSwitchText.textContent = pending.failed
+    ? `Could not switch to ${target}. Still showing ${current}.`
+    : `Switching to ${target}… Still showing ${current}.`;
+  languageSwitchRetry.hidden = !pending.failed;
+}
+
+function retryBackgroundLanguageSwitch() {
+  const pending = state.languageSwitch;
+  if (!pending?.failed) {
+    return;
+  }
+  const key = comparisonLanguageKey();
+  state.trees = { ...pending.previous.trees };
+  state.expandedRows = new Set(pending.previous.expandedRows);
+  state.detailExpandedRows = new Set(pending.previous.detailExpandedRows);
+  state.selectedRowKey = pending.previous.selectedRowKey;
+  state.rootRowKey = pending.previous.rootRowKey;
+  state.languageRestore = undefined;
+  state.languageSwitch = undefined;
+  updateTreeConnections();
+  vscode.postMessage({ type: "retryLanguageSwitch", comparisonKey: key });
+  render();
+}
+
+function finishBackgroundLanguageSwitch() {
+  const pending = state.languageSwitch;
+  if (!pending) {
+    if (!state.languageRestore) {
+      vscode.postMessage({ type: "languageViewReady", comparisonKey: comparisonLanguageKey() });
+    }
+    return;
+  }
+  if (pending.failed || state.languageRestore) {
+    return;
+  }
+  let waiting = false;
+  const visited = new Set();
+  const visit = (pair) => {
+    if (visited.has(pair.key)) { return; }
+    visited.add(pair.key);
+    if (state.detailExpandedRows.has(pair.key) || pair.key === state.selectedRowKey) {
+      for (const side of ["left", "right"]) {
+        const node = pair[side];
+        if (!node) { continue; }
+        if (node.detailsError) {
+          pending.failed = true;
+        } else if (!node.detailsLoaded) {
+          requestItemDetails(side, node);
+          waiting = true;
+        }
+      }
+    }
+    if (state.expandedRows.has(pair.key)) {
+      for (const child of pairChildren(pair.left?.children ?? [], pair.right?.children ?? [])) {
+        visit(child);
+      }
+    }
+  };
+  refreshLoadedItemIndexes();
+  visit(createPair(state.trees.left.root, state.trees.right.root, "root"));
+  if (waiting || pending.failed) {
+    return;
+  }
+  // Preserve any scrolling performed while the previous DOM was on screen.
+  const oldRow = [...document.querySelectorAll(".comparison-row[data-row-key]")]
+    .find((row) => row.dataset.rowKey === pending.previous.selectedRowKey);
+  if (state.languageRestoreAnchor && oldRow) {
+    state.languageRestoreAnchor.offset = oldRow.getBoundingClientRect().top;
+  }
+  state.languageSwitch = undefined;
+  vscode.postMessage({ type: "languageViewReady", comparisonKey: comparisonLanguageKey() });
+  if (pending.fieldSelection) {
+    vscode.postMessage(pending.fieldSelection);
+  }
 }
 
 // Keep identity chains rather than row keys: pairing can change with language data.
 function captureLanguageTreeState() {
   refreshLoadedItemIndexes();
-  const snapshot = { selected: undefined, expanded: [], expandedIndex: 0, offset: undefined, selectionDone: false };
+  const snapshot = { selected: undefined, rows: new Map(), expanded: [], expandedIndex: 0, offset: undefined, selectionDone: false };
   const selectedRow = [...document.querySelectorAll(".comparison-row[data-row-key]")]
     .find((row) => row.dataset.rowKey === state.selectedRowKey);
   snapshot.offset = selectedRow?.getBoundingClientRect().top;
@@ -1803,6 +1904,7 @@ function captureLanguageTreeState() {
       }
     }
     const next = [...chain, identity];
+    snapshot.rows.set(pair.key, next);
     if (pair.key === state.selectedRowKey) {
       snapshot.selected = next;
     }
@@ -1821,6 +1923,10 @@ function captureLanguageTreeState() {
 }
 
 function cancelLanguageRestoration() {
+  if (state.languageSwitch) {
+    state.languageSwitch = undefined;
+    vscode.postMessage({ type: "languageViewReady", comparisonKey: comparisonLanguageKey() });
+  }
   state.languageRestore = undefined;
   state.languageRestoreAnchor = undefined;
   state.languageRestoreNotice = undefined;
@@ -1844,6 +1950,7 @@ function resolveRestoreChain(chain, expandTarget) {
     state.expandedRows.add(pair.key);
     state.detailExpandedRows.add(pair.key);
     if (pairHasError(pair)) {
+      if (state.languageSwitch) { state.languageSwitch.failed = true; }
       return { pair, missing: true };
     }
     if (!pairLevelsLoaded(pair)) {
@@ -1866,12 +1973,13 @@ function resolveRestoreChain(chain, expandTarget) {
 
 function advanceLanguageRestoration() {
   const restore = state.languageRestore;
-  if (!restore) {
+  if (!restore || state.languageSwitch?.failed) {
     return;
   }
   if (["left", "right"].some((side) => state.trees[side].error && !state.trees[side].root)) {
     state.languageRestore = undefined;
     state.languageRestoreNotice = "Could not restore the previous position because a comparison root failed to load.";
+    if (state.languageSwitch) { state.languageSwitch.failed = true; }
     return;
   }
   if (["left", "right"].some((side) => state.trees[side].connectionId && !state.trees[side].root)) {
@@ -1881,13 +1989,14 @@ function advanceLanguageRestoration() {
   state.rootRowKey = createPair(state.trees.left.root, state.trees.right.root, "root").key;
   if (restore.selected) {
     const result = resolveRestoreChain(restore.selected, false);
+    if (state.languageSwitch?.failed) { return; }
     if (result.pending) {
       return;
     }
     if (result.pair && (!restore.selectionDone || state.selectedRowKey !== result.pair.key)) {
       state.selectedRowKey = result.pair.key;
       state.languageRestoreAnchor = { key: result.pair.key, offset: restore.offset };
-      vscode.postMessage({
+      const fieldSelection = {
         type: "selectFieldDiffItem",
         comparisonKey: JSON.stringify([
           state.trees.left.connectionId, state.trees.left.language,
@@ -1897,7 +2006,12 @@ function advanceLanguageRestoration() {
         rightItemId: result.pair.right?.itemId,
         leftName: result.pair.left?.displayName || result.pair.left?.name,
         rightName: result.pair.right?.displayName || result.pair.right?.name,
-      });
+      };
+      if (state.languageSwitch) {
+        state.languageSwitch.fieldSelection = fieldSelection;
+      } else {
+        vscode.postMessage(fieldSelection);
+      }
     }
     restore.selectionDone = true;
     if (result.missing) {
@@ -1908,6 +2022,7 @@ function advanceLanguageRestoration() {
   }
   while (restore.expandedIndex < restore.expanded.length) {
     const result = resolveRestoreChain(restore.expanded[restore.expandedIndex], true);
+    if (state.languageSwitch?.failed) { return; }
     if (result.pending) {
       return;
     }
@@ -1953,6 +2068,18 @@ function updateTreeConnections() {
   const restore = sameConnections && languageChanged
     ? state.languageRestore ?? captureLanguageTreeState()
     : undefined;
+  const previous = state.languageSwitch?.previous ?? {
+    navigation: restore,
+    trees: { ...state.trees },
+    expandedRows: new Set(state.expandedRows),
+    detailExpandedRows: new Set(state.detailExpandedRows),
+    selectedRowKey: state.selectedRowKey,
+    rootRowKey: state.rootRowKey,
+  };
+  const canPrepare = sameConnections && languageChanged && previous.trees.left.root && previous.trees.right.root;
+  const returningToDisplayed = canPrepare && ["left", "right"].every((side) =>
+    previous.trees[side].language === state.selection[`${side}Language`],
+  );
   let changed = false;
   for (const side of ["left", "right"]) {
     const connectionId = state.selection[`${side}ConnectionId`];
@@ -1974,7 +2101,9 @@ function updateTreeConnections() {
     }
   }
   if (changed) {
+    state.languageSwitch = undefined;
     cancelLanguageRestoration();
+    state.languageSwitch = canPrepare ? { previous, failed: false } : undefined;
     state.languageRestore = restore ? { ...restore, expanded: [...restore.expanded], expandedIndex: 0, selectionDone: false } : undefined;
     state.expandedRows.clear();
     state.detailExpandedRows.clear();
@@ -1984,6 +2113,25 @@ function updateTreeConnections() {
     state.refreshOperations.clear();
     state.subtreeLoadOperations.clear();
     closeContextMenu();
+    if (returningToDisplayed) {
+      state.trees = { ...previous.trees };
+      state.expandedRows = new Set(previous.expandedRows);
+      state.detailExpandedRows = new Set(previous.detailExpandedRows);
+      state.selectedRowKey = previous.selectedRowKey;
+      state.rootRowKey = previous.rootRowKey;
+      state.languageRestore = undefined;
+      state.languageSwitch = undefined;
+      vscode.postMessage({ type: "languageViewReady", comparisonKey: comparisonLanguageKey() });
+      const pair = findLoadedPair(state.selectedRowKey);
+      if (pair) {
+        vscode.postMessage({
+          type: "selectFieldDiffItem", comparisonKey: comparisonLanguageKey(),
+          leftItemId: pair.left?.itemId, rightItemId: pair.right?.itemId,
+          leftName: pair.left?.displayName || pair.left?.name,
+          rightName: pair.right?.displayName || pair.right?.name,
+        });
+      }
+    }
   }
 }
 
@@ -2135,6 +2283,38 @@ function applyItemDetailsMessage(message, status) {
   }
 }
 
+languageSwitchRetry.addEventListener("click", retryBackgroundLanguageSwitch);
+for (const eventName of ["click", "dblclick", "contextmenu", "keydown"]) {
+  workspace.addEventListener(eventName, (event) => {
+    if (state.languageSwitch) {
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      const row = event.target.closest(".comparison-row[data-row-key]");
+      if (eventName === "click" && event.target.closest(".comparison-cell") && row) {
+        const pending = state.languageSwitch;
+        const chain = pending.previous.navigation.rows.get(row.dataset.rowKey);
+        if (chain) {
+          document.querySelector(".comparison-row.selected")?.classList.remove("selected");
+          row.classList.add("selected");
+          pending.previous.selectedRowKey = row.dataset.rowKey;
+          pending.previous.navigation.selected = chain;
+          pending.previous.navigation.offset = row.getBoundingClientRect().top;
+          pending.fieldSelection = undefined;
+          if (!pending.failed) {
+            state.languageRestore = {
+              ...pending.previous.navigation,
+              expanded: [...pending.previous.navigation.expanded],
+              expandedIndex: 0, selectionDone: false,
+            };
+            advanceLanguageRestoration();
+            finishBackgroundLanguageSwitch();
+          }
+        }
+      }
+    }
+  }, true);
+}
+
 leftSelect.addEventListener("change", () => {
   vscode.postMessage({
     type: "selectConnection",
@@ -2275,8 +2455,9 @@ window.addEventListener("message", (event) => {
   } else {
     return;
   }
-  if (["stateChanged", "treeLoaded", "treeLoadFailed"].includes(message?.type)) {
+  if (["stateChanged", "treeLoaded", "treeLoadFailed", "itemDetailsLoaded", "itemDetailsLoadFailed"].includes(message?.type)) {
     advanceLanguageRestoration();
+    finishBackgroundLanguageSwitch();
   }
 
   render();

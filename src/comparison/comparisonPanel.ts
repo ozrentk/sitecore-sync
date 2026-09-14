@@ -172,6 +172,7 @@ export class ComparisonPanelManager implements vscode.Disposable {
   private readonly copyingFieldIds = new Set<string>();
   private readonly fieldDiffProvider = new FieldDiffContentProvider();
   private readonly navigationLoadingEmitter = new vscode.EventEmitter<NavigationLoadingState | undefined>();
+  private pendingLanguageView: string | undefined;
   private activeFavoriteNavigation: FavoriteNavigation | undefined;
   readonly onDidChangeNavigationLoading = this.navigationLoadingEmitter.event;
 
@@ -552,6 +553,9 @@ export class ComparisonPanelManager implements vscode.Disposable {
     );
     this.cancelSubtreeLoads();
     if (changedSides.length) {
+      this.pendingLanguageView = sameConnections ? JSON.stringify([
+        next.leftConnectionId, next.leftLanguage, next.rightConnectionId, next.rightLanguage,
+      ]) : undefined;
       this.favoriteNavigationGeneration += 1;
       this.finishFavoriteNavigation();
       this.pendingFavoriteNavigation = undefined;
@@ -810,6 +814,25 @@ export class ComparisonPanelManager implements vscode.Disposable {
   }
 
   private async handleMessage(message: WebviewMessage): Promise<void> {
+    if (message.type === "languageViewReady" && message.comparisonKey === this.pendingLanguageView) {
+      this.pendingLanguageView = undefined;
+      return;
+    }
+    if (message.type === "retryLanguageSwitch") {
+      if (typeof message.comparisonKey === "string" && message.comparisonKey === this.pendingLanguageView) {
+        await this.postState();
+        await this.loadInitialTrees();
+      }
+      return;
+    }
+    if (this.pendingLanguageView && [
+      "syncSubtree", "standardPublish", "tracedPublish", "powerPublish", "runItemTask",
+      "showDetailedFieldDiff", "selectFieldDiffItem", "openFieldDiff", "refreshSubtree",
+      "refreshItem", "refreshAll", "loadSubtree",
+    ].includes(typeof message.type === "string" ? message.type : "")) {
+      return;
+    }
+
     if (message.type === "ready") {
       const navigation = this.pendingFavoriteNavigation;
       this.pendingFavoriteNavigation = undefined;
@@ -2376,6 +2399,9 @@ export class ComparisonPanelManager implements vscode.Disposable {
     fieldId: string,
     direction: "leftToRight" | "rightToLeft",
   ): Promise<void> {
+    if (this.pendingLanguageView) {
+      return;
+    }
     const normalizedFieldId = normalizeItemId(fieldId);
     if (this.copyingFieldIds.has(normalizedFieldId)) {
       return;
@@ -3374,6 +3400,7 @@ export class ComparisonPanelManager implements vscode.Disposable {
   }
 
   private cancelRequests(): void {
+    this.pendingLanguageView = undefined;
     this.itemIconGeneration += 1;
     this.favoriteNavigationGeneration += 1;
     this.finishFavoriteNavigation();
