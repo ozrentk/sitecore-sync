@@ -34,14 +34,51 @@ export function resolvePublicPageUrl(template: string, values: PublicPageValues,
       return url.origin;
     }
     if (name === "route") { return route.split("/").map(encodeURIComponent).join("/"); }
-    const value = name === "language" ? mapping?.language ?? language : mapping?.country;
-    if (!value) { throw new Error(`Configure an explicit ${name} mapping for ${language}.`); }
+    const override = name === "language" ? mapping?.language : mapping?.country;
+    const inferred = override === undefined ? inferLanguageParts(language) : undefined;
+    const value = override ?? (name === "language" ? inferred?.language : inferred?.country);
+    if (!value) { throw new Error(`Language ${language} has no region. Omit {country} or set an optional country override.`); }
     return encodeURIComponent(value);
   });
   if (/[{}]/u.test(resolved)) { throw new Error("The public-page URL contains unresolved placeholders."); }
   const url = safeUrl(resolved);
   url.pathname = url.pathname.replace(/\/{2,}/gu, "/");
   return url.toString();
+}
+
+export function inferLanguageParts(value: string): { readonly language: string; readonly country?: string } {
+  try {
+    const locale = new Intl.Locale(value);
+    return { language: locale.language, country: locale.region };
+  } catch { throw new Error(`Invalid language tag: ${value}. Use a language tag such as en-US.`); }
+}
+
+export function validatePublicPageTemplate(template: string): string | undefined {
+  if (!template.trim()) { return undefined; }
+  try {
+    resolvePublicPageUrl(template, { publicBaseUrl: "https://preview.invalid", deploymentBaseUrl: "https://preview.invalid" }, "en-US", "/");
+    return undefined;
+  } catch (error: unknown) { return error instanceof Error ? error.message : String(error); }
+}
+
+export function resolveHomepageUrl(
+  template: string, configuration: PublicPageConnectionValues, sites: readonly AuthoringSite[],
+  language: string, itemPath?: string,
+): string {
+  const needsBaseUrl = /\{(?:publicBaseUrl|deploymentBaseUrl)\}/u.test(template);
+  let matches = itemPath ? sites.filter(site => isWithinPath(itemPath, site.rootPath)) : [...sites];
+  if (itemPath) {
+    const longest = Math.max(...matches.map(site => site.rootPath.length));
+    matches = matches.filter(site => site.rootPath.length === longest);
+  }
+  if (matches.length > 1 && matches.some(site => site.name === configuration.defaultSite)) {
+    matches = matches.filter(site => site.name === configuration.defaultSite);
+  }
+  if (matches.length !== 1) {
+    if (!needsBaseUrl) { return resolvePublicPageUrl(template, {}, language, "/"); }
+    throw new Error("Select an item from the intended site in the comparison before previewing its homepage.");
+  }
+  return resolvePublicPageUrl(template, configuration.sites?.[matches[0].name] ?? {}, language, "/");
 }
 
 function safeUrl(value: string): URL {

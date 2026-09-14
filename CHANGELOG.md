@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.19.0
+
+- Simplified shared URL-template setup: no connection/site selection, mappings or preview input.
+- Infer language and region from the selected language tag, with optional existing overrides.
+- Offer homepage preview after saving; configure connection/site base URLs in a separate command.
+
 ## 0.18.0
 
 - Enabled indexed name search in the comparison input with left-first lookup, bounded pagination, keyboard-accessible results and cancellation.

@@ -1,6 +1,6 @@
-import { strictEqual, throws, rejects } from "node:assert/strict";
+import { deepStrictEqual, strictEqual, throws, rejects } from "node:assert/strict";
 import { test } from "node:test";
-import { hasPagePresentation, parsePublicPageConnectionValues, resolvePublicPage, resolvePublicPageUrl } from "../../src/publicPages/publicPageUrl";
+import { hasPagePresentation, inferLanguageParts, resolveHomepageUrl, validatePublicPageTemplate, parsePublicPageConnectionValues, resolvePublicPage, resolvePublicPageUrl } from "../../src/publicPages/publicPageUrl";
 import type { AuthoringItemDetails } from "../../src/sitecore/authoringClient";
 const values = { publicBaseUrl: "https://public.example", deploymentBaseUrl: "https://preview.example", languages: { "en-CA": { language: "en", country: "ca" } } };
 function item(path: string, page = false): AuthoringItemDetails {
@@ -9,7 +9,7 @@ function item(path: string, page = false): AuthoringItemDetails {
 test("URL templates use only requested values and encode language, country and route", () => {
   strictEqual(resolvePublicPageUrl("{publicBaseUrl}/{country}/{language}/{route}", values, "en-CA", "/Vehicle Prices/Čaj"), "https://public.example/ca/en/Vehicle%20Prices/%C4%8Caj");
   strictEqual(resolvePublicPageUrl("{deploymentBaseUrl}{route}", values, "fr", "/"), "https://preview.example/");
-  strictEqual(resolvePublicPageUrl("https://literal.example/{language}", {}, "en-CA", "/"), "https://literal.example/en-CA");
+  strictEqual(resolvePublicPageUrl("https://literal.example/{language}", {}, "en-CA", "/"), "https://literal.example/en");
   for (const template of ["{publicBaseUrl}/{country}", "{missing}", "{publicBaseUrl}/{deploymentBaseUrl}", "javascript:alert(1)", "https://user:pass@example.test", "{publicBaseUrl}{language}"]) {
     throws(() => resolvePublicPageUrl(template, { publicBaseUrl: "https://public.example" }, "fr", "/"));
   }
@@ -29,4 +29,28 @@ test("effective inherited layout identifies pages and resolves nearest owning pa
   await rejects(resolvePublicPage("{publicBaseUrl}{route}", {}, [site], page, "en", async () => { throw new Error("offline"); }, AbortSignal.abort()), /abort/i);
   await rejects(resolvePublicPage("{publicBaseUrl}{route}", {}, [site, { ...site, name: "another" }], page, "en", async path => item(path), new AbortController().signal), /Several sites/);
   await rejects(resolvePublicPage("{publicBaseUrl}{route}", {}, [site], item(`${page.path}/Data/Text`), "en", async () => { throw new Error("offline"); }, new AbortController().signal), /offline/);
+});
+
+
+test("URL language and region are inferred from tags without assuming a region", () => {
+  deepStrictEqual(inferLanguageParts("En-US"), { language: "en", country: "US" });
+  deepStrictEqual(inferLanguageParts("zh-Hant-TW"), { language: "zh", country: "TW" });
+  deepStrictEqual(inferLanguageParts("es-419"), { language: "es", country: "419" });
+  deepStrictEqual(inferLanguageParts("en"), { language: "en", country: undefined });
+  strictEqual(resolvePublicPageUrl("https://example.test/{language}/{country}{route}", {}, "en-US", "/"), "https://example.test/en/US/");
+  throws(() => resolvePublicPageUrl("https://example.test/{country}", {}, "en", "/"), /no region/);
+  throws(() => resolvePublicPageUrl("https://example.test/{language}", {}, "bad_language_tag", "/"), /Invalid language tag/);
+  strictEqual(resolvePublicPageUrl("https://example.test/{country}", { languages: { en: { country: "custom" } } }, "en", "/"), "https://example.test/custom");
+  strictEqual(validatePublicPageTemplate("{publicBaseUrl}/{language}/{country}{route}"), undefined);
+  strictEqual(validatePublicPageTemplate(""), undefined);
+  strictEqual(typeof validatePublicPageTemplate("{unsupported}"), "string");
+});
+
+test("homepage preview uses the root route and current site values", () => {
+  const sites = [{ name: "A", rootPath: "/sitecore/A" }, { name: "B", rootPath: "/sitecore/B" }];
+  const configuration = { sites: { A: { publicBaseUrl: "https://a.example" }, B: { publicBaseUrl: "https://b.example" } } };
+  strictEqual(resolveHomepageUrl("{publicBaseUrl}/{language}/{country}{route}", configuration, sites, "en-US", "/sitecore/B/Home/Page"), "https://b.example/en/US/");
+  strictEqual(resolveHomepageUrl("https://shared.example{route}", {}, [], "en"), "https://shared.example/");
+  strictEqual(resolveHomepageUrl("https://shared.example/{country}{route}", { sites: { A: { languages: { "en-US": { country: "us" } } } } }, sites, "en-US", "/sitecore/A/Home"), "https://shared.example/us/");
+  throws(() => resolveHomepageUrl("{publicBaseUrl}{route}", configuration, sites, "en"), /Select an item/);
 });

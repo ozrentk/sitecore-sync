@@ -269,8 +269,12 @@ export function activate(context: vscode.ExtensionContext): void {
 
   context.subscriptions.push(
     vscode.commands.registerCommand("xmCloudSync.configurePublicPageUrls", async () => {
-      try { await new PublicPageService(connectionStore, authoringClient).configure(); }
+      try { await new PublicPageService(connectionStore, authoringClient).configure(comparisonPanelManager.getPublicPagePreviewContext()); }
       catch (error: unknown) { await vscode.window.showErrorMessage(`Unable to configure public-page URLs: ${error instanceof Error ? error.message : String(error)}`); }
+    }),
+    vscode.commands.registerCommand("xmCloudSync.configurePublicPageValues", async () => {
+      try { await new PublicPageService(connectionStore, authoringClient).configureValues(); }
+      catch (error: unknown) { await vscode.window.showErrorMessage(`Unable to configure public-page URL values: ${error instanceof Error ? error.message : String(error)}`); }
     }),
     vscode.commands.registerCommand("xmCloudSync.addConnection", async () => {
       await addConnection(connectionStore, connectionProvider, authoringClient);

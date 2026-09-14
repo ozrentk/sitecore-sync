@@ -1,7 +1,15 @@
 import * as vscode from "vscode";
 import type { ConnectionStore } from "../connections/connectionStore";
 import type { AuthoringContentClient, AuthoringItemDetails } from "../sitecore/authoringClient";
-import { parsePublicPageConnectionValues, resolvePublicPage, resolvePublicPageUrl, type PublicPageTarget } from "./publicPageUrl";
+import { parsePublicPageConnectionValues, resolvePublicPage, resolvePublicPageUrl, resolveHomepageUrl, validatePublicPageTemplate, type PublicPageTarget } from "./publicPageUrl";
+
+import { configureSharedTemplate } from "./sharedTemplateSetup";
+
+export interface PublicPagePreviewContext {
+  readonly connectionId?: string;
+  readonly language: string;
+  readonly itemPath?: string;
+}
 
 export class PublicPageService {
   constructor(private readonly connections: ConnectionStore, private readonly authoring: AuthoringContentClient) {}
@@ -23,11 +31,46 @@ export class PublicPageService {
       path => this.authoring.loadItem(connection, secret, { path }, language, undefined, signal), signal, preferredSite);
   }
 
-  async configure(): Promise<void> {
+  async configure(context?: PublicPagePreviewContext): Promise<void> {
     const settings = vscode.workspace.getConfiguration("xmCloudSync");
-    const template = await vscode.window.showInputBox({ title: "Shared public-page URL template (all connections)", value: settings.get<string>("publicPageUrlTemplate", ""), prompt: "Optional tokens: {publicBaseUrl}, {deploymentBaseUrl}, {language}, {country}, {route}. Empty disables public-page links." });
-    if (template === undefined) { return; }
-    if (!template.trim()) { await settings.update("publicPageUrlTemplate", "", vscode.ConfigurationTarget.Global); return; }
+    await configureSharedTemplate({
+      askTemplate: async () => vscode.window.showInputBox({
+        title: "Shared public-page URL template (all connections and sites)",
+        value: settings.get<string>("publicPageUrlTemplate", ""),
+        prompt: "Tokens: {publicBaseUrl}, {deploymentBaseUrl}, {language}, {country}, {route}. Language and region are inferred, e.g. en-US → en / US. Empty disables links.",
+        validateInput: validatePublicPageTemplate,
+      }),
+      saveTemplate: async template => settings.update("publicPageUrlTemplate", template, vscode.ConfigurationTarget.Global),
+      offerHomepage: async () => await vscode.window.showInformationMessage("Template saved for all connections and sites. Open the homepage using the current comparison?", "Open homepage") === "Open homepage",
+      openHomepage: async template => {
+        try {
+          const connectionId = context?.connectionId;
+          const all = settings.get<Record<string, unknown>>("publicPageValues", {});
+          const configuration = parsePublicPageConnectionValues(connectionId ? all[connectionId] : undefined);
+          let sites = connectionId ? this.connections.listVerifiedSites(connectionId) : [];
+          if (!sites.length && connectionId && /\{(?:publicBaseUrl|deploymentBaseUrl)\}/u.test(template)) {
+            const connection = this.connections.get(connectionId);
+            const secret = await this.connections.getClientSecret(connectionId);
+            if (connection && secret) {
+              sites = (await this.authoring.testConnection(connection, secret, AbortSignal.timeout(30_000))).sites;
+            }
+          }
+          const url = resolveHomepageUrl(template, configuration, sites, context?.language ?? "en", context?.itemPath);
+          await vscode.env.openExternal(vscode.Uri.parse(url));
+        } catch (error: unknown) {
+          await vscode.window.showInformationMessage(`Template saved; homepage preview is unavailable: ${error instanceof Error ? error.message : String(error)}`);
+        }
+      },
+    });
+  }
+
+  async configureValues(): Promise<void> {
+    const settings = vscode.workspace.getConfiguration("xmCloudSync");
+    const template = settings.get<string>("publicPageUrlTemplate", "");
+    if (!/\{(?:publicBaseUrl|deploymentBaseUrl)\}/u.test(template)) {
+      await vscode.window.showInformationMessage("The shared template does not use a base URL placeholder, so no connection/site URL values are needed.");
+      return;
+    }
     const chosen = await vscode.window.showQuickPick(this.connections.list().map(connection => ({ label: connection.name, description: connection.serverUrl, connection })), { title: "Connection-specific public-page values" });
     if (!chosen) { return; }
     const connection = chosen.connection;
@@ -48,19 +91,7 @@ export class PublicPageService {
       if (value === undefined) { return; }
       values[name] = value;
     }
-    if (template.includes("{language}") || template.includes("{country}")) {
-      const mappings = await vscode.window.showInputBox({ title: "Language and country mappings (JSON)", value: JSON.stringify(values.languages ?? {}), prompt: 'Example: {"en-CA":{"language":"en","country":"ca"}}. No country is inferred.', validateInput: value => {
-        try { const parsed: unknown = JSON.parse(value); return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? undefined : "Enter a JSON object."; } catch { return "Enter a valid JSON object."; }
-      } });
-      if (mappings === undefined) { return; }
-      values.languages = parsePublicPageConnectionValues({ sites: { current: { languages: JSON.parse(mappings) as unknown } } }).sites?.current.languages;
-    }
-    const language = await vscode.window.showInputBox({ title: "Preview language", value: Object.keys(values.languages ?? {})[0] ?? "en" });
-    if (language === undefined) { return; }
-    const preview = resolvePublicPageUrl(template, values, language, "/example-page");
-    const save = await vscode.window.showQuickPick([{ label: "Save configuration", description: preview }], { title: "Preview public-page URL (example route)", placeHolder: preview });
-    if (!save) { return; }
     await settings.update("publicPageValues", { ...all, [connection.id]: { ...previous, defaultSite: previous.defaultSite ?? site.value.name, sites: { ...previous.sites, [site.value.name]: values } } }, vscode.ConfigurationTarget.Global);
-    await settings.update("publicPageUrlTemplate", template, vscode.ConfigurationTarget.Global);
+    await vscode.window.showInformationMessage("Connection/site URL values saved. The shared template is unchanged.");
   }
 }
