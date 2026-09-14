@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.13.1
+
+- Renamed comparison context actions to Tree Transfer Left > Right and Tree Transfer Right > Left.
+- Clarified every tree transfer confirmation that transferred items include all source languages and versions, regardless of the selected comparison language.
+
 ## 0.13.0
 
 - Extended navigation loading indicators to sites: the globe becomes spinning arrows while loading and is restored afterward, independently of favorites with the same path.
