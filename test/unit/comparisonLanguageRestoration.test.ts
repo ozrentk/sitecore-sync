@@ -241,3 +241,27 @@ test("render leaves the existing DOM untouched until preparation commits", async
   `);
   strictEqual(view.replacements.length, 1, "A failed switch keeps the last displayed DOM");
 });
+
+
+test("switch labels follow changed sides through supersession, failure and completion", async () => {
+  const view = await webview();
+  const visibility = () => {
+    view.run("updateLanguageSwitchStatus();");
+    return [view.run("languageSwitchStatus.hidden"), view.run("languageSwitchStatusRight.hidden")];
+  };
+  deepStrictEqual(visibility(), [true, true]);
+  view.run("change('fr');");
+  deepStrictEqual(visibility(), [false, true]);
+  view.run("change('fr', 'fr');");
+  deepStrictEqual(visibility(), [false, false]);
+  view.run("change('en', 'fr');");
+  deepStrictEqual(visibility(), [true, false]);
+  view.run(`
+    applyLoadFailure({ side: 'right', connectionId: 'right', language: 'fr', message: 'offline' });
+    advanceLanguageRestoration(); finishBackgroundLanguageSwitch();
+  `);
+  deepStrictEqual(visibility(), [true, false]);
+  view.run("retryBackgroundLanguageSwitch(); respond('right', 'aa');");
+  view.drain();
+  deepStrictEqual(visibility(), [true, true]);
+});

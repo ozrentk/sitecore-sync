@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.15.2
+
+- Show language-switch labels only on comparison sides whose language is changing.
+
 ## 0.15.1
 
 - Centered language-switch labels above both comparison sides and shortened each label to its target language.
