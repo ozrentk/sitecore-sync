@@ -4,6 +4,8 @@ Consolidated planning inventory as of 2026-09-14, reviewed against version 0.20.
 
 Status: B01–B06 are explicit TODOs; B07–B15 are deferred enhancements; B16 is a known limitation; B17 is documentation cleanup; B18 has an agreed high-level plan and awaits implementation. Grouping does not change their priority or scope.
 
+Added 2026-10-01: B19 is a feature idea requiring detailed planning; the earlier inventory has not been re-audited for completion.
+
 ## Publishing and delivery verification
 
 - [ ] **B12 — Automatic publishing after synchronization.** Design an optional workflow that publishes after successful synchronization.
@@ -57,6 +59,7 @@ Status: B01–B06 are explicit TODOs; B07–B15 are deferred enhancements; B16 i
 ## Connections and caching
 
 - [ ] **B09 — Clear Connection Cache command.** Provide an explicit connection-level cache clearing action.
+- [ ] **B19 — Cloud and administration shortcuts from a connection.** Add convenient links to the server/connection right-click menu, opening the selected environment's publishing jobs list, administration panel, logs, Sitecore PowerShell ISE, and other useful cloud or administration pages. This is a feature TODO, not a detailed implementation plan. Planning should establish the supported destinations, how their URLs are resolved from connection/environment metadata, whether custom links are supported, and how unavailable destinations are presented. Opening a shortcut should navigate to the page without automatically executing administrative actions; normal browser sign-in and destination permissions still apply.
 
 ## Documentation cleanup
 
