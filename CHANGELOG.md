@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.22.0
+
+- Add a unified Connection Settings dashboard for creating and editing connections, deployment monitoring, site URL values and traced-publishing defaults.
+- Validate entries inline, test unsaved credentials, discover sites, and keep saved secrets masked with explicit keep/replace/remove controls.
+- Preserve existing configurations and favorites, reject stale edits and attempt rollback if saving fails.
+
 ## 0.21.2
 
 - Distribute installable VSIX files through GitHub Releases, with version-tag and main-branch validation.

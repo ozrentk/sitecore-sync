@@ -2,7 +2,7 @@
   "name": "sitecore-xm-cloud-sync",
   "displayName": "XM Cloud Sync",
   "description": "Compare and synchronize Sitecore XM Cloud authoring content from VS Code.",
-  "version": "0.21.2",
+  "version": "0.22.0",
   "publisher": "OzrenTK",
   "license": "MIT",
   "engines": {
@@ -255,6 +255,12 @@
         "command": "xmCloudSync.configurePublicPageValues",
         "title": "XM Cloud Sync: Configure Connection/Site Public URL Values",
         "shortTitle": "Configure Public URL Values…"
+      },
+      {
+        "command": "xmCloudSync.configureConnection",
+        "title": "XM Cloud Sync: Configure Connection…",
+        "shortTitle": "Configure Connection…",
+        "icon": "$(settings-gear)"
       }
     ],
     "viewsContainers": {
@@ -349,7 +355,7 @@
       ],
       "view/item/context": [
         {
-          "command": "xmCloudSync.configurePublicPageValues",
+          "command": "xmCloudSync.configureConnection",
           "when": "view == xmCloudSync.connections && viewItem == xmCloudConnection",
           "group": "1_connections"
         },
@@ -367,16 +373,6 @@
           "command": "xmCloudSync.testConnection",
           "when": "view == xmCloudSync.connections && viewItem == xmCloudConnection",
           "group": "inline"
-        },
-        {
-          "command": "xmCloudSync.configureDeploymentMonitoring",
-          "when": "view == xmCloudSync.connections && viewItem == xmCloudConnection",
-          "group": "1_connections"
-        },
-        {
-          "command": "xmCloudSync.configurePublishing",
-          "when": "view == xmCloudSync.connections && viewItem == xmCloudConnection",
-          "group": "1_connections"
         },
         {
           "command": "xmCloudSync.removeConnection",

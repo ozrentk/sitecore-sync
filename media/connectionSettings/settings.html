@@ -1,0 +1,34 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src {{cspSource}}; script-src 'nonce-{{nonce}}';">
+<link rel="stylesheet" href="{{styleUri}}"><title>Connection Settings</title></head>
+<body><main>
+<header><div class="eyebrow">XM CLOUD SYNC</div><h1 id="title">Connection Settings</h1><p>Connection details and defaults, together in one place.</p></header>
+<nav aria-label="Settings sections"><a href="#connection">Connection</a><a href="#deployment">Deployment monitoring</a><a href="#public">Public URLs</a><a href="#publishing">Traced publishing</a></nav>
+<div id="status" role="status" aria-live="polite">Loading saved settings…</div><div id="form-error" role="alert"></div>
+<form id="settings" novalidate>
+<fieldset id="fields" disabled>
+<section id="connection"><h2>Connection</h2><p>Use an environment automation client for your content-management server.</p>
+<div class="grid"><label>Name<input id="name" required maxlength="16000" autocomplete="off"><span class="error" id="name-error"></span></label>
+<label>CM server URL<input id="serverUrl" type="url" required placeholder="https://example.sitecorecloud.io"><span class="error" id="serverUrl-error"></span></label>
+<label>Client ID<input id="clientId" required autocomplete="off"><span class="error" id="clientId-error"></span></label></div>
+<div class="secret" data-secret="clientSecret"></div><button type="button" data-test="connection">Test Connection &amp; discover sites</button>
+</section>
+<section id="deployment"><h2>Deployment monitoring</h2><label class="toggle"><input id="deploymentEnabled" type="checkbox">Use organization credentials for deployment monitoring</label><p>Turning this off removes the saved organization secret on Save. Automatic monitoring remains available when the environment client has permission.</p>
+<div class="grid"><label>Organization client ID<input id="deploymentClientId" autocomplete="off"><span class="error" id="deploymentClientId-error"></span></label>
+<label>Environment ID<input id="deploymentEnvironmentId" placeholder="Resolved by Test monitoring"><span class="error" id="deploymentEnvironmentId-error"></span></label></div>
+<div class="secret" data-secret="deploymentSecret"></div><button type="button" data-test="deployment">Test monitoring &amp; match environment</button></section>
+<section id="public"><h2>Public-page URLs</h2><label>Shared URL template <span class="badge">All connections</span><input id="publicTemplate" placeholder="{publicBaseUrl}/{country}/{language}{route}"><span class="error" id="publicTemplate-error"></span></label>
+<p>Changes to this template apply to every connection. Supported tokens: {publicBaseUrl}, {deploymentBaseUrl}, {language}, {country}, {route}. Language and region are inferred.</p>
+<label>Site<select id="sitePicker"></select></label><p id="site-empty">Test Connection to discover sites, or add a site by its exact Sitecore name.</p>
+<div class="grid"><label>Public base URL<input id="publicBaseUrl" type="url" placeholder="https://www.example.com"></label><label>Deployment base URL<input id="deploymentBaseUrl" type="url" placeholder="https://preview.example.com"></label></div>
+<div id="sites-error" class="error" role="alert"></div><div class="site-add"><label>Site name<input id="newSite" autocomplete="off"></label><button type="button" id="addSite">Add site</button></div>
+<label>Default site for ambiguous paths<select id="defaultSite"><option value="">No default</option></select><span class="error" id="defaultSite-error"></span></label></section>
+<section id="publishing"><h2>Traced publishing</h2><label class="toggle"><input id="publishingEnabled" type="checkbox">Configure Experience Edge verification</label><p>These are connection defaults. Routes, field assertions and publish options are chosen for each publishing run. Turning this off removes the saved Edge token on Save.</p>
+<label>Experience Edge GraphQL endpoint<input id="edgeEndpoint" type="url"><span class="error" id="edgeEndpoint-error"></span></label>
+<div class="secret" data-secret="edgeToken"></div><label>Default site name<input id="siteName" list="siteNames" autocomplete="off"><span class="error" id="siteName-error"></span></label><datalist id="siteNames"></datalist>
+<label>Fallback application base URL<input id="applicationBaseUrl" type="url" placeholder="Optional fallback when no shared URL template is configured"><span class="error" id="applicationBaseUrl-error"></span></label>
+<button type="button" data-test="publishing">Test Edge token &amp; site scope</button><p id="edge-sites"></p></section>
+</fieldset>
+<footer><span id="dirty">No unsaved changes</span><button type="button" id="reload">Reload saved values</button><button type="button" id="cancel">Cancel</button><button type="submit" id="save" class="primary" disabled>Save connection</button><button type="button" id="stop" hidden>Cancel test</button></footer>
+</form></main><script nonce="{{nonce}}" src="{{scriptUri}}"></script></body></html>
