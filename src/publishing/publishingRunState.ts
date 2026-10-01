@@ -1,4 +1,5 @@
 import { isOperationIntent } from "../operations/operationTypes";
+export const publishingProfilesKey = "sitecoreXmCloudSync.publishingProfiles.v1";
 import type {
   PowerPublishEdgeVerification,
   PublishBatch,

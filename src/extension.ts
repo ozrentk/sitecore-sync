@@ -1,10 +1,7 @@
-import { PublicPageService } from "./publicPages/publicPageService";
+import { ConnectionSettingsPanel } from "./connections/connectionSettingsPanel";
 import * as vscode from "vscode";
 import { ComparisonPanelManager } from "./comparison/comparisonPanel";
 import {
-  addConnection,
-  configureDeploymentMonitoring,
-  pasteAsConnectionUrl,
   removeConnection,
   testConnection,
 } from "./connections/connectionCommands";
@@ -165,6 +162,8 @@ export function activate(context: vscode.ExtensionContext): void {
     comparisonPanelManager.isConnectionInOpenComparison(connectionId) ||
     transferQueue.referencesConnection(connectionId) ||
     sequenceStore.referencesConnection(connectionId);
+  const connectionSettings = new ConnectionSettingsPanel(context.extensionUri, context.globalState, connectionStore, authoringClient, deploymentClient, experienceEdgeClient, connectionIsInUse);
+  context.subscriptions.push(connectionSettings);
   const updateConnectionRemovalContext = async (): Promise<void> => {
     const selected = selectedConnectionItem?.connection;
     await Promise.all([
@@ -268,25 +267,30 @@ export function activate(context: vscode.ExtensionContext): void {
   );
 
   context.subscriptions.push(
+    vscode.commands.registerCommand("xmCloudSync.configureConnection", async (argument: unknown) => {
+      await connectionSettings.choose("connection", argument instanceof ConnectionTreeItem ? argument.connection.id : undefined);
+    }),
     vscode.commands.registerCommand("xmCloudSync.configurePublicPageUrls", async () => {
-      try { await new PublicPageService(connectionStore, authoringClient).configure(comparisonPanelManager.getPublicPagePreviewContext()); }
-      catch (error: unknown) { await vscode.window.showErrorMessage(`Unable to configure public-page URLs: ${error instanceof Error ? error.message : String(error)}`); }
+      if (connectionStore.list().length) { await connectionSettings.choose("public"); }
+      else { await connectionSettings.open(undefined, "public"); }
     }),
     vscode.commands.registerCommand("xmCloudSync.configurePublicPageValues", async (argument: unknown) => {
-      try { await new PublicPageService(connectionStore, authoringClient).configureValues(argument instanceof ConnectionTreeItem ? argument.connection.id : undefined); }
-      catch (error: unknown) { await vscode.window.showErrorMessage(`Unable to configure public-page URL values: ${error instanceof Error ? error.message : String(error)}`); }
+      await connectionSettings.choose("public", argument instanceof ConnectionTreeItem ? argument.connection.id : undefined);
     }),
     vscode.commands.registerCommand("xmCloudSync.addConnection", async () => {
-      await addConnection(connectionStore, connectionProvider, authoringClient);
+      await connectionSettings.open();
     }),
     vscode.commands.registerCommand("xmCloudSync.pasteAsConnectionUrl", async () => {
-      await pasteAsConnectionUrl(connectionStore, connectionProvider, authoringClient);
+      const clipboard = (await vscode.env.clipboard.readText()).trim();
+      let initialUrl = clipboard;
+      try { initialUrl = new URL(clipboard).origin; } catch { /* Show invalid clipboard text inline for correction. */ }
+      await connectionSettings.open(undefined, "connection", initialUrl);
     }),
     vscode.commands.registerCommand("xmCloudSync.testConnection", async (argument) => {
       await testConnection(argument, connectionStore, connectionProvider, authoringClient);
     }),
     vscode.commands.registerCommand("xmCloudSync.configureDeploymentMonitoring", async (argument) => {
-      await configureDeploymentMonitoring(argument, connectionStore, deploymentClient);
+      await connectionSettings.choose("deployment", argument instanceof ConnectionTreeItem ? argument.connection.id : undefined);
     }),
     vscode.commands.registerCommand("xmCloudSync.removeConnection", async (argument) => {
       await removeConnection(
@@ -348,9 +352,7 @@ export function activate(context: vscode.ExtensionContext): void {
       await publishingManager.abandonCurrentPublish();
     }),
     vscode.commands.registerCommand("xmCloudSync.configurePublishing", async (argument) => {
-      await publishingManager.configureConnection(
-        argument instanceof ConnectionTreeItem ? argument.connection.id : undefined,
-      );
+      await connectionSettings.choose("publishing", argument instanceof ConnectionTreeItem ? argument.connection.id : typeof argument === "string" ? argument : undefined);
     }),
     vscode.commands.registerCommand("xmCloudSync.startTransfers", async () => {
       await transferProcessor.start();

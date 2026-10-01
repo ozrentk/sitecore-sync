@@ -1,6 +1,7 @@
 import { strictEqual } from "node:assert/strict";
 import * as vscode from "vscode";
 import { connectionStoreTests } from "./connectionStoreTests";
+import { connectionSettingsTests } from "./connectionSettingsTests";
 import { comparisonPanelTests } from "./comparisonPanelTests";
 import { itemTaskRunnerTests } from "./itemTaskRunnerTests";
 import { javaScriptTaskHostTests } from "./javascriptTaskHostTests";
@@ -28,13 +29,13 @@ interface IntegrationTest {
 
 const integrationTests: readonly IntegrationTest[] = [
   {
-    name: "exposes public URL configuration on connection context menus",
+    name: "exposes the unified dashboard on connection context menus",
     async execute(): Promise<void> {
       const extension = requireExtension();
       await extension.activate();
       const manifest = extension.packageJSON as ExtensionManifest;
       const entries = manifest.contributes?.menus?.["view/item/context"] ?? [];
-      const entry = entries.find(value => value.command === "xmCloudSync.configurePublicPageValues");
+      const entry = entries.find(value => value.command === "xmCloudSync.configureConnection");
       strictEqual(entry?.when, "view == xmCloudSync.connections && viewItem == xmCloudConnection");
     },
   },
@@ -75,6 +76,7 @@ const integrationTests: readonly IntegrationTest[] = [
     },
   },
   ...connectionStoreTests,
+  ...connectionSettingsTests,
   ...comparisonPanelTests,
   ...itemTaskRunnerTests,
   ...javaScriptTaskHostTests,
