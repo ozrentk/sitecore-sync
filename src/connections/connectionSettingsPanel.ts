@@ -4,7 +4,7 @@ import type { ConnectionStore } from "./connectionStore";
 import type { XmCloudConnection } from "./connection";
 import type { AuthoringContentClient, AuthoringSite } from "../sitecore/authoringClient";
 import type { DeploymentClient } from "../sitecore/deploymentClient";
-import type { ExperienceEdgeClient } from "../sitecore/experienceEdgeClient";
+import { EdgeRequestError, type ExperienceEdgeClient } from "../sitecore/experienceEdgeClient";
 import { publishingProfilesKey, readPublishingProfiles } from "../publishing/publishingRunState";
 import { parsePublicPageConnectionValues } from "../publicPages/publicPageUrl";
 import { parseConnectionSettings, SettingsValidationError, type ConnectionSettingsInput, type SecretEdit } from "./connectionSettingsValidation";
@@ -119,11 +119,21 @@ export class ConnectionSettingsPanel implements vscode.Disposable {
         };
         const testPublishing = async (saving = false): Promise<boolean> => {
           if (!input.publishingEnabled || !edgeToken) { throw new SettingsValidationError({ edgeToken: "Enable traced publishing and provide an Edge token." }); }
-          const sites = verifiedIdentity === identity && verifiedSites ? verifiedSites : await testConnection();
-          const edgeSites = await this.edge.listSites(input.edgeEndpoint, edgeToken, controller!.signal);
+          let edgeSites;
+          try { edgeSites = await this.edge.listSites(input.edgeEndpoint, edgeToken, controller!.signal); }
+          catch (error: unknown) {
+            if (controller!.signal.aborted) { throw error; }
+            throw new SettingsValidationError({ edgeToken: error instanceof EdgeRequestError ? error.safeMessage : "Experience Edge site query failed. Check the Delivery endpoint and token. No settings were saved." });
+          }
+          await send({ type: "edgeSites", sites: edgeSites.map(site => site.name) });
+          let sites: readonly AuthoringSite[];
+          try { sites = verifiedIdentity === identity && verifiedSites ? verifiedSites : await testConnection(); }
+          catch (error: unknown) {
+            if (controller!.signal.aborted) { throw error; }
+            throw new SettingsValidationError({ clientSecret: "Edge accepted the token, but the CM/Authoring connection could not be tested for site comparison. Use Test connection to check its URL and client credentials, then retry. No settings were saved." });
+          }
           const matches = sites.filter(site => edgeSites.some(edgeSite => edgeSite.name.toLowerCase() === site.name.toLowerCase() && (!edgeSite.rootPath || edgeSite.rootPath.toLowerCase() === site.rootPath.toLowerCase())));
           if (input.siteName && !sites.some(site => site.name === input.siteName)) { throw new SettingsValidationError({ siteName: "Choose a site from this connection's Authoring catalog." }); }
-          await send({ type: "edgeSites", sites: edgeSites.map(site => site.name) });
           const scopeMatches = sites.length > 0 && matches.length === sites.length;
           if (!scopeMatches) {
             const describe = (catalog: readonly { name: string; rootPath?: string }[]): string => catalog.slice(0, 20).map(site => `${site.name} — ${site.rootPath || "root not returned"}`).join("\n") || "No sites returned";

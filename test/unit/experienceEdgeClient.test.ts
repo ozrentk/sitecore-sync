@@ -5,7 +5,7 @@ import {
   strictEqual,
 } from "node:assert/strict";
 import { test } from "node:test";
-import { ExperienceEdgeClient } from "../../src/sitecore/experienceEdgeClient";
+import { EdgeRequestError, ExperienceEdgeClient } from "../../src/sitecore/experienceEdgeClient";
 import {
   jsonResponse,
   noOpLogger,
@@ -244,4 +244,22 @@ test("probeApplication constructs a public request and retains only diagnostic h
   strictEqual(headers.get("accept"), "text/html,application/xhtml+xml,application/json");
   strictEqual(headers.get("cache-control"), "no-cache");
   strictEqual(headers.has("sc_apikey"), false);
+});
+
+
+test("Edge failures expose safe diagnostics and retain HTTP status for non-JSON errors", async () => {
+  for (const [response, expected] of [
+    [new Response("private gateway response", { status: 403 }), /HTTP 403/],
+    [new Response("<html>Playground</html>"), /non-JSON/],
+    [jsonResponse({ errors: [{ message: "Cannot query field private-fixture" }] }), /schema differs/],
+  ] as const) {
+    const client = new ExperienceEdgeClient(noOpLogger, new QueuedHttpRuntime([response]));
+    await rejects(client.listSites(endpoint, token, signal), (error: unknown) => {
+      strictEqual(error instanceof EdgeRequestError, true);
+      const safe = (error as EdgeRequestError).safeMessage;
+      match(safe, expected);
+      strictEqual(safe.includes("private"), false);
+      return true;
+    });
+  }
 });

@@ -8,7 +8,7 @@ import { publishingProfilesKey } from "../../src/publishing/publishingRunState";
 import type { ConnectionSettingsInput } from "../../src/connections/connectionSettingsValidation";
 import type { AuthoringContentClient } from "../../src/sitecore/authoringClient";
 import type { DeploymentClient } from "../../src/sitecore/deploymentClient";
-import type { ExperienceEdgeClient } from "../../src/sitecore/experienceEdgeClient";
+import { EdgeRequestError, type ExperienceEdgeClient } from "../../src/sitecore/experienceEdgeClient";
 import { MemoryMemento, MemorySecretStorage, type IntegrationTest } from "./testSupport";
 
 const keep = { action: "keep" as const, value: "" };
@@ -91,7 +91,7 @@ export const connectionSettingsTests: readonly IntegrationTest[] = [
       let rejectEdge = false;
       let edgeSiteName = "wrong-site";
       const edge = { clear() {}, listSites: async () => {
-        if (rejectEdge) { throw new Error("edge-authentication-failure-fixture"); }
+        if (rejectEdge) { throw new EdgeRequestError("edge-authentication-failure-fixture", "Experience Edge returned HTTP 403. The endpoint rejected access."); }
         return [{ name: edgeSiteName }];
       } } as unknown as ExperienceEdgeClient;
       const dashboard = new ConnectionSettingsPanel(vscode.extensions.getExtension("OzrenTK.sitecore-xm-cloud-sync")!.extensionUri, state, store, authoring, deployment, edge, () => false);
@@ -138,11 +138,17 @@ export const connectionSettingsTests: readonly IntegrationTest[] = [
         await send({ type: "save", values: { ...values, publishingEnabled: true, edgeToken: { action: "replace", value: "invalid-test-token" } } });
         strictEqual(results.length, scopeDialogCount);
         strictEqual(await store.getEdgeToken(connection.id), undefined);
+        strictEqual(JSON.stringify(messages.filter(value => value.type === "errors").at(-1)).includes("HTTP 403"), true);
+        strictEqual(JSON.stringify(messages).includes("edge-authentication-failure-fixture"), false);
         rejectEdge = false;
         edgeSiteName = "site";
         await send({ type: "publishing", values: { ...values, publishingEnabled: true, edgeToken: { action: "replace", value: "matching-test-token" } } });
         strictEqual(results.length, scopeDialogCount);
         strictEqual(JSON.stringify(messages.filter(value => value.type === "status").at(-1)).includes("its sites match"), true);
+        failConnection = true;
+        await send({ type: "publishing", values: { ...values, clientSecret: { action: "replace", value: "different-test-secret" }, publishingEnabled: true, edgeToken: { action: "replace", value: "valid-test-token" } } });
+        strictEqual(JSON.stringify(messages.filter(value => value.type === "errors").at(-1)).includes("Edge accepted the token, but the CM/Authoring"), true);
+        failConnection = false;
         edgeSiteName = "wrong-site";
         waitForCancel = true;
         const cancelled = send({ type: "connection", values });
