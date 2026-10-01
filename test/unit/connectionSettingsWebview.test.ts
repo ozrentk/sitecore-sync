@@ -28,7 +28,7 @@ test("dashboard secret fields infer replacement, preserve empty drafts and reset
   const run = (code: string): unknown => new Script(code).runInContext(context);
   run(`const initial = {type:'initialize',isNew:false,values:{name:'Test',clientId:'client',serverUrl:'https://cm.example.test',sites:[]},stored:{clientSecret:true,deploymentSecret:true,edgeToken:true}};
     receive({data:initial}); receive({data:{type:'idle'}});`);
-  for (const id of ["clientSecret", "deploymentSecret"]) {
+  for (const id of ["clientSecret", "deploymentSecret", "edgeToken"]) {
     strictEqual(run(`get('${id}-action')`), null);
     strictEqual(run(`get('${id}').type`), "password");
     strictEqual(run(`get('${id}').disabled`), false);
@@ -46,10 +46,10 @@ test("dashboard secret fields infer replacement, preserve empty drafts and reset
     strictEqual(run(`secretAction('${id}')`), "keep");
     strictEqual(run(`get('${id}').value`), "");
   }
-  strictEqual(run(`get('edgeToken-action').value`), "keep");
   run(`request('save');`);
   strictEqual(run(`sent.at(-1).values.clientSecret.action`), "keep");
   strictEqual(run(`sent.at(-1).values.deploymentSecret.action`), "keep");
+  strictEqual(run(`sent.at(-1).values.edgeToken.action`), "keep");
   run(`receive({data:{...initial,isNew:true,stored:{}}});`);
   strictEqual(run(`localErrors('save').clientSecret`), "Enter a client secret.");
   run(`get('clientSecret').value='new-fixture';`);
