@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.22.1
+
+- Simplify client and organization secrets to a single masked field each: enter a replacement or leave empty to retain the saved secret.
+
 ## 0.22.0
 
 - Add a unified Connection Settings dashboard for creating and editing connections, deployment monitoring, site URL values and traced-publishing defaults.
