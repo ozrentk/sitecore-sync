@@ -4,7 +4,7 @@ Consolidated planning inventory as of 2026-09-14, reviewed against version 0.20.
 
 Status: B01–B06 are explicit TODOs; B07–B15 are deferred enhancements; B16 is a known limitation; B17 is documentation cleanup; B18 has an agreed high-level plan and awaits implementation. Grouping does not change their priority or scope.
 
-Added 2026-10-01: B19 is a feature idea requiring detailed planning; the earlier inventory has not been re-audited for completion.
+Added 2026-10-01: B19 and B20 are feature ideas requiring detailed planning; the earlier inventory has not been re-audited for completion.
 
 ## Publishing and delivery verification
 
@@ -59,6 +59,7 @@ Added 2026-10-01: B19 is a feature idea requiring detailed planning; the earlier
 ## Connections and caching
 
 - [ ] **B09 — Clear Connection Cache command.** Provide an explicit connection-level cache clearing action.
+- [ ] **B20 — Local XM Cloud environment support.** Allow a locally running XM Cloud development environment to be configured alongside hosted environments and selected in the same connection workflows. Support local-to-cloud, cloud-to-local and local-to-local comparison and synchronization where the required APIs are available. This is a feature TODO requiring detailed planning: establish the supported local setup, endpoint and authentication configuration, development certificate handling, and API compatibility. Determine which browsing, task, publishing, delivery-verification and environment-shortcut capabilities apply locally; make unavailable capabilities clear rather than assuming hosted-cloud services exist. Preserve credential storage, explicit mutation confirmation and existing connection behavior.
 - [ ] **B19 — Cloud and administration shortcuts from a connection.** Add convenient links to the server/connection right-click menu, opening the selected environment's publishing jobs list, administration panel, logs, Sitecore PowerShell ISE, and other useful cloud or administration pages. This is a feature TODO, not a detailed implementation plan. Planning should establish the supported destinations, how their URLs are resolved from connection/environment metadata, whether custom links are supported, and how unavailable destinations are presented. Opening a shortcut should navigate to the page without automatically executing administrative actions; normal browser sign-in and destination permissions still apply.
 
 ## Documentation cleanup
