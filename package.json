@@ -29,7 +29,6 @@
     "onView:xmCloudSync.operations",
     "onView:xmCloudSync.fieldDiff",
     "onCommand:xmCloudSync.addConnection",
-    "onCommand:xmCloudSync.pasteAsConnectionUrl",
     "onCommand:xmCloudSync.testConnection",
     "onCommand:xmCloudSync.configureDeploymentMonitoring",
     "onCommand:xmCloudSync.removeConnection",
@@ -53,10 +52,6 @@
         "command": "xmCloudSync.addConnection",
         "title": "XM Cloud Sync: Add Connection",
         "icon": "$(add)"
-      },
-      {
-        "command": "xmCloudSync.pasteAsConnectionUrl",
-        "title": "XM Cloud Sync: Paste as Connection URL"
       },
       {
         "command": "xmCloudSync.testConnection",
@@ -302,7 +297,7 @@
     "viewsWelcome": [
       {
         "view": "xmCloudSync.connections",
-        "contents": "No XM Cloud connections have been added.\n[Add Connection](command:xmCloudSync.addConnection)\n[Paste as Connection URL](command:xmCloudSync.pasteAsConnectionUrl)"
+        "contents": "No XM Cloud connections have been added.\n[Add Connection](command:xmCloudSync.addConnection)"
       },
       {
         "view": "xmCloudSync.operations",
@@ -356,11 +351,6 @@
       "view/item/context": [
         {
           "command": "xmCloudSync.configureConnection",
-          "when": "view == xmCloudSync.connections && viewItem == xmCloudConnection",
-          "group": "1_connections"
-        },
-        {
-          "command": "xmCloudSync.pasteAsConnectionUrl",
           "when": "view == xmCloudSync.connections && viewItem == xmCloudConnection",
           "group": "1_connections"
         },

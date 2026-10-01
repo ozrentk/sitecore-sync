@@ -110,7 +110,7 @@ window.addEventListener("message", event => {
     }
     get("title").textContent = isNew ? "Add Connection" : message.values.name;
     get("save").textContent = isNew ? "Add connection" : "Save changes";
-    get("status").textContent = "Tests do not save changes. Use Save when ready."; errors({}); setDirty(false);
+    get("status").textContent = ""; errors({}); setDirty(false);
     get(message.section)?.scrollIntoView();
   } else if (message.type === "sites") {
     saveSite(); for (const name of message.sites) if (!sites.some(site => site.name === name)) sites.push({ name, publicBaseUrl: "", deploymentBaseUrl: "" }); renderSites();

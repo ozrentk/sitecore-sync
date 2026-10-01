@@ -27,7 +27,7 @@ export class ConnectionSettingsPanel implements vscode.Disposable {
     if (id) { await this.open(id, section); }
   }
 
-  async open(connectionId?: string, section = "connection", initialServerUrl = ""): Promise<void> {
+  async open(connectionId?: string, section = "connection"): Promise<void> {
     const key = connectionId ?? "new";
     const existing = this.panels.get(key);
     if (existing) { existing.reveal(); await existing.webview.postMessage({ type: "focus", section }); return; }
@@ -59,7 +59,7 @@ export class ConnectionSettingsPanel implements vscode.Disposable {
       baseline = revision();
       panel.title = connection ? `Settings: ${connection.name}` : "Add Connection";
       await send({ type: "initialize", section, isNew: !id,
-        values: { name: connection?.name ?? "", serverUrl: connection?.serverUrl ?? initialServerUrl, clientId: connection?.clientId ?? "",
+        values: { name: connection?.name ?? "", serverUrl: connection?.serverUrl ?? "", clientId: connection?.clientId ?? "",
           deploymentEnabled: Boolean(connection?.deploymentClientId), deploymentClientId: connection?.deploymentClientId ?? "", deploymentEnvironmentId: connection?.deploymentEnvironmentId ?? "",
           publishingEnabled: Boolean(profile), edgeEndpoint: profile?.edgeEndpoint ?? "https://edge.sitecorecloud.io/api/graphql/v1", siteName: profile?.siteName ?? "",
           applicationBaseUrl: profile?.applicationBaseUrl ?? "", publicTemplate: settings().get("publicPageUrlTemplate", ""), defaultSite: values.defaultSite ?? "",

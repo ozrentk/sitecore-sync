@@ -60,6 +60,8 @@ const integrationTests: readonly IntegrationTest[] = [
         return entry.command;
       });
       const registered = new Set(await vscode.commands.getCommands(true));
+      strictEqual(registered.has("xmCloudSync.pasteAsConnectionUrl"), false);
+      strictEqual(JSON.stringify(manifest).includes("xmCloudSync.pasteAsConnectionUrl"), false);
       const missing = contributed.filter((command) => !registered.has(command));
       strictEqual(
         missing.length,
