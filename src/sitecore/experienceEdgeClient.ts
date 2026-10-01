@@ -68,6 +68,10 @@ export interface EdgeSiteInfo {
   readonly rootPath?: string;
 }
 
+export class EdgeRequestError extends Error {
+  constructor(message: string, readonly safeMessage: string) { super(message); }
+}
+
 export class ExperienceEdgeClient {
   private readonly http: SitecoreHttpClient;
 
@@ -246,21 +250,28 @@ export class ExperienceEdgeClient {
         body: JSON.stringify({ query, variables }),
       },
       { name, signal, retryable: true },
-    );
+    ).catch((error: unknown) => {
+      if (signal.aborted) { throw error; }
+      throw new EdgeRequestError("Experience Edge network request failed.", "Could not reach Experience Edge. Check the endpoint, network, proxy, and TLS certificate.");
+    });
+    if (!response.ok) {
+      const hint = response.status === 401 || response.status === 403
+        ? "The endpoint rejected access. Check the token and its environment."
+        : response.status === 404 ? "Check the GraphQL endpoint; use /api/graphql/v1, not /api/graphql/ide."
+        : "The endpoint returned an unsuccessful response. Retry or check service availability.";
+      throw new EdgeRequestError(`${name} failed (${response.status}).`, `Experience Edge returned HTTP ${response.status}. ${hint}`);
+    }
     const text = await response.text();
     let parsed: unknown;
     try {
       parsed = JSON.parse(text) as unknown;
     } catch {
-      throw new Error(`${name} returned invalid JSON.`);
+      throw new EdgeRequestError(`${name} returned invalid JSON.`, "Experience Edge returned non-JSON content. Check the endpoint; use /api/graphql/v1, not the Playground /api/graphql/ide URL.");
     }
     if (!isRecord(parsed)) {
       throw new Error(`${name} returned an invalid response.`);
     }
     const payload = parsed as T;
-    if (!response.ok) {
-      throw new Error(`${name} failed (${response.status}).`);
-    }
     const errors = payload.errors;
     if (errors !== undefined && !Array.isArray(errors)) {
       throw new Error(`${name} returned an invalid response.`);
@@ -271,7 +282,10 @@ export class ExperienceEdgeClient {
           isRecord(error) && typeof error.message === "string" ? [error.message] : []
         )
         .join("; ");
-      throw new Error(messages || `${name} returned a GraphQL error.`);
+      throw new EdgeRequestError(messages || `${name} returned a GraphQL error.`,
+        /cannot query field|unknown argument|unknown type/i.test(messages)
+          ? "The endpoint rejected the site query because its GraphQL schema differs. Check that this is the Experience Edge Delivery endpoint (/api/graphql/v1)."
+          : "Experience Edge returned GraphQL errors. The token may lack access or the endpoint may not support this query.");
     }
     return payload;
   }
