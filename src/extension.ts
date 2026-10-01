@@ -280,12 +280,6 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.commands.registerCommand("xmCloudSync.addConnection", async () => {
       await connectionSettings.open();
     }),
-    vscode.commands.registerCommand("xmCloudSync.pasteAsConnectionUrl", async () => {
-      const clipboard = (await vscode.env.clipboard.readText()).trim();
-      let initialUrl = clipboard;
-      try { initialUrl = new URL(clipboard).origin; } catch { /* Show invalid clipboard text inline for correction. */ }
-      await connectionSettings.open(undefined, "connection", initialUrl);
-    }),
     vscode.commands.registerCommand("xmCloudSync.testConnection", async (argument) => {
       await testConnection(argument, connectionStore, connectionProvider, authoringClient);
     }),

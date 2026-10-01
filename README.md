@@ -14,7 +14,7 @@ Create an environment automation client for the XM Cloud environment in Sitecore
 4. Use **Test connection** to validate the entered credentials without saving. A modal shows success, failure, or cancellation/timeout.
 5. Configure optional deployment monitoring, per-site public URLs, and traced publishing defaults in the same dashboard, then select **Add connection**.
 
-Right-click a saved connection and choose **Configure Connection…** to review or edit all of these values. Existing deployment, public URL and traced-publishing commands open the corresponding dashboard section. **Paste as Connection URL** opens the new-connection form with the CM origin prefilled.
+Right-click a saved connection and choose **Configure Connection…** to review or edit all of these values. Existing deployment, public URL and traced-publishing commands open the corresponding dashboard section.
 
 Validation appears beside the relevant fields. **Save changes** applies the form, **Cancel** closes it without saving, and **Reload saved values** discards the draft. Closing the tab also discards unsaved values. Stored secrets never populate the webview. **Client secret**, **Organization client secret**, and **Experience Edge token** each use one masked field: enter a new value to replace the saved secret on Save, or leave it empty to keep the saved value. Disabling an optional credential section removes its saved secret when saved. Other credentials remain unchanged. Server or authoring-credential changes are blocked while the connection is referenced by comparisons or operations. Saved favorites and existing language overrides are retained.
 
@@ -38,7 +38,7 @@ Enable **Lock languages** to keep both sides on the same configured Sitecore lan
 
 One XM Cloud connection is sufficient. Select the same connection on both sides to compare languages such as `en` and `de`, or select different connections to compare environments. **Compare with…** also offers the selected connection itself for cross-language comparison.
 
-Selecting a connection reveals a trash action beside **Add Connection** and **Open Comparison**. A connection used by the open comparison cannot be deleted. **Paste as Connection URL** is available by right-clicking a connection and as an action in the empty Connections view; it accepts a full XM Cloud URL copied from Content Editor, extracts its HTTPS origin, and prefills the connection wizard.
+Selecting a connection reveals a trash action beside **Add Connection** and **Open Comparison**. A connection used by the open comparison cannot be deleted.
 
 Clicking a configured site beneath a connection reveals its root item using the same navigation behavior as favorites. A comparison must already be open with that connection selected on either side; clicking a site preserves the connection selections. Loaded rows are reused, missing ancestor levels are loaded as needed, and newer site or favorite clicks supersede earlier navigation. The site globe changes to spinning arrows while its root is loading and returns on completion, failure, cancellation, or superseding navigation. Site and favorite indicators remain separate even when they point to the same path. An unavailable site root reports an error without offering to remove a favorite.
 
