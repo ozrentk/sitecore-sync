@@ -73,10 +73,16 @@ export const connectionSettingsTests: readonly IntegrationTest[] = [
       const create = mock.method(vscode.window, "createWebviewPanel", () => panel);
       const configured: Record<string, unknown> = { publicPageUrlTemplate: "{publicBaseUrl}{route}", publicPageValues: { [connection.id]: { sites: { site: { publicBaseUrl: "https://public.example.test", languages: { en: { country: "US" } } } } } } };
       const config = mock.method(vscode.workspace, "getConfiguration", () => ({ get: (key: string, fallback: unknown) => configured[key] ?? fallback, inspect: (key: string) => ({ globalValue: configured[key] }), update: async (key: string, value: unknown) => { configured[key] = value; } }));
+      const results: { kind: string; message: string; options: vscode.MessageOptions }[] = [];
+      const success = mock.method(vscode.window, "showInformationMessage", async (message: string, options: vscode.MessageOptions) => { results.push({ kind: "success", message, options }); });
+      const failure = mock.method(vscode.window, "showErrorMessage", async (message: string, options: vscode.MessageOptions) => { results.push({ kind: "failure", message, options }); });
+      const cancellation = mock.method(vscode.window, "showWarningMessage", async (message: string, options: vscode.MessageOptions) => { results.push({ kind: "cancel", message, options }); });
       const tested: string[] = [];
+      let failConnection = false;
       let waitForCancel = false;
       const authoring = { clear() {}, testConnection: async (_connection: unknown, secret: string, signal: AbortSignal) => {
         tested.push(secret);
+        if (failConnection) { throw new Error("sensitive-response-fixture"); }
         if (waitForCancel) { await new Promise((_resolve, reject) => signal.addEventListener("abort", () => reject(new Error("cancelled")), { once: true })); }
         return { sites: [{ name: "site", rootPath: "/sitecore/content/Example" }] };
       } } as unknown as AuthoringContentClient;
@@ -99,6 +105,14 @@ export const connectionSettingsTests: readonly IntegrationTest[] = [
         const values = { ...(initial.values as ConnectionSettingsInput), clientSecret: keep, deploymentSecret: keep, edgeToken: keep };
         await send({ type: "connection", values: { ...values, clientSecret: { action: "replace", value: "unsaved-test-secret" } } });
         deepStrictEqual(tested, ["unsaved-test-secret"]);
+        strictEqual(results.at(-1)?.kind, "success");
+        strictEqual(results.at(-1)?.options.modal, true);
+        failConnection = true;
+        await send({ type: "connection", values });
+        strictEqual(results.at(-1)?.kind, "failure");
+        strictEqual(results.at(-1)?.options.modal, true);
+        strictEqual(JSON.stringify(results).includes("sensitive-response-fixture"), false);
+        failConnection = false;
         strictEqual(await store.getClientSecret(connection.id), "stored-test-secret");
         await send({ type: "deployment", values: { ...values, deploymentEnabled: true, deploymentClientId: "organization-client", deploymentSecret: { action: "replace", value: "test-organization-secret" } } });
         strictEqual(messages.some(value => value.type === "environment" && value.environmentId === "matched-environment"), true);
@@ -113,6 +127,9 @@ export const connectionSettingsTests: readonly IntegrationTest[] = [
         incoming.fire({ type: "cancelOperation" });
         await cancelled;
         waitForCancel = false;
+        strictEqual(results.at(-1)?.kind, "cancel");
+        strictEqual(results.at(-1)?.options.modal, true);
+        const resultCount = results.length;
         strictEqual(await store.getClientSecret(connection.id), "stored-test-secret");
         await send({ type: "save", values: { ...values, name: "Renamed" } });
         strictEqual(store.get(connection.id)?.name, "Renamed");
@@ -130,6 +147,7 @@ export const connectionSettingsTests: readonly IntegrationTest[] = [
         await send({ type: "save", values: { ...values, name: "Renamed", publishingEnabled: true } });
         strictEqual(tested.length, before);
         strictEqual(await store.getEdgeToken(connection.id), "existing-test-edge-token");
+        strictEqual(results.length, resultCount);
         incoming.fire({ type: "cancel" });
         strictEqual(store.get(connection.id)?.name, "Renamed");
         await dashboard.open(); await send({ type: "ready" });
@@ -138,7 +156,7 @@ export const connectionSettingsTests: readonly IntegrationTest[] = [
         strictEqual(store.list().length, 2);
         strictEqual(await store.getClientSecret(created.id), "new-test-secret");
         strictEqual(JSON.stringify(messages).includes("new-test-secret"), false);
-      } finally { dashboard.dispose(); create.mock.restore(); config.mock.restore(); incoming.dispose(); closed.dispose(); store.dispose(); secrets.dispose(); }
+      } finally { dashboard.dispose(); success.mock.restore(); failure.mock.restore(); cancellation.mock.restore(); create.mock.restore(); config.mock.restore(); incoming.dispose(); closed.dispose(); store.dispose(); secrets.dispose(); }
     },
   },
 ];

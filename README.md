@@ -11,7 +11,7 @@ Create an environment automation client for the XM Cloud environment in Sitecore
 1. Open the **XM Cloud Sync** activity view.
 2. In **Connections**, select **Add Connection**.
 3. Fill in the **Connection Settings** dashboard: name, CM server URL, client ID, and client secret.
-4. Use **Test Connection & discover sites** to validate the entered credentials without saving.
+4. Use **Test connection** to validate the entered credentials without saving. A modal shows success, failure, or cancellation/timeout.
 5. Configure optional deployment monitoring, per-site public URLs, and traced publishing defaults in the same dashboard, then select **Add connection**.
 
 Right-click a saved connection and choose **Configure Connection…** to review or edit all of these values. Existing deployment, public URL and traced-publishing commands open the corresponding dashboard section. **Paste as Connection URL** opens the new-connection form with the CM origin prefilled.

@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.22.2
+
+- Simplify secret placeholders and helper text, shorten the Test connection button, and show connection test results in a modal.
+
 ## 0.22.1
 
 - Simplify client and organization secrets to a single masked field each: enter a replacement or leave empty to retain the saved secret.

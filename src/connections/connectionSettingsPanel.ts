@@ -126,7 +126,13 @@ export class ConnectionSettingsPanel implements vscode.Disposable {
           if (input.siteName && !matches.some(site => site.name === input.siteName)) { throw new SettingsValidationError({ siteName: "Choose a site accessible to this connection and token." }); }
           await send({ type: "edgeSites", sites: edgeSites.map(site => site.name) });
         };
-        if (request.type === "connection") { const sites = await testConnection(); await send({ type: "status", text: `Connected. Found ${sites.length} site(s). Nothing saved yet.` }); }
+        if (request.type === "connection") {
+          const sites = await testConnection();
+          controller.signal.throwIfAborted();
+          await send({ type: "status", text: `Connected. Found ${sites.length} site(s). Nothing saved yet.` });
+          clearTimeout(timeout);
+          if (!disposed) { await vscode.window.showInformationMessage("Connection test succeeded.", { modal: true, detail: "The connection is working. Changes have not been saved." }); }
+        }
         else if (request.type === "deployment") { await send({ type: "environment", environmentId: await testDeployment() }); }
         else if (request.type === "publishing") { await testPublishing(); await send({ type: "status", text: "Edge token matches this connection. Nothing saved yet." }); }
         else {
@@ -156,6 +162,15 @@ export class ConnectionSettingsPanel implements vscode.Disposable {
         }
       } catch (error: unknown) {
         await send({ type: "errors", errors: error instanceof SettingsValidationError ? error.errors : { form: controller.signal.aborted ? "Operation cancelled or timed out. Changes were not saved." : "Operation failed. Check the connection, credentials and settings, then retry. If saving failed, reload saved values to review the current state." } });
+        if (request.type === "connection" && !disposed) {
+          clearTimeout(timeout);
+          const detail = error instanceof SettingsValidationError ? Object.values(error.errors).join("\n") : "Check the CM server URL and client credentials, then try again.";
+          if (controller.signal.aborted) {
+            await vscode.window.showWarningMessage("Connection test cancelled or timed out.", { modal: true, detail: "Changes have not been saved. You can test the connection again." });
+          } else {
+            await vscode.window.showErrorMessage("Connection test failed.", { modal: true, detail });
+          }
+        }
       } finally { clearTimeout(timeout); busy = false; if (saving) { this.saving = false; } await send({ type: "idle" }); }
     }));
     try {

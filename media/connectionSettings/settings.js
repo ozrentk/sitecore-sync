@@ -121,8 +121,8 @@ window.addEventListener("message", event => {
       get(id).value = "";
       if (simpleSecrets.has(id)) {
         get(id).disabled = false;
-        get(id).placeholder = message.stored[id] ? "Leave empty to keep stored secret" : "Enter client secret";
-        get(`${id}-stored`).textContent = message.stored[id] ? "A secret is stored. Enter a new value to replace it on Save; leave empty to keep it." : "No secret stored.";
+        get(id).placeholder = "Enter new secret or leave empty to keep the old one";
+        get(`${id}-stored`).textContent = message.stored[id] ? "A secret is stored." : "No secret stored.";
         continue;
       }
       get(`${id}-action`).value = "keep";
