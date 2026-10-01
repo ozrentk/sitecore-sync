@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.22.3
+
+- Give the Experience Edge token the same single masked field and concise hints as other secrets; empty input keeps the stored token.
+
 ## 0.22.2
 
 - Simplify secret placeholders and helper text, shorten the Test connection button, and show connection test results in a modal.

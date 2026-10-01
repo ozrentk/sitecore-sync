@@ -2,35 +2,20 @@ const vscode = acquireVsCodeApi();
 const get = id => document.getElementById(id);
 const textFields = ["name", "serverUrl", "clientId", "deploymentClientId", "deploymentEnvironmentId", "edgeEndpoint", "siteName", "applicationBaseUrl", "publicTemplate", "defaultSite"];
 const secretNames = { clientSecret: "Client secret", deploymentSecret: "Organization client secret", edgeToken: "Experience Edge token" };
-const simpleSecrets = new Set(["clientSecret", "deploymentSecret"]);
 let storedSecrets = {};
-function secretAction(id) { return simpleSecrets.has(id) ? (get(id).value ? "replace" : "keep") : get(`${id}-action`).value; }
+function secretAction(id) { return get(id).value ? "replace" : "keep"; }
 let sites = [];
 let isNew = true;
 let busy = false;
 for (const [id, title] of Object.entries(secretNames)) {
   const root = document.querySelector(`[data-secret="${id}"]`);
   const label = document.createElement("label"); label.textContent = title;
-  if (simpleSecrets.has(id)) {
-    root.classList.add("simple-secret");
-    const input = document.createElement("input"); input.type = "password"; input.id = id; input.autocomplete = "new-password";
-    const stored = document.createElement("small"); stored.id = `${id}-stored`;
-    const error = document.createElement("span"); error.className = "error"; error.id = `${id}-error`;
-    input.setAttribute("aria-describedby", `${stored.id} ${error.id}`);
-    label.append(input, stored, error); root.append(label);
-    continue;
-  }
-  const select = document.createElement("select"); select.id = `${id}-action`;
-  for (const [value, text] of [["keep", "Keep stored value"], ["replace", "Replace"], ["remove", "Remove on Save"]]) {
-    const option = document.createElement("option"); option.value = value; option.textContent = text; select.append(option);
-  }
-  const stored = document.createElement("small"); stored.id = `${id}-stored`;
-  label.append(select, stored);
-  const replacement = document.createElement("label"); replacement.textContent = `New ${title.toLowerCase()}`;
+  root.classList.add("simple-secret");
   const input = document.createElement("input"); input.type = "password"; input.id = id; input.autocomplete = "new-password";
-  const error = document.createElement("span"); error.className = "error"; error.id = `${id}-error`; input.setAttribute("aria-describedby", error.id);
-  replacement.append(input, error); root.append(label, replacement);
-  select.addEventListener("change", () => { input.disabled = select.value !== "replace"; if (input.disabled) input.value = ""; });
+  const stored = document.createElement("small"); stored.id = `${id}-stored`;
+  const error = document.createElement("span"); error.className = "error"; error.id = `${id}-error`;
+  input.setAttribute("aria-describedby", `${stored.id} ${error.id}`);
+  label.append(input, stored, error); root.append(label);
 }
 for (const error of document.querySelectorAll(".error[id]")) { const input = get(error.id.replace(/-error$/, "")); if (input && !input.hasAttribute("aria-describedby")) input.setAttribute("aria-describedby", error.id); }
 function setDirty(value) { get("dirty").textContent = value ? "Unsaved changes" : "No unsaved changes"; }
@@ -119,15 +104,9 @@ window.addEventListener("message", event => {
     for (const id of ["deploymentEnabled", "publishingEnabled"]) get(id).checked = message.values[id];
     for (const id of Object.keys(secretNames)) {
       get(id).value = "";
-      if (simpleSecrets.has(id)) {
-        get(id).disabled = false;
-        get(id).placeholder = "Enter new secret or leave empty to keep the old one";
-        get(`${id}-stored`).textContent = message.stored[id] ? "A secret is stored." : "No secret stored.";
-        continue;
-      }
-      get(`${id}-action`).value = "keep";
-      get(`${id}-stored`).textContent = message.stored[id] ? "A secret is stored. Its value is never sent to this form." : "No secret stored. Choose Replace to enter one.";
-      get(id).disabled = true;
+      get(id).disabled = false;
+      get(id).placeholder = "Enter new secret or leave empty to keep the old one";
+      get(`${id}-stored`).textContent = message.stored[id] ? "A secret is stored." : "No secret stored.";
     }
     get("title").textContent = isNew ? "Add Connection" : message.values.name;
     get("save").textContent = isNew ? "Add connection" : "Save changes";
