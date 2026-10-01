@@ -32,6 +32,8 @@ test("dashboard secret fields infer replacement, preserve empty drafts and reset
     strictEqual(run(`get('${id}-action')`), null);
     strictEqual(run(`get('${id}').type`), "password");
     strictEqual(run(`get('${id}').disabled`), false);
+    strictEqual(run(`get('${id}').placeholder`), "Enter new secret or leave empty to keep the old one");
+    strictEqual(run(`get('${id}-stored').textContent`), "A secret is stored.");
     strictEqual(run(`get('${id}').value`), "");
     strictEqual(run(`secretAction('${id}')`), "keep");
     run(`get('${id}').value='replacement-fixture';`);
