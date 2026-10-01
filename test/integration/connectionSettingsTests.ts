@@ -76,7 +76,8 @@ export const connectionSettingsTests: readonly IntegrationTest[] = [
       const results: { kind: string; message: string; options: vscode.MessageOptions }[] = [];
       const success = mock.method(vscode.window, "showInformationMessage", async (message: string, options: vscode.MessageOptions) => { results.push({ kind: "success", message, options }); });
       const failure = mock.method(vscode.window, "showErrorMessage", async (message: string, options: vscode.MessageOptions) => { results.push({ kind: "failure", message, options }); });
-      const cancellation = mock.method(vscode.window, "showWarningMessage", async (message: string, options: vscode.MessageOptions) => { results.push({ kind: "cancel", message, options }); });
+      let approveScope = false;
+      const cancellation = mock.method(vscode.window, "showWarningMessage", async (message: string, options: vscode.MessageOptions) => { results.push({ kind: "cancel", message, options }); return approveScope ? "Use token anyway" : undefined; });
       const tested: string[] = [];
       let failConnection = false;
       let waitForCancel = false;
@@ -87,7 +88,12 @@ export const connectionSettingsTests: readonly IntegrationTest[] = [
         return { sites: [{ name: "site", rootPath: "/sitecore/content/Example" }] };
       } } as unknown as AuthoringContentClient;
       const deployment = { clear() {}, resolveEnvironment: async () => ({ environmentId: "matched-environment" }) } as unknown as DeploymentClient;
-      const edge = { clear() {}, listSites: async () => [{ name: "wrong-site" }] } as unknown as ExperienceEdgeClient;
+      let rejectEdge = false;
+      let edgeSiteName = "wrong-site";
+      const edge = { clear() {}, listSites: async () => {
+        if (rejectEdge) { throw new Error("edge-authentication-failure-fixture"); }
+        return [{ name: edgeSiteName }];
+      } } as unknown as ExperienceEdgeClient;
       const dashboard = new ConnectionSettingsPanel(vscode.extensions.getExtension("OzrenTK.sitecore-xm-cloud-sync")!.extensionUri, state, store, authoring, deployment, edge, () => false);
       const send = async (message: unknown): Promise<void> => {
         const start = messages.filter(value => value.type === "idle").length;
@@ -121,6 +127,23 @@ export const connectionSettingsTests: readonly IntegrationTest[] = [
         strictEqual(store.get(connection.id)?.name, "Original");
         strictEqual(await store.getEdgeToken(connection.id), undefined);
         strictEqual(JSON.stringify(messages.filter(value => value.type === "errors").at(-1)).includes("scope"), true);
+        await send({ type: "publishing", values: { ...values, publishingEnabled: true, edgeToken: { action: "replace", value: "valid-test-token" } } });
+        strictEqual(results.at(-1)?.message, "The token is valid, but the site catalogs differ.");
+        strictEqual(results.at(-1)?.options.detail?.includes("wrong-site"), true);
+        strictEqual(results.at(-1)?.options.detail?.includes("/sitecore/content/Example"), true);
+        strictEqual(JSON.stringify(messages.filter(value => value.type === "status").at(-1)).includes("Edge token is valid. Site catalogs differ"), true);
+        strictEqual(await store.getEdgeToken(connection.id), undefined);
+        const scopeDialogCount = results.length;
+        rejectEdge = true;
+        await send({ type: "save", values: { ...values, publishingEnabled: true, edgeToken: { action: "replace", value: "invalid-test-token" } } });
+        strictEqual(results.length, scopeDialogCount);
+        strictEqual(await store.getEdgeToken(connection.id), undefined);
+        rejectEdge = false;
+        edgeSiteName = "site";
+        await send({ type: "publishing", values: { ...values, publishingEnabled: true, edgeToken: { action: "replace", value: "matching-test-token" } } });
+        strictEqual(results.length, scopeDialogCount);
+        strictEqual(JSON.stringify(messages.filter(value => value.type === "status").at(-1)).includes("its sites match"), true);
+        edgeSiteName = "wrong-site";
         waitForCancel = true;
         const cancelled = send({ type: "connection", values });
         await new Promise(resolve => setTimeout(resolve, 10));
@@ -156,6 +179,10 @@ export const connectionSettingsTests: readonly IntegrationTest[] = [
         strictEqual(store.list().length, 2);
         strictEqual(await store.getClientSecret(created.id), "new-test-secret");
         strictEqual(JSON.stringify(messages).includes("new-test-secret"), false);
+        approveScope = true;
+        await send({ type: "save", values: { ...values, name: "New connection", publishingEnabled: true, edgeToken: { action: "replace", value: "confirmed-test-token" } } });
+        strictEqual(await store.getEdgeToken(created.id), "confirmed-test-token");
+        strictEqual(JSON.stringify(results).includes("confirmed-test-token"), false);
       } finally { dashboard.dispose(); success.mock.restore(); failure.mock.restore(); cancellation.mock.restore(); create.mock.restore(); config.mock.restore(); incoming.dispose(); closed.dispose(); store.dispose(); secrets.dispose(); }
     },
   },

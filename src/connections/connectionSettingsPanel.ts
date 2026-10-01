@@ -117,14 +117,27 @@ export class ConnectionSettingsPanel implements vscode.Disposable {
           const result = await this.deployment.resolveEnvironment(connection, { clientId: input.deploymentClientId, clientSecret: deploymentSecret }, controller!.signal);
           return result.environmentId;
         };
-        const testPublishing = async (): Promise<void> => {
+        const testPublishing = async (saving = false): Promise<boolean> => {
           if (!input.publishingEnabled || !edgeToken) { throw new SettingsValidationError({ edgeToken: "Enable traced publishing and provide an Edge token." }); }
           const sites = verifiedIdentity === identity && verifiedSites ? verifiedSites : await testConnection();
           const edgeSites = await this.edge.listSites(input.edgeEndpoint, edgeToken, controller!.signal);
           const matches = sites.filter(site => edgeSites.some(edgeSite => edgeSite.name.toLowerCase() === site.name.toLowerCase() && (!edgeSite.rootPath || edgeSite.rootPath.toLowerCase() === site.rootPath.toLowerCase())));
-          if (!sites.length || matches.length !== sites.length) { throw new SettingsValidationError({ edgeToken: "The token's accessible sites do not match this connection. Check its environment and scope." }); }
-          if (input.siteName && !matches.some(site => site.name === input.siteName)) { throw new SettingsValidationError({ siteName: "Choose a site accessible to this connection and token." }); }
+          if (input.siteName && !sites.some(site => site.name === input.siteName)) { throw new SettingsValidationError({ siteName: "Choose a site from this connection's Authoring catalog." }); }
           await send({ type: "edgeSites", sites: edgeSites.map(site => site.name) });
+          const scopeMatches = sites.length > 0 && matches.length === sites.length;
+          if (!scopeMatches) {
+            const describe = (catalog: readonly { name: string; rootPath?: string }[]): string => catalog.slice(0, 20).map(site => `${site.name} — ${site.rootPath || "root not returned"}`).join("\n") || "No sites returned";
+            const detail = `Edge accepted the token, but its site catalog differs from Authoring. This can reflect unpublished site information or a different environment. Verify the sites before using this token.\n\nAuthoring sites (${sites.length}; showing up to 20):\n${describe(sites)}\n\nEdge sites (${edgeSites.length}; showing up to 20):\n${describe(edgeSites)}\n\nMatching Authoring sites: ${matches.length}/${sites.length}.`;
+            controller!.signal.throwIfAborted();
+            if (disposed) { throw new DOMException("Dashboard closed", "AbortError"); }
+            clearTimeout(timeout);
+            const choice = saving
+              ? await vscode.window.showWarningMessage("The token is valid, but the site catalogs differ.", { modal: true, detail }, "Use token anyway")
+              : await vscode.window.showWarningMessage("The token is valid, but the site catalogs differ.", { modal: true, detail });
+            controller!.signal.throwIfAborted();
+            if (saving && choice !== "Use token anyway") { throw new SettingsValidationError({ edgeToken: "Token scope was not confirmed. Review the site catalogs before saving." }); }
+          }
+          return scopeMatches;
         };
         if (request.type === "connection") {
           const sites = await testConnection();
@@ -134,7 +147,7 @@ export class ConnectionSettingsPanel implements vscode.Disposable {
           if (!disposed) { await vscode.window.showInformationMessage("Connection test succeeded.", { modal: true, detail: "The connection is working. Changes have not been saved." }); }
         }
         else if (request.type === "deployment") { await send({ type: "environment", environmentId: await testDeployment() }); }
-        else if (request.type === "publishing") { await testPublishing(); await send({ type: "status", text: "Edge token matches this connection. Nothing saved yet." }); }
+        else if (request.type === "publishing") { const matches = await testPublishing(); await send({ type: "status", text: matches ? "Edge token is valid and its sites match this connection. Nothing saved yet." : "Edge token is valid. Site catalogs differ; saving requires confirmation. Nothing saved yet." }); }
         else {
           if (revision() !== baseline) { throw new SettingsValidationError({ form: "Settings changed elsewhere. Reload saved values before saving." }); }
           if (!id && !authoringSecret) { throw new SettingsValidationError({ clientSecret: "A client secret is required for a new connection." }); }
@@ -147,7 +160,7 @@ export class ConnectionSettingsPanel implements vscode.Disposable {
             Object.assign(connection, { deploymentEnvironmentId: environmentId });
           }
           const previousProfile = profiles().find(value => value.connectionId === id);
-          if (input.publishingEnabled && (identityChanged || previousProfile?.edgeEndpoint !== input.edgeEndpoint || (previousProfile?.siteName ?? "") !== input.siteName || input.edgeToken.action !== "keep")) { await testPublishing(); }
+          if (input.publishingEnabled && (identityChanged || previousProfile?.edgeEndpoint !== input.edgeEndpoint || (previousProfile?.siteName ?? "") !== input.siteName || input.edgeToken.action !== "keep")) { await testPublishing(true); }
           if (input.deploymentEnabled && !deploymentSecret) { throw new SettingsValidationError({ deploymentSecret: "A deployment secret is required when monitoring is enabled." }); }
           if (input.publishingEnabled && !edgeToken) { throw new SettingsValidationError({ edgeToken: "An Edge token is required when traced publishing is enabled." }); }
           controller.signal.throwIfAborted();

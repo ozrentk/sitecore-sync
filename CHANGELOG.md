@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.22.4
+
+- Distinguish valid Experience Edge tokens from site-catalog mismatches; show Authoring and Edge sites and allow an explicit scope override on Save.
+
 ## 0.22.3
 
 - Give the Experience Edge token the same single masked field and concise hints as other secrets; empty input keeps the stored token.
