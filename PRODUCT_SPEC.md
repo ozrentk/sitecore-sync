@@ -427,3 +427,11 @@ Search uses the documented Authoring `search` query on `sitecore_master_index` (
 ## GitHub distribution
 
 The installable VSIX is distributed through GitHub Releases without Marketplace publishing. Version tag pushes must match the manifest and lockfile and reference a commit on `main`. CI scans Git history and the built package for secrets, then publishes the verified VSIX only after type checking and both test suites pass. Ordinary CI artifacts expire after 14 days; release assets are the download location for users. Updates are installed manually from the newer VSIX. Publishing credentials use the workflow token with write access confined to the release job.
+
+## B18 internal mode foundation
+
+`src/comparison/contentSession.ts` defines a panel-independent Browse/Compare lifecycle. Opening one endpoint produces Browse; Compare requires two explicit endpoints and preserves independent languages even when both use the same connection. A retained side carries its connection, language, root and selected item into Browse. Language lock is explicit and inconsistent locked pairs are rejected without changing the previous state.
+
+Transitions commit atomically after asynchronous preparation. Cancelled or failed preparation preserves the committed state; newer transitions, selection changes, cancellation and disposal invalidate earlier work. Same-key loads supersede each other, while separate keys may coexist. Results are published only while their originating session revision is current, including when transport ignores cancellation or selection returns to the same values.
+
+This is an internal foundation only, not an enabled Browse feature. The existing comparison panel, command behavior and persisted comparison selection remain unchanged. B18 #2 must integrate the lifecycle with the single-tree surface and all asynchronous publication paths before enabling Browse. Details/actions, partner persistence, switching UX and full acceptance remain in #3–#5. No new stored schema or credentials are introduced.
