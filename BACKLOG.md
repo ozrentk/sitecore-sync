@@ -2,7 +2,7 @@
 
 Consolidated planning inventory as of 2026-09-14, reviewed against version 0.20.0. Unchecked entries are outstanding, not a commitment to implement them in this order. Product requirements remain in [PRODUCT_SPEC.md](PRODUCT_SPEC.md); completed release details are in [CHANGELOG.md](CHANGELOG.md).
 
-Status: B01–B06 are explicit TODOs; B07–B15 are deferred enhancements; B16 is a known limitation; B17 is documentation cleanup; B18 has an agreed high-level plan and awaits implementation. Grouping does not change their priority or scope.
+Status: B01–B06 are explicit TODOs; B07–B15 are deferred enhancements; B16 is a known limitation; B17 is documentation cleanup; B18 has an internal mode foundation; user-facing Browse implementation remains pending. Grouping does not change their priority or scope.
 
 Added 2026-10-01: B19–B21 are feature ideas requiring detailed planning; the earlier inventory has not been re-audited for completion.
 
@@ -32,7 +32,15 @@ Also recorded: B22–B29 cover environment database/IAR diagnostics, finishing P
 - [ ] **B07 — Specific item-version selection.** Allow comparison of selected numbered versions instead of only the latest version in each selected language.
 - [ ] **B08 — Expand All size preflight.** Estimate unique left/right subtree items without materializing the webview tree. Support cancellation and either an exact count or a configurable warning threshold before expansion.
 - [ ] **B10 — ID-first/path-fallback comparison identity.** Add an alternative identity mode for matching items between environments. This is separate from the completed ID/path navigation feature.
-- [ ] **B18 — Browse mode for a single connection (planned; not implemented).** Opening a connection defaults to one full-width content tree. Use the familiar comparison-tree presentation and navigation, expose meaningful single-connection actions, and provide an explicit Browse / Compare switch. See the agreed plan below.
+- [ ] **B18 — Browse mode for a single connection (foundation only; not activated).** Opening a connection defaults to one full-width content tree. Use the familiar comparison-tree presentation and navigation, expose meaningful single-connection actions, and provide an explicit Browse / Compare switch. See the agreed plan below.
+
+### B18 — Implementation subtasks
+
+- [x] **#1 — Browse/Compare mode foundation (internal only).** `ContentSession` owns immutable Browse/Compare selections, single-connection entry, explicit comparison entry, retained-side state, cancellable transitions and superseding load publication. No panel or command consumes it yet: activation is deliberately deferred until the single-tree surface can hide comparison-only controls. Existing comparison commands and their language-lock policy are unchanged.
+- [ ] **#2 — Full-width single-tree UI/navigation.** Integrate the foundation with panel entry points, tree loads and webview messages; do not leave parallel state owners. Route asynchronous publication through the session and activate Browse only with a usable single-tree surface.
+- [ ] **#3 — Single-item details/actions.**
+- [ ] **#4 — Remembered partner and complete switching UX.**
+- [ ] **#5 — Full B18 acceptance/delivery.**
 
 ### B18 — Agreed high-level plan
 
@@ -48,7 +56,7 @@ Also recorded: B22–B29 cover environment database/IAR diagnostics, finishing P
 
 **Compare to Browse and state.** Let the user choose which comparison side to retain and remember that choice for subsequent switches, while allowing it to be changed. Preserve the retained side's connection, language, root and selected item. Preserve expansion and scroll state where practical, and keep mode-specific navigation state so switching does not unnecessarily restart browsing. New navigation or mode changes must supersede pending loads and prevent stale results from replacing the current view.
 
-**Implementation acceptance.** Verify opening with one configured connection; search and details in Browse; publishing and task availability; absence of diff/transfer controls; first-time partner selection and cancellation; remembered partner/language after reload; deleted partners and unavailable languages; same-connection cross-language comparison; explicit language-lock behavior; and state restoration during cancelled or superseded loading. Use domain tests and extension-host checks where appropriate, plus focused manual checks for tree layout, keyboard access and mode transitions. This plan records future behavior; no implementation has been performed in this planning task.
+**Implementation acceptance.** Verify opening with one configured connection; search and details in Browse; publishing and task availability; absence of diff/transfer controls; first-time partner selection and cancellation; remembered partner/language after reload; deleted partners and unavailable languages; same-connection cross-language comparison; explicit language-lock behavior; and state restoration during cancelled or superseded loading. Use domain tests and extension-host checks where appropriate, plus focused manual checks for tree layout, keyboard access and mode transitions. The complete behavior remains pending; only the internal foundation in subtask #1 is delivered.
 
 ## Editors and publishing integration
 
