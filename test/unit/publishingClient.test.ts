@@ -128,6 +128,8 @@ test("status accepts a null target database but rejects malformed required field
     { ...validStatus, processed: -1 },
     { ...validStatus, processed: 1.5 },
     { ...validStatus, languages: [{ name: 42 }] },
+    { ...validStatus, languages: undefined },
+    { ...validStatus, languages: [null] },
     { ...validStatus, targetDatabase: {} },
   ]) {
     const runtime = new QueuedHttpRuntime([
@@ -159,16 +161,17 @@ test("publishing requests surface GraphQL messages and the generic fallback", as
 test("invalid publishing status identifies the mismatched fields without disclosing response values", async () => {
   const runtime = new QueuedHttpRuntime([tokenResponse(), jsonResponse({ data: { publishingStatus: {
     state: "RUNNING", isDone: false, isFailed: false, processed: "private-response-value",
-    languages: null, targetDatabase: null,
+    languages: "private-language-value", targetDatabase: null,
   } } })]);
   const client = new PublishingClient(noOpLogger, runtime);
   await rejects(client.status(testConnection, "client-secret", "publish-123", signal), (error: unknown) => {
     strictEqual(error instanceof Error, true);
     const message = (error as Error).message;
     strictEqual(message.includes("processed expected a non-negative integer, received string"), true);
-    strictEqual(message.includes("languages expected an array of named languages, received null"), true);
+    strictEqual(message.includes("languages expected null or an array of named languages, received string"), true);
     strictEqual(message.includes("remote publishing outcome is unknown"), true);
     strictEqual(message.includes("private-response-value"), false);
+    strictEqual(message.includes("private-language-value"), false);
     return true;
   });
 });
@@ -198,5 +201,22 @@ test("publishing validates authentication responses", async () => {
       client.status(testConnection, "client-secret", "publish-123", signal),
       /Publishing authentication failed/u,
     );
+  }
+});
+
+
+test("null language metadata preserves running, completed and failed publishing states", async () => {
+  for (const flags of [
+    { state: "RUNNING", isDone: false, isFailed: false },
+    { state: "COMPLETED", isDone: true, isFailed: false },
+    { state: "FAILED", isDone: true, isFailed: true },
+  ]) {
+    const runtime = new QueuedHttpRuntime([tokenResponse(), jsonResponse({ data: { publishingStatus: {
+      ...flags, processed: 0, languages: null, targetDatabase: null,
+    } } })]);
+    const client = new PublishingClient(noOpLogger, runtime);
+    deepStrictEqual(await client.status(testConnection, "client-secret", "publish-123", signal),
+      { ...flags, processed: 0, languages: [] });
+    strictEqual(runtime.requests.length, 2);
   }
 });

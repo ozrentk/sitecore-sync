@@ -32,7 +32,7 @@ interface StatusResponse {
       readonly isDone?: unknown;
       readonly isFailed?: unknown;
       readonly processed?: unknown;
-      readonly languages?: readonly { readonly name?: unknown }[];
+      readonly languages?: readonly { readonly name?: unknown }[] | null;
       readonly targetDatabase?: { readonly name?: unknown } | null;
     } | null;
   };
@@ -127,10 +127,10 @@ export class PublishingClient {
       typeof status.processed !== "number" ||
       !Number.isInteger(status.processed) ||
       status.processed < 0 ||
-      !Array.isArray(status.languages) ||
-      status.languages.some(
-        (language) => typeof language?.name !== "string" || language.name.length === 0,
-      ) ||
+      (status.languages !== null && (!Array.isArray(status.languages) ||
+        status.languages.some(
+          (language) => typeof language?.name !== "string" || language.name.length === 0,
+        ))) ||
       (status.targetDatabase !== null &&
         (typeof status.targetDatabase !== "object" ||
           typeof status.targetDatabase.name !== "string" ||
@@ -143,7 +143,8 @@ export class PublishingClient {
       isDone: status.isDone,
       isFailed: status.isFailed,
       processed: status.processed,
-      languages: status.languages.map((language) => language.name as string),
+      // Sitecore may omit language metadata while still returning authoritative job state.
+      languages: (status.languages ?? []).map((language) => language.name as string),
       ...(status.targetDatabase === null
         ? {}
         : { targetDatabase: status.targetDatabase.name as string }),
@@ -239,8 +240,8 @@ function invalidStatusFields(status: NonNullable<NonNullable<StatusResponse["dat
   if (typeof status.processed !== "number" || !Number.isInteger(status.processed) || status.processed < 0) {
     describe("processed", status.processed, "a non-negative integer");
   }
-  if (!Array.isArray(status.languages) || status.languages.some(language => typeof language?.name !== "string" || !language.name.length)) {
-    describe("languages", status.languages, "an array of named languages");
+  if (status.languages !== null && (!Array.isArray(status.languages) || status.languages.some(language => typeof language?.name !== "string" || !language.name.length))) {
+    describe("languages", status.languages, "null or an array of named languages");
   }
   if (status.targetDatabase !== null && (typeof status.targetDatabase !== "object" || typeof status.targetDatabase.name !== "string" || !status.targetDatabase.name.length)) {
     describe("targetDatabase", status.targetDatabase, "null or an object with a non-empty name");

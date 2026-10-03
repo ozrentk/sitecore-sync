@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.24.2
+
+- Accept null publishing-language metadata without pausing the queue; continue honoring the reported job state, completion and failure flags.
+
 ## 0.24.1
 
 - Correct the shared bottom-panel tab name to Item Details.
