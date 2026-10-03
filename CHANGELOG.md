@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.30.0
+
+- Add previewed MCP creation of the first local language version and explicit content-field reset for controlled fallback testing.
+- Validate the version mutation contract without execution before preview, preserve confirmation and stale-state checks, and journal uncertain outcomes without retries.
+
 ## 0.29.0
 
 - Add explicitly started local MCP access for selected connections, with path-based reads, indexed search, language/site discovery and fallback diagnostics.

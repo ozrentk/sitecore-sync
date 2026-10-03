@@ -4,6 +4,7 @@ import { randomUUID } from "node:crypto";
 import { print } from "graphql";
 import {
   createItemMutation,
+  addItemVersionMutation,
   deleteItemMutation,
   itemDetailsQuery,
   languagesQuery,
@@ -211,6 +212,8 @@ interface ItemMutationResponse {
   readonly data?: {
     readonly createItem?: { readonly item?: RawMutatedItem | null } | null;
     readonly updateItem?: { readonly item?: RawMutatedItem | null } | null;
+    readonly addItemVersion?: { readonly item?: RawMutatedItem | null } | null;
+    readonly __typename?: unknown;
   };
   readonly errors?: readonly GraphQlError[];
 }
@@ -1276,11 +1279,50 @@ export class AuthoringContentClient {
     );
   }
 
+  async validateAddItemVersion(connection: XmCloudConnection, clientSecret: string,
+    input: { readonly itemId: string; readonly language: string }, signal: AbortSignal): Promise<void> {
+    const payload = await this.requestAddItemVersion(connection, clientSecret, input, true, signal);
+    if (typeof payload.data?.__typename !== "string" || payload.data.addItemVersion !== undefined) {
+      throw new Error("Authoring API could not validate version creation without execution.");
+    }
+  }
+
+  async addItemVersion(connection: XmCloudConnection, clientSecret: string,
+    input: { readonly itemId: string; readonly language: string }, signal: AbortSignal): Promise<AuthoringItemDetails> {
+    const payload = await this.requestAddItemVersion(connection, clientSecret, input, false, signal);
+    const raw = payload.data?.addItemVersion?.item;
+    const item = parseMutatedItem(raw, "versioned");
+    if (normalizeGuid(item.itemId) !== normalizeGuid(input.itemId)
+      || item.language.toLowerCase() !== input.language.toLowerCase()
+      || typeof raw?.version !== "number" || !Number.isInteger(raw.version) || raw.version < 1) {
+      throw new Error("Authoring API did not confirm the new language version.");
+    }
+    return this.loadItem(connection, clientSecret, { itemId: item.itemId }, item.language, raw.version, signal);
+  }
+
+  private async requestAddItemVersion(connection: XmCloudConnection, clientSecret: string,
+    input: { readonly itemId: string; readonly language: string }, validateOnly: boolean,
+    signal: AbortSignal): Promise<ItemMutationResponse> {
+    const accessToken = await this.getAccessToken(connection, clientSecret, signal);
+    return this.postGraphQl<ItemMutationResponse>(connection.serverUrl, accessToken,
+      "create Authoring language version", "XmCloudSyncAddItemVersion", print(addItemVersionMutation),
+      { input: { database: "master", ...input }, validateOnly }, signal, false);
+  }
+
+  async resetItemField(connection: XmCloudConnection, clientSecret: string,
+    input: Omit<UpdateAuthoringItemInput, "fields"> & { readonly fieldName: string },
+    signal: AbortSignal): Promise<AuthoringItemDetails> {
+    await this.mutateItemFields(connection, clientSecret,
+      { ...input, fields: { [input.fieldName]: "" } }, signal, true);
+    return this.loadItem(connection, clientSecret, { itemId: input.itemId }, input.language, input.version, signal);
+  }
+
   private async mutateItemFields(
     connection: XmCloudConnection,
     clientSecret: string,
     input: UpdateAuthoringItemInput,
     signal: AbortSignal,
+    reset = false,
   ): Promise<{ readonly itemId: string; readonly language: string }> {
     const accessToken = await this.getAccessToken(connection, clientSecret, signal);
     const payload = await this.postGraphQl<ItemMutationResponse>(
@@ -1295,14 +1337,15 @@ export class AuthoringContentClient {
           itemId: input.itemId,
           language: input.language,
           version: input.version,
-          fields: fieldEntries(input.fields),
+          fields: fieldEntries(input.fields).map(field => ({ ...field, reset })),
         },
       },
       signal,
       false,
     );
     const updatedItem = parseMutatedItem(payload.data?.updateItem?.item, "updated");
-    if (normalizeGuid(updatedItem.itemId) !== normalizeGuid(input.itemId)) {
+    if (normalizeGuid(updatedItem.itemId) !== normalizeGuid(input.itemId)
+      || updatedItem.language.toLowerCase() !== input.language.toLowerCase()) {
       throw new Error("Authoring API did not confirm the updated item.");
     }
     return updatedItem;
@@ -1814,7 +1857,7 @@ function createFieldEntries(
 
 function parseMutatedItem(
   value: RawMutatedItem | null | undefined,
-  operation: "created" | "updated",
+  operation: "created" | "updated" | "versioned",
 ): { readonly itemId: string; readonly language: string } {
   if (
     !value ||

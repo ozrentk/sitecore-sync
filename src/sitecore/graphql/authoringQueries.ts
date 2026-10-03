@@ -184,6 +184,16 @@ export const updateItemMutation = gql`
   }
 `;
 
+// Validation uses GraphQL's skip directive: the server checks the contract without executing it.
+export const addItemVersionMutation = gql`
+  mutation XmCloudSyncAddItemVersion($input: AddItemVersionInput!, $validateOnly: Boolean!) {
+    __typename
+    addItemVersion(input: $input) @skip(if: $validateOnly) {
+      item { itemId path version language { name } }
+    }
+  }
+`;
+
 export const deleteItemMutation = gql`
   mutation XmCloudSyncDeleteItem($input: DeleteItemInput!) {
     deleteItem(input: $input) {

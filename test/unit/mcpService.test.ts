@@ -17,7 +17,18 @@ function fixture() {
   let current = testConnection; let fail = false; let failSave = false;
   const service = new McpService({ get: id => id === current.id ? current : undefined,
     getClientSecret: async () => "private-credential", listVerifiedSites: () => [] }, {
-    loadItem: async () => { reads++; return details; }, loadLanguages: async () => [],
+    loadItem: async () => { reads++; return details; }, loadLanguages: async () => [{ name: "en", displayName: "English", englishName: "English", nativeName: "English" }],
+    validateAddItemVersion: async () => { if (fail) { throw new Error("Unsupported contract"); } },
+    addItemVersion: async () => {
+      strictEqual(records.at(-1)?.status, "outcome-unknown"); writes++;
+      if (fail) { throw new Error("private-credential raw server error"); }
+      details = { ...details, version: 1 }; return details;
+    },
+    resetItemField: async () => {
+      strictEqual(records.at(-1)?.status, "outcome-unknown"); writes++;
+      if (fail) { throw new Error("private-credential raw server error"); }
+      details = { ...details, fields: [{ ...details.fields[0]!, value: "Standard value", containsStandardValue: true }] }; return details;
+    },
     searchItemsByName: async () => ({ items: [], hasMore: false, totalCount: 0 }),
     collectFallbackDiagnostic: async () => '{}',
     createItem: async (_connection, _secret, input) => {
@@ -111,4 +122,48 @@ test("MCP expires plans and bounds pending previews", async context => {
   now += 600001; await rejects(f.call("execute_plan", { planId }), /expired/u); strictEqual(f.writes(), 0);
   for (let index = 0; index < 20; index++) { await preview(f); }
   await rejects(preview(f), /Too many/u);
+});
+
+
+test("MCP reset is distinct from literal empty and accepts a nonempty Standard Value", async () => {
+  const f = fixture();
+  const { value: _value, ...input } = update;
+  const plan = await f.call("preview_field_reset", input) as { planId: string };
+  strictEqual(f.writes(), 0);
+  await rejects(f.call("execute_plan", { planId: plan.planId }), /Enable MCP Mutations/u);
+  f.service.enableMutations(testConnection.id);
+  const result = await f.call("execute_plan", { planId: plan.planId }) as McpOperation;
+  strictEqual(result.status, "completed"); strictEqual(result.targets[0]!.status, "reset");
+  strictEqual(f.writes(), 1);
+  await rejects(f.call("execute_plan", { planId: plan.planId }), /already used/u);
+});
+
+test("MCP first-version creation requires a missing configured locale, rechecks state and journals", async () => {
+  const input = { connectionId: testConnection.id, item: itemId, language: "en" };
+  const f = fixture();
+  await rejects(f.call("preview_language_version", input), /no existing local version/u);
+  f.mutate({ version: 0, fields: [], availableVersions: [] });
+  await rejects(f.call("preview_language_version", { ...input, language: "fr" }), /no existing local version/u);
+  const plan = await f.call("preview_language_version", input) as { planId: string };
+  strictEqual(f.writes(), 0); f.service.enableMutations(testConnection.id);
+  const result = await f.call("execute_plan", { planId: plan.planId }) as McpOperation;
+  strictEqual(result.status, "completed"); strictEqual(result.targets[0]!.version, 1);
+  strictEqual(result.targets[0]!.status, "version-created"); strictEqual(f.writes(), 1);
+  const stale = fixture(); stale.mutate({ version: 0, fields: [], availableVersions: [] });
+  const stalePlan = await stale.call("preview_language_version", input) as { planId: string };
+  stale.service.enableMutations(testConnection.id); stale.mutate({ path: "/sitecore/content/Moved" });
+  await rejects(stale.call("execute_plan", { planId: stalePlan.planId }), /changed after preview/u);
+  strictEqual(stale.writes(), 0);
+});
+
+test("MCP reset and version-creation failures retain unknown outcomes without retry", async () => {
+  for (const name of ["preview_field_reset", "preview_language_version"]) {
+    const f = fixture(); const { value: _value, ...reset } = update;
+    if (name === "preview_language_version") { f.mutate({ version: 0, fields: [], availableVersions: [] }); }
+    const input = name === "preview_field_reset" ? reset : { connectionId: testConnection.id, item: itemId, language: "en" };
+    const plan = await f.call(name, input) as { planId: string };
+    f.service.enableMutations(testConnection.id); f.fail();
+    await rejects(f.call("execute_plan", { planId: plan.planId }), /Inspect list_operations/u);
+    strictEqual(f.records()[0]!.status, "outcome-unknown"); strictEqual(f.writes(), 1);
+  }
 });

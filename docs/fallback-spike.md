@@ -45,7 +45,7 @@ node --import tsx scripts/fallback-spike.ts validate <exported-schema-file>
 
 Replace the example item GUID with a representative existing item. The locale arguments are explicit probe candidates, not an asserted fallback chain. Do not derive them from regional names. Output contains each query and its variables. It reuses the application's details selection, changes only the fallback argument for the cross-check, and keeps the original requested locale. The schema command outputs a standard GraphQL introspection query; an IDE schema export is also suitable. Validation accepts SDL or JSON introspection (with or without the `data` wrapper).
 
-The user has authorized development-environment testing, including creating and removing new test items, while preserving all existing items. Start with read-only evidence; if fixture creation becomes necessary, record the new item identities and remove only those items. No creation or deletion has been performed so far.
+The user has authorized development-environment testing, including creating and removing new test items, while preserving all existing items. Start with read-only evidence; if fixture creation becomes necessary, record the new item identities and remove only those items. At the initial planning stage no creation or deletion had been performed; subsequent controlled results are recorded below.
 
 Run queries in an already authenticated Authoring Playground. Complete pagination independently for each query: copy `endCursor` into `after` until `hasNextPage` is false. Preserve null outer items, version 0, absent versus null collections, empty values and all provenance flags in evidence. Never interpret a first page as a complete field set. Keep raw response exports outside version control; sanitize item names/values before making deterministic fixtures. Do not include headers, tokens or credentials in exports.
 
@@ -55,7 +55,7 @@ Run exact requested/candidate reads, then the fallback-enabled original lookup. 
 
 ## Runtime matrix still required
 
-All cases below are **unverified**, not synthetic fixtures claiming observed Sitecore behavior:
+The following matrix tracks required evidence. Later observations below cover only the explicitly named cases; remaining cases are unverified.
 
 | Case | Evidence required |
 | --- | --- |
@@ -100,3 +100,18 @@ Version 0.27.0 corrects the misleading invalid-response classification for versi
 The second configuration report establishes observed language settings en-NZ -> en-AU -> en: the Fallback Language values are locale names, not GUIDs. The collector now follows validated names beneath /sitecore/system/Languages, while retaining GUID support and bounded cycle detection. BAUPage Standard Values supply item fallback enablement. The three fallback-marked content fields have Enable Shared Language Fallback set in their metadata-locale field definitions; definition reads in the regional locales have version 0. This does not establish per-language override semantics or environment switches. Configuration coverage was partial (16 of 48 field definitions and a capped template traversal).
 
 The user authorized preparation of mutation and diagnostic commands for new content and, if needed, changes to existing content. Version 0.28.0 implements the narrower new-item procedure in README: source-only enabled/disabled item controls and local value/empty controls. Run it once for a page template and once for a component template. It neither clones a page tree nor changes template rules. Multiple language versions on one new item, field-rule changes and reset-versus-empty mutations remain unimplemented pending evidence; do not treat these four controls as the full matrix. All live execution is user initiated; no environment mutations were made while developing the commands.
+
+
+## Controlled page/component observations (2026-10-04)
+
+Eight isolated test items were created through confirmed MCP plans: four page controls and four component controls. Existing content was preserved; nothing was published or deleted. Raw reports remain outside the repository because they contain private content.
+
+- Language-definition evidence links `en-NZ -> en-AU -> en`. The selected page text field and component rich-text field both expose enabled shared language-fallback settings.
+- Source-only controls have exact requested/intermediate version 0 and null fields. Reading fields with fallback enabled in the original requested locale returns the English marker with `containsFallbackValue: true`, while the outer version stays 0.
+- The same nested-field behavior occurs on controls whose item-level fallback setting is empty. This is evidence about this field query, not proof that item-level fallback is enabled.
+- A local requested-language marker is returned without a fallback flag. A local empty control with no populated source is empty without a fallback flag.
+- Temporarily writing a literal empty English source on both source-enabled controls produces an empty requested/intermediate cross-check value **with** `containsFallbackValue: true`. Restoring the English markers restores those cross-check values. Exact English reads verified both markers restored at version 1. An empty fallback-marked value therefore cannot be treated as a usable nonempty value.
+
+Schema introspection remains unavailable. Configuration traversal is bounded and partial; effective environment switches and mixed-field source rules are not established. These observations do not complete B04's implementation gate.
+
+Version 0.30.0 adds previewed first-language-version creation and explicit field reset to support the next experiments. The version preview validates its mutation contract using `@skip` before allowing execution. These new operations have automated coverage but have not yet been exercised on the development environment. Next: add a local version to an isolated source-enabled control, compare literal empty versus reset with its populated English source, then test an intermediate-language override. Repeat for the component and retain exact/cross-check evidence after each change.
