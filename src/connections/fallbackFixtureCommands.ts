@@ -40,7 +40,7 @@ export class FallbackFixtureCommands {
     if (!parentId) { return; }
     const exampleId = await this.askId("Representative page or component", "Existing item ID whose template should be used. Its values will not be copied.");
     if (!exampleId) { return; }
-    const localeText = await vscode.window.showInputBox({ title: "Test locales", value: "en-NZ, en-AU, en",
+    const localeText = await vscode.window.showInputBox({ ignoreFocusOut: true, title: "Test locales", value: "en-NZ, en-AU, en",
       prompt: "Requested locale first, source locale last. Use the configured chain.", validateInput: value => {
         try { const locales = value.split(",").map(part => part.trim()); buildFallbackProbes(parentId, locales);
           return locales.length < 2 ? "Supply at least two locales." : undefined;
@@ -107,7 +107,7 @@ export class FallbackFixtureCommands {
   }
 
   private async askId(title: string, prompt: string): Promise<string | undefined> {
-    const value = await vscode.window.showInputBox({ title, prompt, validateInput: input => {
+    const value = await vscode.window.showInputBox({ ignoreFocusOut: true, title, prompt, validateInput: input => {
       try { buildFallbackProbes(fixtureGuid(input.trim()), ["en"]); return undefined; } catch { return "Supply an item GUID."; }
     } });
     return value === undefined ? undefined : fixtureGuid(value.trim());

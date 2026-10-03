@@ -21,10 +21,10 @@ export async function runFallbackDiagnostic(store: ConnectionStore, client: Auth
     if (!scope) { return; }
     let selection: { itemId: string; languages: string[] } | undefined;
     if (scope.probes) {
-      const itemId = await vscode.window.showInputBox({ title: "Item to inspect", prompt: "Paste the item ID (GUID). Existing content will not be changed.",
+      const itemId = await vscode.window.showInputBox({ ignoreFocusOut: true, title: "Item to inspect", prompt: "Paste the item ID (GUID). Existing content will not be changed.",
         validateInput: value => validate(value.trim(), ["en"]) });
       if (itemId === undefined) { return; }
-      const languages = await vscode.window.showInputBox({ title: "Locales to inspect", prompt: "Comma-separated locales: requested locale first, then up to seven candidate locales. These do not assert a fallback chain.",
+      const languages = await vscode.window.showInputBox({ ignoreFocusOut: true, title: "Locales to inspect", prompt: "Comma-separated locales: requested locale first, then up to seven candidate locales. These do not assert a fallback chain.",
         placeHolder: "en-NZ, en-AU, en", validateInput: value => validate(itemId.trim(), splitLanguages(value)) });
       if (languages === undefined) { return; }
       selection = { itemId: itemId.trim(), languages: splitLanguages(languages) };
