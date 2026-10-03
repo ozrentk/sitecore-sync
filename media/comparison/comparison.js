@@ -71,10 +71,6 @@ const languageSwitchRetryRight = document.getElementById("language-switch-retry-
 
 document.getElementById("mode-browse").addEventListener("click", () => requestMode("browse"));
 document.getElementById("mode-compare").addEventListener("click", () => requestMode("compare"));
-document.getElementById("retained-side").addEventListener("change", event => {
-  state.retainedSide = event.target.value;
-  vscode.postMessage({ type: "setRetainedSide", side: event.target.value });
-});
 document.getElementById("content-cancel").addEventListener("click", () => vscode.postMessage({ type: "cancelContentLoads" }));
 const modeSnapshots = new Map();
 let modeRestoration;
@@ -118,9 +114,9 @@ function requestMode(mode) {
   };
   vscode.postMessage({ type: "switchMode", mode, navigation });
 }
-function restoreModeNavigation(previous, message) {
+function restoreModeNavigation(previous) {
   const cached = modeSnapshots.get(modeSnapshotKey(state.mode, state.selection));
-  const retained = state.mode === "browse" ? previous.sides[message.retainedFrom || "left"] : previous.sides.left;
+  const retained = previous.sides.left;
   const right = cached?.sides.right || [...modeSnapshots.values()].reverse().flatMap(snapshot => Object.values(snapshot.sides))
     .find(value => value.tree.connectionId === state.selection.rightConnectionId && value.tree.language === state.selection.rightLanguage);
   const sides = { left: retained, right: state.mode === "compare" ? right : undefined };
@@ -1975,8 +1971,6 @@ function render() {
   const browse = state.mode === "browse";
   document.getElementById("mode-browse").setAttribute("aria-pressed", String(browse));
   document.getElementById("mode-compare").setAttribute("aria-pressed", String(!browse));
-  document.getElementById("retained-side-label").hidden = browse;
-  document.getElementById("retained-side").value = state.retainedSide || "";
   document.getElementById("content-cancel").hidden = !["left", ...(browse ? [] : ["right"])].some(side =>
     state.trees[side].loading || state.languages[side].loading || (state.trees[side].root && subtreeStructureIsLoading(state.trees[side].root))) &&
     state.subtreeLoadOperations.size === 0 && state.refreshOperations.size === 0;
@@ -2679,7 +2673,6 @@ window.addEventListener("message", (event) => {
     }
     if (mode === "browse" && state.mode !== mode) clearNodeDetails(state.trees.left.root);
     state.mode = mode;
-    state.retainedSide = message.retainedSide;
     state.viewContext = message.viewContext;
     state.connections = message.connections;
     state.selection = message.selection;
@@ -2687,7 +2680,7 @@ window.addEventListener("message", (event) => {
     updateTreeConnections();
     if (previous && previousMode !== mode) {
       state.languageSwitch = undefined; cancelLanguageRestoration();
-      restoreModeNavigation(previous, message);
+      restoreModeNavigation(previous);
     }
   } else if (message?.type === "requestCompareMode") {
     requestMode("compare");
