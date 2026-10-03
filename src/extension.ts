@@ -1,3 +1,4 @@
+import { McpAccessManager } from "./mcp/accessManager";
 import { FallbackFixtureCommands } from "./connections/fallbackFixtureCommands";
 import { ConnectionSettingsPanel } from "./connections/connectionSettingsPanel";
 import { runFallbackDiagnostic } from "./connections/fallbackDiagnosticCommand";
@@ -48,6 +49,8 @@ export function activate(context: vscode.ExtensionContext): void {
   const connectionStore = new ConnectionStore(context.globalState, context.secrets);
   const connectionProvider = new ConnectionTreeProvider(connectionStore);
   const authoringClient = new AuthoringContentClient(log);
+  const mcpAccess = new McpAccessManager(context, connectionStore, authoringClient);
+  context.subscriptions.push(mcpAccess);
   const diagnosticLifetime = new AbortController();
   context.subscriptions.push({ dispose: () => diagnosticLifetime.abort() });
   const fallbackFixtures = new FallbackFixtureCommands(connectionStore, authoringClient, context.workspaceState, diagnosticLifetime.signal);
@@ -290,6 +293,9 @@ export function activate(context: vscode.ExtensionContext): void {
     }),
     vscode.commands.registerCommand("xmCloudSync.createFallbackTestItems", () => fallbackFixtures.run(false)),
     vscode.commands.registerCommand("xmCloudSync.diagnoseFallbackTestItems", () => fallbackFixtures.run(true)),
+    vscode.commands.registerCommand("xmCloudSync.startMcpAccess", () => mcpAccess.start()),
+    vscode.commands.registerCommand("xmCloudSync.stopMcpAccess", () => mcpAccess.stop()),
+    vscode.commands.registerCommand("xmCloudSync.enableMcpMutations", () => mcpAccess.enableMutations()),
     vscode.commands.registerCommand("xmCloudSync.collectFallbackDiagnostic", async () => {
       await runFallbackDiagnostic(connectionStore, authoringClient, diagnosticLifetime.signal);
     }),

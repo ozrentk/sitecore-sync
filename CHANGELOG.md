@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.29.0
+
+- Add explicitly started local MCP access for selected connections, with path-based reads, indexed search, language/site discovery and fallback diagnostics.
+- Add previewed, confirmed fallback test creation and exact-locale content field updates with session mutation controls, stale-state checks and persisted recovery records.
+- Bundle the stdio MCP server and display client setup instructions; keep Sitecore credentials inside VS Code and revoke access on stop.
+
 ## 0.28.1
 
 - Keep fallback test and diagnostic GUID/locale textboxes open when switching windows to copy values.

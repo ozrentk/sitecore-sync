@@ -2,7 +2,7 @@
   "name": "sitecore-xm-cloud-sync",
   "displayName": "XM Cloud Sync",
   "description": "Compare and synchronize Sitecore XM Cloud authoring content from VS Code.",
-  "version": "0.28.1",
+  "version": "0.29.0",
   "publisher": "OzrenTK",
   "license": "MIT",
   "engines": {
@@ -46,7 +46,10 @@
     "onCommand:xmCloudSync.openProductSpec",
     "onCommand:xmCloudSync.collectFallbackDiagnostic",
     "onCommand:xmCloudSync.createFallbackTestItems",
-    "onCommand:xmCloudSync.diagnoseFallbackTestItems"
+    "onCommand:xmCloudSync.diagnoseFallbackTestItems",
+    "onCommand:xmCloudSync.startMcpAccess",
+    "onCommand:xmCloudSync.stopMcpAccess",
+    "onCommand:xmCloudSync.enableMcpMutations"
   ],
   "main": "./out/extension.js",
   "contributes": {
@@ -277,6 +280,21 @@
       {
         "command": "xmCloudSync.collectFallbackDiagnostic",
         "title": "Collect Authoring Fallback Diagnostic",
+        "category": "XM Cloud Sync"
+      },
+      {
+        "command": "xmCloudSync.startMcpAccess",
+        "title": "Start MCP Access",
+        "category": "XM Cloud Sync"
+      },
+      {
+        "command": "xmCloudSync.stopMcpAccess",
+        "title": "Stop MCP Access",
+        "category": "XM Cloud Sync"
+      },
+      {
+        "command": "xmCloudSync.enableMcpMutations",
+        "title": "Enable MCP Mutations",
         "category": "XM Cloud Sync"
       }
     ],
@@ -682,8 +700,10 @@
     "typescript": "^5.9.0"
   },
   "dependencies": {
+    "@modelcontextprotocol/sdk": "1.32.0",
     "graphql": "^16.11.0",
     "graphql-tag": "^2.12.6",
-    "playwright-core": "^1.62.0"
+    "playwright-core": "^1.62.0",
+    "zod": "4.6.5"
   }
 }

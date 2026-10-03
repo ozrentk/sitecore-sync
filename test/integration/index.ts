@@ -3,6 +3,7 @@ import * as vscode from "vscode";
 import { connectionStoreTests } from "./connectionStoreTests";
 import { fallbackDiagnosticTests } from "./fallbackDiagnosticTests";
 import { fallbackFixtureTests } from "./fallbackFixtureTests";
+import { mcpAccessTests } from "./mcpAccessTests";
 import { connectionSettingsTests } from "./connectionSettingsTests";
 import { comparisonPanelTests } from "./comparisonPanelTests";
 import { itemTaskRunnerTests } from "./itemTaskRunnerTests";
@@ -82,6 +83,7 @@ const integrationTests: readonly IntegrationTest[] = [
   ...connectionStoreTests,
   ...fallbackDiagnosticTests,
   ...fallbackFixtureTests,
+  ...mcpAccessTests,
   ...connectionSettingsTests,
   ...comparisonPanelTests,
   ...itemTaskRunnerTests,
