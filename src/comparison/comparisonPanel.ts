@@ -2173,10 +2173,23 @@ export class ComparisonPanelManager implements vscode.Disposable {
   }
 
   private async refreshStateAndTrees(): Promise<void> {
+    this.cancelModeSwitch();
     this.cancelRequests();
+    const session = this.contentSession.state;
+    if (session?.mode === "compare" && (!this.connectionStore.get(session.left.connectionId) || !this.connectionStore.get(session.right.connectionId))) {
+      // Never substitute an unrelated endpoint for a deleted comparison connection.
+      this.contentSession.openConnection(session.left);
+    }
+    this.treeLevelCache.clear();
+    this.languageCache.clear();
+    this.itemDetailsCache.clear();
+    this.modeNavigation.clear();
     this.clearItemIconCaches();
+    const current = this.contentSession.capture();
     await this.clearFieldDiffSelection();
-    await this.postState();
+    if (!current()) return;
+    await this.postState(true);
+    if (!current()) return;
     await this.panel?.webview.postMessage({ type: "itemIconsReset" });
     await this.loadInitialTrees();
   }
@@ -2586,6 +2599,7 @@ export class ComparisonPanelManager implements vscode.Disposable {
   }
 
   private async getLanguages(connectionId: string): Promise<readonly AuthoringLanguage[]> {
+    const current = this.contentSession?.capture() ?? (() => true);
     const cached = this.languageCache.get(connectionId);
     if (cached) {
       return cached;
@@ -2596,6 +2610,7 @@ export class ComparisonPanelManager implements vscode.Disposable {
     }
     const connection = this.connectionStore.get(connectionId);
     const clientSecret = await this.connectionStore.getClientSecret(connectionId);
+    if (!current()) throw new DOMException("Content selection changed.", "AbortError");
     if (!connection || !clientSecret) {
       throw new Error("The XM Cloud connection or its secret is missing.");
     }
@@ -2673,6 +2688,7 @@ export class ComparisonPanelManager implements vscode.Disposable {
     language: string,
     itemId: string,
   ): Promise<AuthoringItemDetails> {
+    const current = this.contentSession?.capture() ?? (() => true);
     const cacheKey = this.itemDetailsCacheKey(connectionId, language, itemId);
     const cached = this.itemDetailsCache.get(cacheKey);
     if (cached) {
@@ -2684,6 +2700,7 @@ export class ComparisonPanelManager implements vscode.Disposable {
     }
     const connection = this.connectionStore.get(connectionId);
     const clientSecret = await this.connectionStore.getClientSecret(connectionId);
+    if (!current()) throw new DOMException("Content selection changed.", "AbortError");
     if (!connection || !clientSecret) {
       throw new Error("The XM Cloud connection or its secret is missing.");
     }
@@ -3653,6 +3670,7 @@ export class ComparisonPanelManager implements vscode.Disposable {
     locator: AuthoringItemLocator,
     cancellationSignal?: AbortSignal,
   ): Promise<AuthoringTreeLevel> {
+    const current = this.contentSession?.capture() ?? (() => true);
     const cacheKey = this.treeCacheKey(connectionId, language, locator);
     const cached = this.treeLevelCache.get(cacheKey);
     if (cached) {
@@ -3674,6 +3692,7 @@ export class ComparisonPanelManager implements vscode.Disposable {
       throw new Error("The XM Cloud connection no longer exists.");
     }
     const clientSecret = await this.connectionStore.getClientSecret(connectionId);
+    if (!current()) throw new DOMException("Content selection changed.", "AbortError");
     if (!clientSecret) {
       throw new Error("The connection's client secret is missing.");
     }
@@ -3739,11 +3758,11 @@ export class ComparisonPanelManager implements vscode.Disposable {
 
   private getSelection(): ComparisonSelection {
     const current = this.contentSession?.state;
-    if (current?.mode === "browse") return { leftConnectionId: current.source.connectionId,
+    if (current?.mode === "browse") return { leftConnectionId: this.connectionStore.get(current.source.connectionId) ? current.source.connectionId : undefined,
       leftLanguage: current.source.language, rightConnectionId: undefined, rightLanguage: defaultLanguage, languagesLocked: false };
-    if (current?.mode === "compare") return this.normalizeSelection({ leftConnectionId: current.left.connectionId,
+    if (current?.mode === "compare") return { leftConnectionId: current.left.connectionId,
       rightConnectionId: current.right.connectionId, leftLanguage: current.left.language, rightLanguage: current.right.language,
-      languagesLocked: current.languagesLocked });
+      languagesLocked: current.languagesLocked };
     const stored = this.workspaceState.get<Partial<ComparisonSelection>>(selectionKey, {});
     return this.normalizeSelection(stored);
   }
@@ -3805,7 +3824,7 @@ export class ComparisonPanelManager implements vscode.Disposable {
     this.comparisonStateEmitter.fire();
   }
 
-  private async postState(): Promise<void> {
+  private async postState(resetContent = false): Promise<void> {
     if (!this.panel) {
       return;
     }
@@ -3819,6 +3838,7 @@ export class ComparisonPanelManager implements vscode.Disposable {
 
     await this.panel.webview.postMessage({
       type: "stateChanged",
+      resetContent,
       viewContext: this.contentSession?.revisionId,
       mode: this.browseMode ? "browse" : "compare",
       connections,

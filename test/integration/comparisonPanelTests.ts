@@ -38,6 +38,81 @@ interface ComparisonPanelHarness {
 }
 
 export const comparisonPanelTests: readonly IntegrationTest[] = [{
+  name: "opening the only configured connection enters Browse and loads only its source",
+  async execute(): Promise<void> {
+    const one = connection("one", "One");
+    strictEqual(new ConnectionTreeItem(one, { status: "unknown" }, 0).command?.command, "xmCloudSync.browseConnection");
+    const session = new ContentSession();
+    const loaded: string[] = [];
+    const manager = Object.create(ComparisonPanelManager.prototype) as { openBrowse(id: string): Promise<void> };
+    Object.assign(manager, { contentSession: session, modeIntent: 0, workspaceState: new MemoryMemento(), panel: {},
+      connectionStore: { list: () => [one], get: (id: string) => id === one.id ? one : undefined },
+      cancelRequests: () => session.cancelPending(), clearFieldDiffSelection: async () => undefined,
+      openPanel: async () => undefined, postState: async () => undefined,
+      loadAndPostLanguages: async (side: string) => { loaded.push(`languages:${side}`); },
+      loadTreeLevel: async (side: string) => { loaded.push(`tree:${side}`); },
+    });
+    await manager.openBrowse(one.id);
+    strictEqual(session.state?.mode, "browse");
+    deepStrictEqual(loaded, ["languages:left", "tree:left"]);
+    session.dispose();
+  },
+}, {
+  name: "connection deletion returns Compare to Browse without substituting another endpoint and clears old caches",
+  async execute(): Promise<void> {
+    for (const removed of ["left", "right"] as const) {
+      const session = new ContentSession();
+      session.openCompare({ connectionId: "left", language: "en", rootPath: "/sitecore/home" },
+        { connectionId: "right", language: "fr", rootPath: "/" });
+      const connections = [connection("left", "Left"), connection("right", "Right"), connection("other", "Other")].filter(value => value.id !== removed);
+      const caches = [new Map([["old", {}]]), new Map([["old", {}]]), new Map([["old", {}]]), new Map([["old", {}]])];
+      const posted: Array<Record<string, unknown>> = [];
+      const manager = Object.create(ComparisonPanelManager.prototype) as { refreshStateAndTrees(): Promise<void>; getSelection(): { leftConnectionId?: string; rightConnectionId?: string } };
+      Object.assign(manager, { contentSession: session, workspaceState: new MemoryMemento(),
+        connectionStore: { list: () => connections, get: (id: string) => connections.find(value => value.id === id) },
+        treeLevelCache: caches[0], languageCache: caches[1], itemDetailsCache: caches[2], modeNavigation: caches[3],
+        cancelRequests: () => session.cancelPending(), clearItemIconCaches() {}, clearFieldDiffSelection: async () => undefined,
+        loadInitialTrees: async () => undefined,
+        panel: { webview: { postMessage: async (value: Record<string, unknown>) => { posted.push(value); return true; } } },
+      });
+      await manager.refreshStateAndTrees();
+      strictEqual(session.state?.mode, "browse");
+      strictEqual(manager.getSelection().leftConnectionId, removed === "left" ? undefined : "left");
+      strictEqual(manager.getSelection().rightConnectionId, undefined);
+      strictEqual(caches.every(cache => cache.size === 0), true);
+      strictEqual(posted.find(value => value.type === "stateChanged")?.resetContent, true);
+      session.dispose();
+    }
+  },
+}, {
+  name: "cancelled credential lookup cannot start tree, language or detail requests in an obsolete session",
+  async execute(): Promise<void> {
+    for (const kind of ["tree", "languages", "details"] as const) {
+      const session = new ContentSession();
+      session.openConnection({ connectionId: "one", language: "en", rootPath: "/" });
+      let finish!: (secret: string) => void;
+      const secret = new Promise<string>(resolve => { finish = resolve; });
+      let networkCalls = 0;
+      const manager = Object.create(ComparisonPanelManager.prototype) as {
+        getLanguages(id: string): Promise<unknown>; getItemDetails(id: string, language: string, item: string): Promise<unknown>;
+        getTreeLevel(id: string, language: string, locator: unknown): Promise<unknown>;
+      };
+      Object.assign(manager, { contentSession: session,
+        connectionStore: { get: () => connection("one", "One"), getClientSecret: () => secret },
+        treeLevelCache: new Map(), languageCache: new Map(), itemDetailsCache: new Map(),
+        pendingTreeLevels: new Map(), pendingLanguages: new Map(), pendingItemDetails: new Map(),
+        authoringClient: { loadLanguages: async () => { networkCalls++; }, loadItemDetails: async () => { networkCalls++; }, loadTreeLevel: async () => { networkCalls++; } },
+        log: { trace() {} },
+      });
+      const pending = kind === "tree" ? manager.getTreeLevel("one", "en", { path: "/" })
+        : kind === "details" ? manager.getItemDetails("one", "en", "item") : manager.getLanguages("one");
+      session.cancelPending(); finish("test-secret");
+      await rejects(pending, /Content selection changed/u);
+      strictEqual(networkCalls, 0);
+      session.dispose();
+    }
+  },
+}, {
   name: "mode switching remembers the partner across reload and always retains left navigation despite a legacy right preference",
   async execute(): Promise<void> {
     const workspaceState = new MemoryMemento({ [modePreferencesKey]: {
