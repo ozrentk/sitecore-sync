@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.27.0
+
+- Extend the Authoring fallback diagnostic with exact language-chain reference, field-definition and template/Standard Values evidence, explicit limits and unknown environment settings.
+- Recognize version-0/null-fields responses as completed observations rather than invalid API responses.
+- Keep the same connection/item/locale inputs; select **Item probes and fallback configuration** to collect the expanded version-2 report.
+
 ## 0.26.0
 
 - Add **Collect Authoring Fallback Diagnostic** to the Command Palette, using saved connection credentials without requiring the browser Playground.

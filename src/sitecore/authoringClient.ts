@@ -1164,7 +1164,7 @@ export class AuthoringContentClient {
     const accessToken = await this.getAccessToken(connection, clientSecret, signal);
     const report = await collectFallbackDiagnostic(probes, (operation, query, variables) =>
       this.postGraphQl(connection.serverUrl, accessToken, "Authoring fallback diagnostic", operation, query, variables, signal),
-    signal, progress);
+    signal, progress, selection !== undefined);
     return serializeFallbackDiagnostic(report, [clientSecret, accessToken]);
   }
 

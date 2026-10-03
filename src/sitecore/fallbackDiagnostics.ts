@@ -1,3 +1,4 @@
+import { collectFallbackConfiguration } from "./fallbackConfiguration";
 import { getIntrospectionQuery, Kind, print, visit } from "graphql";
 import { itemDetailsQuery } from "./graphql/authoringQueries";
 
@@ -40,10 +41,11 @@ export function buildFallbackProbes(itemId: string, languages: readonly string[]
 
 type DiagnosticRequest = (operation: string, query: string, variables: Readonly<Record<string, unknown>>) => Promise<unknown>;
 
-interface ProbeEvidence {
+export interface ProbeEvidence {
   readonly label: string;
   readonly language: string;
   readonly pages: { readonly observedAt: string; readonly data: unknown }[];
+  outcome?: "no-local-fields";
   status: "complete" | "unavailable" | "invalid-response" | "limit-reached";
 }
 
@@ -56,6 +58,7 @@ function object(value: unknown): Record<string, unknown> | undefined {
 export async function collectFallbackDiagnostic(
   probes: readonly FallbackProbe[], request: DiagnosticRequest, signal: AbortSignal,
   progress: (message: string) => void = () => undefined,
+  includeConfiguration = false,
 ): Promise<unknown> {
   signal.throwIfAborted();
   const startedAt = new Date().toISOString();
@@ -79,25 +82,27 @@ export async function collectFallbackDiagnostic(
     signal.throwIfAborted();
     schema = { status: "unavailable" };
   }
-  const observations: ProbeEvidence[] = [];
-  for (const probe of probes) {
+  const readItem = async (label: string, locator: { itemId: string } | { path: string }, language: string, query = print(itemDetailsQuery)): Promise<ProbeEvidence> => {
     signal.throwIfAborted();
-    progress(`Reading ${probe.label}`);
-    const evidence: ProbeEvidence = { label: probe.label, language: probe.variables.where.language, pages: [], status: "limit-reached" };
-    observations.push(evidence);
+    progress(`Reading ${label}`);
+    const evidence: ProbeEvidence = { label, language, pages: [], status: "limit-reached" };
     const seen = new Set<string>();
     let after: string | null = null;
     for (let page = 0; page < 50; page++) {
       signal.throwIfAborted();
       try {
-        const result = object(await request("XmCloudSyncItemDetails", probe.query, { ...probe.variables, after }));
+        const result = object(await request("XmCloudSyncItemDetails", query, { where: { database: "master", language, ...locator }, pageSize: 100, after }));
         signal.throwIfAborted();
         const data = object(result?.data);
         if (!data || !("item" in data)) { evidence.status = "invalid-response"; break; }
         if (!fits(data)) { break; }
         evidence.pages.push({ observedAt: new Date().toISOString(), data });
         if (data.item === null) { evidence.status = "complete"; break; }
-        const fields = object(object(data.item)?.fields);
+        const item = object(data.item);
+        if (item?.version === 0 && item.fields === null) {
+          evidence.status = "complete"; evidence.outcome = "no-local-fields"; break;
+        }
+        const fields = object(item?.fields);
         const pageInfo = object(fields?.pageInfo);
         if (!object(data.item) || !Array.isArray(fields?.nodes) || typeof pageInfo?.hasNextPage !== "boolean") {
           evidence.status = "invalid-response"; break;
@@ -114,11 +119,19 @@ export async function collectFallbackDiagnostic(
         break;
       }
     }
+    return evidence;
+  };
+  const observations: ProbeEvidence[] = [];
+  for (const probe of probes) {
+    observations.push(await readItem(probe.label, { itemId: probe.variables.where.itemId }, probe.variables.where.language, probe.query));
   }
+  const configuration = includeConfiguration && probes.length
+    ? await collectFallbackConfiguration(observations, [...new Set(probes.map(probe => probe.variables.where.language))], readItem, signal)
+    : undefined;
   return {
-    formatVersion: 1, startedAt, finishedAt: new Date().toISOString(),
+    formatVersion: 2, startedAt, finishedAt: new Date().toISOString(),
     notice: "Read-only evidence, not a fallback resolution or transactional snapshot. Candidate locales are supplied, not a verified chain. Complete means collection completed, not verified provenance. The report contains selected item content; review before sharing. Unavailable means the request failed (authentication, permissions, schema or transport); it does not mean content is absent. Raw server errors are omitted.",
-    itemId: probes[0]?.variables.where.itemId, schema, observations,
+    itemId: probes[0]?.variables.where.itemId, schema, observations, configuration,
   };
 }
 

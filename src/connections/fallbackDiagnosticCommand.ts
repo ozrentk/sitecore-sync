@@ -16,7 +16,7 @@ export async function runFallbackDiagnostic(store: ConnectionStore, client: Auth
     if (!selected) { return; }
     const scope = await vscode.window.showQuickPick([
       { label: "Schema only", probes: false },
-      { label: "Schema and item fallback probes", probes: true },
+      { label: "Item probes and fallback configuration", probes: true },
     ], { title: "Authoring fallback diagnostic", placeHolder: "Read-only report; item probes include field content" });
     if (!scope) { return; }
     let selection: { itemId: string; languages: string[] } | undefined;

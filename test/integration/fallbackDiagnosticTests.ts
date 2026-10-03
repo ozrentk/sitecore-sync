@@ -17,8 +17,10 @@ export const fallbackDiagnosticTests: readonly IntegrationTest[] = [{
     let cancel = false;
     let probeScope = false;
     const selectionCalls: unknown[] = [];
-    const pick = mock.method(vscode.window, "showQuickPick", async (items: readonly { connection?: unknown; probes?: boolean }[]) =>
-      items[0]?.connection ? items[0] : items[probeScope ? 1 : 0]);
+    const pick = mock.method(vscode.window, "showQuickPick", async (items: readonly { label?: string; connection?: unknown; probes?: boolean }[]) => {
+      if (!items[0]?.connection) { strictEqual(items[1]?.label, "Item probes and fallback configuration"); }
+      return items[0]?.connection ? items[0] : items[probeScope ? 1 : 0];
+    });
     let inputIndex = 0;
     const input = mock.method(vscode.window, "showInputBox", async () =>
       inputIndex++ % 2 === 0 ? "00000000-0000-0000-0000-000000000001" : "en-NZ, en");
@@ -28,13 +30,13 @@ export const fallbackDiagnosticTests: readonly IntegrationTest[] = [{
       strictEqual(actual.id, connection.id); strictEqual(secret, "fixture-secret");
       selectionCalls.push(selection);
       if (cancel) { throw new DOMException("Cancelled", "AbortError"); }
-      return JSON.stringify({ formatVersion: 1, schema: { status: "complete" }, observations: [] });
+      return JSON.stringify({ formatVersion: 2, schema: { status: "complete" }, observations: [], configuration: { environmentSettings: { status: "unknown" } } });
     });
     try {
       await runFallbackDiagnostic(store, client);
       strictEqual(vscode.window.activeTextEditor?.document.isUntitled, true);
       strictEqual(vscode.window.activeTextEditor?.document.languageId, "json");
-      strictEqual(JSON.parse(vscode.window.activeTextEditor!.document.getText()).formatVersion, 1);
+      strictEqual(JSON.parse(vscode.window.activeTextEditor!.document.getText()).formatVersion, 2);
       deepStrictEqual(selectionCalls, [undefined]);
       probeScope = true;
       await runFallbackDiagnostic(store, client);
