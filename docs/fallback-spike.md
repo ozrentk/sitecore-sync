@@ -1,0 +1,86 @@
+# Language fallback technical spike — B04
+
+Status as of 2026-10-03: offline source/documentation investigation and read-only probe tooling completed; environment schema/configuration and runtime verification pending. B04 comparison integration is not implemented. B03 publishing and B26 editor integration remain separate work.
+
+## Agreed implementation contract
+
+- New comparisons start in **Exact locale**. Use `withLanguageFallback: false`, preserving missing versions and Standard Values/inheritance metadata. Exact locale does not mean physically stored values only.
+- **With fallback** is explicit and remains selected while navigating that comparison. Resolve each side independently. Keep exact values and resolution evidence inspectable, alongside effective values, source locale/version and full chain.
+- Read the requested locale without fallback first. Inspect applicable configuration and enablement, then follow configured candidates using reads without fallback. Independently query the original requested locale with fallback enabled as a cross-check. Never substitute that cross-check for source resolution or infer a source from matching text.
+- Preserve requested and effective locale per field. Equal text from different origins must remain distinguishable, such as **Equal value, different source**.
+- A disagreement or missing evidence produces **Unverified fallback**. Preserve calculated and Sitecore results; do not confidently classify that field as equal or make its unverified source writable.
+- Enable field transfer only in Exact locale, enforced in the extension host as well as the UI. Mode changes invalidate pending loads and stale field-transfer messages. Do not change subtree-transfer semantics or enable fallback globally for publishing/transfer.
+- Editor save behavior remains existing-source only, without creating versions; this task does not implement editor saves.
+
+## Evidence gathered
+
+| Evidence | Finding | Confidence / limit |
+| --- | --- | --- |
+| Repository `itemDetailsQuery` | `fields(ownFields: false, withLanguageFallback: false)` requests value, three provenance flags, scope, template field ID, language/version and available versions. | Verified source contract; not a captured server schema. |
+| Repository `loadItemDetailsPages` / parser | Null outer `item` throws; version 0 is permitted; absent fields become an empty collection. Missing provenance flags become false. | Verified client behavior. The parser cannot establish whether an omitted flag means false on the server. A fallback evidence reader must preserve unknown/missing evidence. |
+| Repository language query | Fetches language names/display metadata only; no fallback chain or policy. | Verified. Language names or regional similarity cannot supply the missing chain. |
+| Official fallback setup documentation [1] | Configuration has environment, site UI, item/template and field-definition concerns. Versioned field enablement depends on an additional setting. | Documented, not verified against this environment or Authoring execution context. Delivery/Page builder settings cannot automatically be equated to Authoring settings. |
+| Official fallback overview [2] | Item fallback covers missing versions; field fallback has exclusions including shared/system fields and Standard Values items. | Documented for XP 10.0, requiring environment verification before applying to XM Cloud Authoring. |
+| Official Authoring documentation [3] | The environment's authenticated IDE exposes its schema. | Documentation provides the discovery route, not the missing runtime evidence. |
+| Available access | No schema export found in this repository. The user shared an authenticated Experience Edge Delivery Playground, which is a different API from Authoring; a connected Authoring Playground is still needed. Connection credentials are retrieved through VS Code SecretStorage. | No live probe requests performed. No credentials copied into files or requests and no environment content/configuration changed. |
+
+Sources reviewed:
+
+1. [Sitecore: Enable and set up language fallback](https://doc.sitecore.com/sai/en/developers/sitecoreai/content-modeling-and-presentation/working-with-languages/language-fallback/overview-of-setting-up-language-fallback/enable-and-set-up-language-fallback.html).
+2. [Sitecore: Language fallback](https://doc.sitecore.com/xp/en/developers/100/sitecore-experience-manager/language-fallback.html).
+3. [Sitecore: Authoring and Management GraphQL API](https://doc.sitecore.com/sai/en/developers/sitecoreai/content-modeling-and-presentation/sitecore-authoring-and-management-graphql-api.html).
+4. [Sitecore: Fine-tune fallback configuration](https://doc.sitecore.com/xp/en/developers/102/sitecore-experience-manager/fine-tune-your-language-fallback-configuration.html) documents the per-language field-setting switch; its actual effective value still needs verification.
+
+## Read-only probe procedure
+
+The checked-in helper generates requests and validates a supplied schema locally. It has no HTTP client, accepts no credentials and does not execute requests. Use the installed lockfile dependencies:
+
+```powershell
+node --import tsx scripts/fallback-spike.ts schema
+node --import tsx scripts/fallback-spike.ts probes 00000000-0000-0000-0000-000000000001 en-NZ en-AU en
+node --import tsx scripts/fallback-spike.ts validate <exported-schema-file>
+```
+
+Replace the example item GUID with a representative existing item. The locale arguments are explicit probe candidates, not an asserted fallback chain. Do not derive them from regional names. Output contains each query and its variables. It reuses the application's details selection, changes only the fallback argument for the cross-check, and keeps the original requested locale. The schema command outputs a standard GraphQL introspection query; an IDE schema export is also suitable. Validation accepts SDL or JSON introspection (with or without the `data` wrapper).
+
+The user has authorized development-environment testing, including creating and removing new test items, while preserving all existing items. Start with read-only evidence; if fixture creation becomes necessary, record the new item identities and remove only those items. No creation or deletion has been performed so far.
+
+Run queries in an already authenticated Authoring Playground. Complete pagination independently for each query: copy `endCursor` into `after` until `hasNextPage` is false. Preserve null outer items, version 0, absent versus null collections, empty values and all provenance flags in evidence. Never interpret a first page as a complete field set. Keep raw response exports outside version control; sanitize item names/values before making deterministic fixtures. Do not include headers, tokens or credentials in exports.
+
+First inspect schema descriptions for the actual types reachable from `item`, `fields`, `templateField`, `languages`, site/configuration queries and `ItemQueryInput`. Determine whether they expose effective fallback configuration, chain references, source metadata and raw/empty/reset state. If configuration is only available through language/template definition items, verify those fields and inheritance using exact reads; do not hard-code guessed IDs or localized labels. The effective environment/context switches must also be established. A template checkbox alone does not prove all required switches are enabled.
+
+Run exact requested/candidate reads, then the fallback-enabled original lookup. For missing requested versions, distinguish an absent outer item from a version-0 object: a nested `fields` argument cannot be assumed to change the outer lookup. Check whether any separate item-level API option exists in the actual schema. Do not treat an empty nested response as proof that no usable fallback exists.
+
+## Runtime matrix still required
+
+All cases below are **unverified**, not synthetic fixtures claiming observed Sitecore behavior:
+
+| Case | Evidence required |
+| --- | --- |
+| Existing local value | Exact and cross-check values, scope, flags, local version, effective enablement. |
+| Missing requested version | Null versus version 0; item enablement; whether nested fallback returns fields; existing source version. |
+| `en-NZ -> en-AU -> en` | Actual configured chain and intermediate version absence, not a guessed chain. |
+| Disabled fallback | Effective environment/context and item/field settings; no inferred fallback from an equal candidate. |
+| Mixed field sources | Field-definition enablement/inheritance and separate source evidence per field. |
+| Empty value | Distinguish explicitly empty, unset/reset, inherited and Standard Value; determine which states trigger fallback. |
+| Shared / unversioned / Standard Values | Scope-specific behavior and any fallback exclusions; do not assign a fictitious locale to shared values. |
+| No usable source | Complete valid chain and complete candidate reads, with no access errors mistaken for absence. |
+| Invalid / cyclic chain | Sanitized fixture built from the eventual config contract; bounded traversal with explicit unresolved reason. |
+| Cross-check mismatch | Preserve both results, source uncertainty and observation times. Equal text alone must not certify provenance. |
+| Errors / cancellation / supersession | Deterministic mocked failures; never cache a failure as missing content or publish stale results. |
+
+## B04 implementation gate and next steps
+
+The schema must establish supported reads, and representative responses/configuration must establish the resolution rules. Without these, implementing a source resolver would invent empty-value semantics, enablement and version-0 behavior. An exported schema alone permits query validation but does not complete runtime validation. Needed access: an authenticated Authoring Playground through connected browser controls, or a reviewed schema export and sanitized read-only probe responses plus the relevant effective configuration.
+
+Once established, implement an evidence-preserving adapter and pure bounded resolver, then deterministic regression fixtures for the matrix above. Represent unresolved configuration/provenance explicitly. Keep source identity, locale, version, field scope, inheritance/Standard Values, exact values, calculated values, cross-check values and capture times separate.
+
+Sequential probes are intentional during the spike. GraphQL aliases could reduce round trips once schema and resolver scoping are verified; they do not guarantee transactional consistency. Bound any later cache by connection, database, item, requested/candidate locale, version and policy generation; use short session/request scope, deduplicate in-flight reads, and invalidate on relevant navigation/settings changes. Do not persist speculative provenance. Detect disagreement or changed observations rather than claiming a snapshot.
+
+After the foundation passes the runtime matrix, add the mode selector, independent side resolution, visible provenance/evidence and host-side field-transfer fencing. Verify mode defaults/retention, language locking, navigation preservation, stale detail responses and stale transfer messages in unit/extension-host tests and focused UI checks. Publishing diagnostics and editor integration remain deferred.
+
+## Verification of this preparatory change
+
+Automated verification: `npm test` passed 275 tests; `npm run check` passed; focused probe tests passed again after adding SDL and wrapped/unwrapped JSON schema coverage. CLI generation was smoke-tested for the schema query and a three-locale probe set. `git diff --check` passed.
+
+Automated tests cover query-only generation, candidate bounds/validation, exact candidate reads, original-locale cross-check, retained provenance/pagination fields and schema compatibility diagnostics. These tests verify tooling, not fallback runtime behavior. No extension UI, manifest, network client or packaged behavior has changed; no version bump or new VSIX is required for this preparation. Live probes, fallback runtime fixtures, resolver integration and UI/extension-host acceptance remain pending.
