@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.25.2
+
+- Recover removed comparison endpoints in Browse without silently selecting another connection; show an explicit connection choice when the browsed source is missing.
+- Clear content, language and navigation caches when connection endpoints change, and reject requests superseded while credentials are loading.
+- Record B18 automated and browser verification separately from pending manual desktop and live Sitecore acceptance.
+
 ## 0.25.1
 
 - Always retain the left comparison side when switching to Browse, preserving its language and navigation. Remove the Keep in Browse selector and side-choice prompt; ignore old retained-side preferences.

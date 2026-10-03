@@ -29,7 +29,7 @@ async function webview() {
     state.expandedRows = new Set(['root:aa:aa', 'id:bb']); state.selectedRowKey = 'id:cc';`);
   const switchTo = (mode: string, selection: unknown, retainedFrom?: string) => receive({ data: { type: "stateChanged", mode, selection,
     connections: [{ id: "a" }, { id: "b" }], viewContext: 5, retainedFrom } });
-  return { run, messages, switchTo };
+  return { run, messages, switchTo, receive };
 }
 
 test("Browse always retains left navigation even if an old message requests right", async () => {
@@ -74,4 +74,15 @@ test("selection waits for partner branches so late pairing cannot replace its ro
   view.run("applyLoadedLevel({side:'right',connectionId:'new',language:'de',requestedItemId:'bb',level:{item:child,children:[leaf]}}); applyModeRestoration();");
   strictEqual(view.run("modeRestoration"), undefined);
   strictEqual(view.run("state.selectedRowKey"), "id:cc");
+});
+
+test("connection changes clear stale tree snapshots, search nodes and selection", async () => {
+  const view = await webview();
+  view.run("modeSnapshots.set('old', captureModeNavigation()); navigationRetainedNodes.left.set('old', {});");
+  view.receive({ data: { type: "stateChanged", mode: "browse", viewContext: 9, resetContent: true,
+    connections: [{ id: "b" }], selection: { leftLanguage: "en", rightLanguage: "en" } } });
+  strictEqual(view.run("state.trees.left.root"), undefined);
+  strictEqual(view.run("state.selectedRowKey"), undefined);
+  strictEqual(view.run("modeSnapshots.size"), 0);
+  strictEqual(view.run("navigationRetainedNodes.left.size"), 0);
 });

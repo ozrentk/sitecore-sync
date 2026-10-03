@@ -440,7 +440,9 @@ The top bar contains a Browse / Compare selector with active-mode highlighting. 
 
 Switching to Browse always retains the left comparison side, without a side selector or prompt. Previously stored retained-side preferences are ignored and removed when preferences are next saved. The left connection, language, displayed root and selected identity carry across; bounded in-memory mode snapshots restore loaded expansions and scroll within the panel. These snapshots do not persist remote content. Workspace metadata under `sitecoreXmCloudSync.modePreferences.v1` stores only partner connection IDs, languages and lock preferences. No credentials are introduced. The toolbar has no Browse-specific Refresh button; existing context-menu refresh remains. Cancel loading is shown only while cancellable content loading is active in either mode, alongside existing search and subtree cancellation behavior.
 
-B18 #1–#4 are implemented. Full integrated acceptance remains in #5.
+Connection-store removal never silently substitutes an endpoint in an active session. An affected comparison returns to Browse on the left; a missing browsed source shows an explicit connection choice. Endpoint changes invalidate cached tree/language/details data and in-memory navigation snapshots. Supersession during credential lookup prevents the obsolete network request from starting. Normal UI removal remains guarded while the connection is in use.
+
+B18 #1–#4 are implemented. Version 0.25.2 includes automated host/browser verification and recovery fixes; #5 remains pending for native desktop manual and live Sitecore acceptance. The README records verification boundaries.
 
 
 Browse empty-field feedback distinguishes fields hidden by filters from an empty Authoring response. Empty responses show the selected language/version and available versions; language fallback remains disabled. Show all fields restores all three Browse visibility categories. The shared bottom-panel container is named Item Details, with the paired Field Diff view retained in Compare.

@@ -334,6 +334,11 @@ function renderOptions(select, selectedId) {
   }
 
   select.disabled = false;
+  if (!connectionById(selectedId)) {
+    const option = document.createElement("option");
+    option.value = ""; option.textContent = "Choose a connection"; option.selected = true; option.disabled = true;
+    select.append(option);
+  }
   for (const connection of state.connections) {
     const option = document.createElement("option");
     option.value = connection.id;
@@ -370,7 +375,7 @@ function renderLanguageOptions(side, select, selectedLanguage) {
     option.selected = language.name.toLowerCase() === selectedLanguage?.toLowerCase();
     select.append(option);
   }
-  select.disabled = languageState.loading;
+  select.disabled = languageState.loading || !connectionById(state.selection[`${side}ConnectionId`]);
   select.title = languageState.error || "Select content language";
 }
 
@@ -629,7 +634,9 @@ function createRootStatus(side) {
   const tree = state.trees[side];
   const status = document.createElement("div");
   status.className = `root-status ${side}`;
-  if (tree.error) {
+  if (!connectionById(tree.connectionId)) {
+    status.textContent = "Choose a connection to load content.";
+  } else if (tree.error) {
     const message = document.createElement("span");
     message.className = "error-text";
     message.textContent = tree.error;
@@ -2658,13 +2665,21 @@ window.addEventListener("message", (event) => {
     if (JSON.stringify(state.selection) !== JSON.stringify(message.selection)) { clearItemLookupUi(); }
     const mode = message.mode || "compare";
     const previousMode = state.mode;
-    const previous = state.mode !== mode ? captureModeNavigation() : undefined;
+    const previous = state.mode !== mode && !message.resetContent ? captureModeNavigation() : undefined;
+    if (message.resetContent) {
+      modeSnapshots.clear(); modeRestoration = undefined; clearItemLookupUi();
+      for (const side of ["left", "right"]) {
+        state.trees[side] = emptyTreeState(undefined);
+        state.languages[side] = { connectionId: undefined, values: [], loading: false };
+        navigationRetainedNodes[side].clear();
+      }
+    }
     if (previous) {
       modeSnapshots.set(modeSnapshotKey(state.mode, state.selection), previous);
       while (modeSnapshots.size > 8) modeSnapshots.delete(modeSnapshots.keys().next().value);
       modeRestoration = undefined;
     }
-    if (state.mode !== mode) {
+    if (state.mode !== mode || message.resetContent) {
       closeContextMenu(); clearItemLookupUi();
       state.languageSwitch = undefined; cancelLanguageRestoration();
       state.selectedRowKey = undefined; state.rootRowKey = undefined;

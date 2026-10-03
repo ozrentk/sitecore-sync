@@ -312,7 +312,21 @@ Use the **Browse / Compare** buttons at the top to switch modes; the active mode
 
 Returning to Browse always keeps the **left side**, including its language, root and selected item; loaded branches and scroll are restored within the open panel where available. Navigation snapshots stay in memory, while partner/language preferences survive reloads. Refresh remains in context menus. **Cancel loading** appears only during cancellable tree/language loads in either mode; search keeps its existing Cancel control.
 
-B18 subtasks #1–#4 are implemented. Full integrated acceptance remains in #5; see `BACKLOG.md`.
+If a comparison endpoint disappears from the connection store, the panel returns to Browse on the left. If that source is missing too, choose a connection explicitly; another environment is never substituted automatically. Endpoint changes clear cached content and navigation snapshots before reloading. Normal UI deletion remains blocked while a connection is in use.
+
+B18 subtasks #1–#4 are implemented and packaged. Subtask #5 remains open for manual desktop and live Sitecore acceptance; see `BACKLOG.md`.
+
+Verification for 0.25.2 (2026-10-03):
+
+| Verification | Evidence / limit |
+| --- | --- |
+| Unit and VS Code 1.100.0 extension-host suites | Session cancellation, modes/preferences, missing partners/languages, explicit locks, action targeting, navigation, connection deletion/cache recovery, credential-wait supersession, activation and Compare regressions; mocked Sitecore transport. |
+| Automated browser UI smoke | Real tree/details assets in headless Edge with a simulated VS Code bridge: full-width Browse, menus and all publish/task/link message targets, copying, filters, escaped text, empty/error states, keyboard navigation, narrow layout, conditional cancellation, mode/selection/expansion and 800px scroll restoration. |
+| Delivery | Type check, VSIX packaging and file review, redacted package secret scan, installation in a temporary isolated VS Code profile. |
+| Pending manual desktop checks | Native Extension Development Host focus, pickers, actual sidebar/details interaction, themes and rapid switching. Native desktop control is unavailable in this agent session; automated host/browser checks do not replace these. |
+| Pending live Sitecore checks | Real search/site/favorite navigation, Standard/Traced/Power Publish, task execution, public-page resolution and the null-language publishing-status fix. No live credentials or remote content mutations were used for verification. |
+
+For manual acceptance, open a connection, navigate/search and inspect an item, switch Compare/Browse with different languages, cancel a first-time partner picker, reload to verify remembered partner/language, and check that Browse keeps the left selection and view. In an approved test environment, verify each publish mode, a matching item task and the public-page link, then compare the result with the Operations record.
 
 
 Browse empty-field feedback distinguishes fields hidden by filters from an empty Authoring response. Empty responses show the selected language/version and available versions; language fallback remains disabled. Show all fields restores all three Browse visibility categories. The shared bottom-panel container is named Item Details, with the paired Field Diff view retained in Compare.
