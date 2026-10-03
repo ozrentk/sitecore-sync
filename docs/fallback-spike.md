@@ -1,6 +1,6 @@
 # Language fallback technical spike — B04
 
-Status as of 2026-10-03: offline source/documentation investigation and read-only probe tooling completed; environment schema/configuration and runtime verification pending. B04 comparison integration is not implemented. B03 publishing and B26 editor integration remain separate work.
+Status as of 2026-10-03: offline investigation and authenticated diagnostic tooling completed in 0.26.0; live environment schema/configuration and runtime verification pending. B04 comparison integration is not implemented. B03 publishing and B26 editor integration remain separate work.
 
 ## Agreed implementation contract
 
@@ -22,7 +22,7 @@ Status as of 2026-10-03: offline source/documentation investigation and read-onl
 | Official fallback setup documentation [1] | Configuration has environment, site UI, item/template and field-definition concerns. Versioned field enablement depends on an additional setting. | Documented, not verified against this environment or Authoring execution context. Delivery/Page builder settings cannot automatically be equated to Authoring settings. |
 | Official fallback overview [2] | Item fallback covers missing versions; field fallback has exclusions including shared/system fields and Standard Values items. | Documented for XP 10.0, requiring environment verification before applying to XM Cloud Authoring. |
 | Official Authoring documentation [3] | The environment's authenticated IDE exposes its schema. | Documentation provides the discovery route, not the missing runtime evidence. |
-| Available access | No schema export found in this repository. The user shared an authenticated Experience Edge Delivery Playground, which is a different API from Authoring; a connected Authoring Playground is still needed. Connection credentials are retrieved through VS Code SecretStorage. | No live probe requests performed. No credentials copied into files or requests and no environment content/configuration changed. |
+| Available access | No schema export found in this repository. The user shared an authenticated Experience Edge Delivery Playground, which is a different API from Authoring; the Authoring Playground returned 404. Version 0.26.0 now supports collecting evidence directly through the saved extension connection, so browser IDE access is no longer required. Connection credentials are retrieved through VS Code SecretStorage. | No live probe requests performed. No credentials copied into files or requests and no environment content/configuration changed. |
 
 Sources reviewed:
 
@@ -32,6 +32,8 @@ Sources reviewed:
 4. [Sitecore: Fine-tune fallback configuration](https://doc.sitecore.com/xp/en/developers/102/sitecore-experience-manager/fine-tune-your-language-fallback-configuration.html) documents the per-language field-setting switch; its actual effective value still needs verification.
 
 ## Read-only probe procedure
+
+Preferred in 0.26.0: use the Command Palette diagnostic described in the README. It uses saved credentials, retrieves schema and optional item probes, and opens an unsaved JSON report. It does not infer a chain or resolve source provenance. The offline instructions below remain useful for inspecting/generated queries or a separately authenticated IDE.
 
 The checked-in helper generates requests and validates a supplied schema locally. It has no HTTP client, accepts no credentials and does not execute requests. Use the installed lockfile dependencies:
 
@@ -71,7 +73,7 @@ All cases below are **unverified**, not synthetic fixtures claiming observed Sit
 
 ## B04 implementation gate and next steps
 
-The schema must establish supported reads, and representative responses/configuration must establish the resolution rules. Without these, implementing a source resolver would invent empty-value semantics, enablement and version-0 behavior. An exported schema alone permits query validation but does not complete runtime validation. Needed access: an authenticated Authoring Playground through connected browser controls, or a reviewed schema export and sanitized read-only probe responses plus the relevant effective configuration.
+The schema must establish supported reads, and representative responses/configuration must establish the resolution rules. Without these, implementing a source resolver would invent empty-value semantics, enablement and version-0 behavior. An exported schema alone permits query validation but does not complete runtime validation. Next evidence: run **XM Cloud Sync: Collect Authoring Fallback Diagnostic** in the extension using the saved dev connection. Start with Schema only, then representative item probes. This uses the Authoring endpoint directly; an authenticated browser IDE is optional. Review the resulting schema and item responses together with relevant effective configuration.
 
 Once established, implement an evidence-preserving adapter and pure bounded resolver, then deterministic regression fixtures for the matrix above. Represent unresolved configuration/provenance explicitly. Keep source identity, locale, version, field scope, inheritance/Standard Values, exact values, calculated values, cross-check values and capture times separate.
 
@@ -83,4 +85,4 @@ After the foundation passes the runtime matrix, add the mode selector, independe
 
 Automated verification: `npm test` passed 275 tests; `npm run check` passed; focused probe tests passed again after adding SDL and wrapped/unwrapped JSON schema coverage. CLI generation was smoke-tested for the schema query and a three-locale probe set. `git diff --check` passed.
 
-Automated tests cover query-only generation, candidate bounds/validation, exact candidate reads, original-locale cross-check, retained provenance/pagination fields and schema compatibility diagnostics. These tests verify tooling, not fallback runtime behavior. No extension UI, manifest, network client or packaged behavior has changed; no version bump or new VSIX is required for this preparation. Live probes, fallback runtime fixtures, resolver integration and UI/extension-host acceptance remain pending.
+Automated tests cover query-only generation, candidate bounds/validation, exact candidate reads, original-locale cross-check, retained provenance/pagination fields and schema compatibility diagnostics. These tests verify tooling, not fallback runtime behavior. That preparatory check did not exercise a live environment. Version 0.26.0 subsequently adds the authenticated client/command with unit coverage for pagination, incomplete evidence, cancellation, authentication routing and redaction, plus an extension-host smoke check for saved credentials and opening an unsaved report. Live probes, fallback runtime fixtures and resolver/UI integration remain pending. Manual native UI acceptance has not been performed.

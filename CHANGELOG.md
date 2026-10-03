@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.26.0
+
+- Add **Collect Authoring Fallback Diagnostic** to the Command Palette, using saved connection credentials without requiring the browser Playground.
+- Collect the schema and optional paginated exact-locale/fallback cross-check evidence into an unsaved JSON report, with cancellation, collection limits and credential redaction.
+- Keep comparison, transfer and publishing semantics unchanged while live fallback provenance is investigated.
+
 ## 0.25.2
 
 - Recover removed comparison endpoints in Browse without silently selecting another connection; show an explicit connection choice when the browsed source is missing.

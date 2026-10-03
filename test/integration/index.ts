@@ -1,6 +1,7 @@
 import { strictEqual } from "node:assert/strict";
 import * as vscode from "vscode";
 import { connectionStoreTests } from "./connectionStoreTests";
+import { fallbackDiagnosticTests } from "./fallbackDiagnosticTests";
 import { connectionSettingsTests } from "./connectionSettingsTests";
 import { comparisonPanelTests } from "./comparisonPanelTests";
 import { itemTaskRunnerTests } from "./itemTaskRunnerTests";
@@ -78,6 +79,7 @@ const integrationTests: readonly IntegrationTest[] = [
     },
   },
   ...connectionStoreTests,
+  ...fallbackDiagnosticTests,
   ...connectionSettingsTests,
   ...comparisonPanelTests,
   ...itemTaskRunnerTests,
