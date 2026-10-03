@@ -289,6 +289,26 @@ function createFieldRow(pair) {
   return row;
 }
 
+function emptyFieldsMessage(snapshot, totalFields) {
+  if (totalFields) return `All ${totalFields} returned field(s) are hidden by the current filters.`;
+  if (state.mode !== "browse") return "No fields were returned for either item.";
+  if (snapshot.leftError) return "Fields are unavailable because item details could not be loaded.";
+  const details = snapshot.leftDetails;
+  if (!details) return "Item details are unavailable.";
+  const versions = (details.availableVersions ?? []).map(version => `${version.language} (v${version.version})`).join(", ");
+  return `Authoring returned no fields for ${details.language} (version ${details.version}). Language fallback is not applied.${versions ? ` Available versions: ${versions}.` : ""}`;
+}
+
+function showAllBrowseFields() {
+  state.browseVisibility = { content: "all", standard: "all", system: "all" };
+  persistVisibility();
+  render();
+}
+
+function persistVisibility() {
+  vscode.setState({ ...vscode.getState(), visibility: { ...state.visibility }, browseVisibility: { ...state.browseVisibility } });
+}
+
 function render() {
   document.getElementById("details-title").textContent = state.mode === "browse" ? "Item Details · read-only" : "Field visibility";
   document.body.classList.toggle("browse", state.mode === "browse");
@@ -306,16 +326,24 @@ function render() {
     content.innerHTML = state.mode === "browse" ? `<p class="state">Select an item to inspect its read-only details.</p>` : `<p class="state">Right-click an item in the comparison and choose <strong>Show Detailed Field Diff</strong>.</p>`;
     return;
   }
-  const pairs = pairFields(
+  const allPairs = pairFields(
     state.snapshot.leftDetails?.fields ?? [],
     state.snapshot.rightDetails?.fields ?? [],
-  ).filter(pairIsVisible);
+  );
+  const pairs = allPairs.filter(pairIsVisible);
   const fragment = document.createDocumentFragment();
   fragment.append(createSummary(state.snapshot));
   if (!pairs.length) {
     const empty = document.createElement("p");
     empty.className = "state";
-    empty.textContent = "No fields match the current filters.";
+    empty.textContent = emptyFieldsMessage(state.snapshot, allPairs.length);
+    if (state.mode === "browse" && allPairs.length) {
+      const showAll = document.createElement("button");
+      showAll.type = "button";
+      showAll.textContent = "Show all fields";
+      showAll.addEventListener("click", showAllBrowseFields);
+      empty.append(document.createTextNode(" "), showAll);
+    }
     fragment.append(empty);
   } else {
     for (const pair of pairs) fragment.append(createFieldRow(pair));
@@ -328,11 +356,7 @@ for (const group of visibilityGroups) {
     const button = event.target.closest("button[data-mode]");
     if (!button) return;
     (state.mode === "browse" ? state.browseVisibility : state.visibility)[group.dataset.category] = button.dataset.mode;
-    vscode.setState({
-      ...vscode.getState(),
-      visibility: { ...state.visibility },
-      browseVisibility: { ...state.browseVisibility },
-    });
+    persistVisibility();
     render();
   });
 }

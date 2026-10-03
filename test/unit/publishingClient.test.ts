@@ -156,6 +156,23 @@ test("publishing requests surface GraphQL messages and the generic fallback", as
   }
 });
 
+test("invalid publishing status identifies the mismatched fields without disclosing response values", async () => {
+  const runtime = new QueuedHttpRuntime([tokenResponse(), jsonResponse({ data: { publishingStatus: {
+    state: "RUNNING", isDone: false, isFailed: false, processed: "private-response-value",
+    languages: null, targetDatabase: null,
+  } } })]);
+  const client = new PublishingClient(noOpLogger, runtime);
+  await rejects(client.status(testConnection, "client-secret", "publish-123", signal), (error: unknown) => {
+    strictEqual(error instanceof Error, true);
+    const message = (error as Error).message;
+    strictEqual(message.includes("processed expected a non-negative integer, received string"), true);
+    strictEqual(message.includes("languages expected an array of named languages, received null"), true);
+    strictEqual(message.includes("remote publishing outcome is unknown"), true);
+    strictEqual(message.includes("private-response-value"), false);
+    return true;
+  });
+});
+
 test("publishing rejects unexpected content types and invalid JSON", async () => {
   for (const [response, expected] of [
     [new Response("<html>error</html>", { headers: { "content-type": "text/html" } }), /unexpected content type \(text\/html\)/u],

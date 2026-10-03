@@ -40,7 +40,7 @@ Also recorded: B22–B29 cover environment database/IAR diagnostics, finishing P
 - [x] **#2 — Full-width single-tree UI/navigation.** Connection clicks and Browse Connection open one tree with one selector pair, connection-scoped search, site/favorite navigation, icons, lazy loads, refresh/cancel and keyboard navigation. The session fences stale responses; comparison controls and actions are hidden and guarded. Explicit Compare behavior is retained.
 - [x] **#3 — Single-item details/actions.** Browse selection opens read-only Item Details with metadata, one set of fields, separate visibility preferences, scope/source markers and eligible public links. The tree provides identity copying, all three publishing modes and matching task plug-ins through existing service and trust boundaries. Stale actions/detail responses and Browse diff/transfer requests are guarded. No field editing is included.
 - [ ] **#4 — Remembered partner and complete switching UX.**
-- [ ] **#5 — Full B18 acceptance/delivery.**
+- [ ] **#5 — Full B18 acceptance/delivery.** Follow up the reported Standard Publish status-validation failure on a datasource in en-UK (version 0). Version 0 explains the no-local-fields observation without language fallback; improved status diagnostics identify the mismatched response field, but the exact payload and remote outcome remain unverified.
 
 ### B18 — Agreed high-level plan
 
