@@ -334,3 +334,7 @@ Browse empty-field feedback distinguishes fields hidden by filters from an empty
 Invalid publishing-status responses identify the failed contract fields and received types without exposing response values. They leave the remote outcome unknown and do not trigger an automatic republish.
 
 Publishing status may return null language metadata. This is treated as unavailable metadata; polling and completion/failure decisions still use the validated job state and flags. Malformed non-null language values remain errors.
+
+## Fallback investigation (development)
+
+B04 comparison fallback is planned, not available in the current extension. The [technical spike](docs/fallback-spike.md) records the agreed Exact locale / With fallback behavior, verified source findings, environment access gaps and read-only probe procedure. Generate schema or item queries with `node --import tsx scripts/fallback-spike.ts`; this helper performs no network requests or content writes. Existing comparison, transfer and publishing behavior is unchanged.
