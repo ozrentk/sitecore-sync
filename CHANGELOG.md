@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.25.0
+
+- Add a visible Browse / Compare selector with the active mode highlighted.
+- Remember each browsed connection's comparison partner and language; prompt for missing partners, unavailable languages and conflicting language locks without losing the current view on cancellation.
+- Remember the side retained in Browse and preserve its root, selection, loaded branches and scroll through mode switches within the open panel.
+- Remove Browse's toolbar Refresh button; retain context-menu refresh and show Cancel loading only during cancellable loads in either mode.
+
 ## 0.24.2
 
 - Accept null publishing-language metadata without pausing the queue; continue honoring the reported job state, completion and failure flags.

@@ -1,4 +1,5 @@
-import { ContentSession } from "./contentSession";
+import { ContentSession, type ContentEndpoint } from "./contentSession";
+import { modePreferencesKey, navigationEndpoint, prepareCompare, readModePreferences } from "./modeSwitching";
 import { PublicPageService, type PublicPagePreviewContext } from "../publicPages/publicPageService";
 import * as vscode from "vscode";
 import type { ConnectionStore } from "../connections/connectionStore";
@@ -66,6 +67,8 @@ interface ComparisonSelection {
 }
 
 interface WebviewMessage {
+  readonly mode?: unknown;
+  readonly navigation?: unknown;
   readonly viewMode?: unknown;
   readonly viewContext?: unknown;
   readonly searchRequestId?: unknown;
@@ -179,6 +182,8 @@ class FieldDiffContentProvider implements vscode.TextDocumentContentProvider {
 export class ComparisonPanelManager implements vscode.Disposable {
   private readonly contentSession = new ContentSession();
   private modeIntent = 0;
+  private modeSwitchPicker: vscode.CancellationTokenSource | undefined;
+  private readonly modeNavigation = new Map<string, ContentEndpoint>();
   private itemSearchSession: ItemSearchSession | undefined;
   private publicPageController: AbortController | undefined;
   private lookupController: AbortController | undefined;
@@ -371,15 +376,99 @@ export class ComparisonPanelManager implements vscode.Disposable {
 
   async open(): Promise<void> {
     if (this.browseMode) {
-      ++this.modeIntent;
-      this.cancelRequests();
-      const stored = this.normalizeSelection(this.workspaceState.get<Partial<ComparisonSelection>>(selectionKey, {}));
-      this.setSessionSelection(stored, false);
-      await this.clearFieldDiffSelection();
-      await this.postState();
-      await this.loadInitialTrees();
+      if (this.panel) await this.panel.webview.postMessage({ type: "requestCompareMode" });
+      else await this.switchMode({ mode: "compare" });
     }
     await this.openPanel();
+  }
+
+  private cancelModeSwitch(): void {
+    this.modeIntent = (this.modeIntent ?? 0) + 1;
+    this.modeSwitchPicker?.cancel();
+    this.modeSwitchPicker?.dispose();
+    this.modeSwitchPicker = undefined;
+  }
+
+  private async switchMode(message: WebviewMessage): Promise<void> {
+    this.cancelModeSwitch();
+    const mode = message.mode;
+    if ((mode !== "browse" && mode !== "compare") || mode === (this.browseMode ? "browse" : "compare")) return;
+    const intent = this.modeIntent;
+    const picker = new vscode.CancellationTokenSource();
+    this.modeSwitchPicker = picker;
+    const currentSession = this.contentSession.capture();
+    const current = (): boolean => intent === this.modeIntent && currentSession() && !picker.token.isCancellationRequested;
+    const preferences = readModePreferences(this.workspaceState.get(modePreferencesKey));
+    const selection = this.getSelection();
+    const navigation = message.navigation && typeof message.navigation === "object"
+      ? message.navigation as Record<string, unknown> : {};
+    const endpoint = (side: TreeSide): ContentEndpoint | undefined => {
+      const connectionId = selection[`${side}ConnectionId`];
+      if (!connectionId) return undefined;
+      return navigationEndpoint(this.sessionEndpoint(side) ?? { connectionId, language: selection[`${side}Language`], rootPath: "/" }, navigation[side]);
+    };
+    const left = endpoint("left");
+    const right = endpoint("right");
+    if (!left) { picker.dispose(); this.modeSwitchPicker = undefined; return; }
+    let retainedSide = preferences.retainedSide;
+    try {
+      let next;
+      if (mode === "compare") {
+        const saved = Object.hasOwn(preferences.partners, left.connectionId) ? preferences.partners[left.connectionId] : undefined;
+        next = await prepareCompare(left, saved, this.connectionStore.list().map(connection => connection.id), {
+          current,
+          partner: async () => (await vscode.window.showQuickPick(this.connectionStore.list().map(connection => ({
+            label: connection.name, description: connection.id === left.connectionId ? "Same connection" : undefined, id: connection.id,
+          })), { title: "Choose comparison partner", placeHolder: "The browsed connection stays on the left" }, picker.token))?.id,
+          languages: async id => (await this.getLanguages(id)).map(language => language.name),
+          language: async (id, languages) => (await vscode.window.showQuickPick(languages.map(label => ({ label })),
+            { title: `Choose language — ${this.connectionStore.get(id)?.name ?? id}`, placeHolder: "The previous language is unavailable" }, picker.token))?.label,
+          unlock: async () => Boolean(await vscode.window.showQuickPick([{ label: "Unlock languages and compare", value: true }],
+            { title: "The restored languages differ", placeHolder: "Unlock to preserve both language choices, or Escape to cancel" }, picker.token)),
+        });
+        if (next?.mode === "compare") {
+          const remembered = this.modeNavigation.get(JSON.stringify([next.right.connectionId, next.right.language]));
+          if (remembered) next = { ...next, right: remembered };
+        }
+      } else {
+        if (!right) return;
+        if (!retainedSide) {
+          retainedSide = (await vscode.window.showQuickPick((["left", "right"] as const).map(side => ({ side,
+            label: `${side === "left" ? "Left" : "Right"}: ${this.connectionStore.get(selection[`${side}ConnectionId`]!)?.name ?? side}`,
+            description: selection[`${side}Language`],
+          })), { title: "Choose the side to keep in Browse" }, picker.token))?.side;
+        }
+        if (!retainedSide) return;
+        next = { mode: "browse" as const, source: retainedSide === "left" ? left : right };
+      }
+      if (!next || !current()) return;
+      for (const value of [left, right]) if (value) {
+        const key = JSON.stringify([value.connectionId, value.language]);
+        this.modeNavigation.delete(key); this.modeNavigation.set(key, value);
+      }
+      while (this.modeNavigation.size > 16) this.modeNavigation.delete(this.modeNavigation.keys().next().value!);
+      this.cancelRequests();
+      this.contentSession.setState(next);
+      const persistence = next.mode === "compare" ? this.saveSelection(this.getSelection())
+        : this.workspaceState.update(modePreferencesKey, { ...preferences, retainedSide,
+          partners: { ...preferences.partners, [next.source.connectionId]: {
+            connectionId: (retainedSide === "right" ? left : right)!.connectionId,
+            language: (retainedSide === "right" ? left : right)!.language, languagesLocked: selection.languagesLocked,
+          } } });
+      const committed = this.contentSession.capture();
+      await persistence;
+      if (!committed()) return;
+      await this.clearFieldDiffSelection();
+      if (!committed()) return;
+      await this.postState(retainedSide);
+      if (!committed()) return;
+      await this.loadInitialTrees();
+    } catch (error: unknown) {
+      if (intent === this.modeIntent) await vscode.window.showErrorMessage(`Unable to switch content mode: ${errorMessage(error)}`);
+    } finally {
+      if (this.modeSwitchPicker === picker) this.modeSwitchPicker = undefined;
+      picker.dispose();
+    }
   }
 
   private async openPanel(): Promise<void> {
@@ -897,7 +986,18 @@ export class ComparisonPanelManager implements vscode.Disposable {
     if (message.viewMode !== undefined && message.viewMode !== (this.browseMode ? "browse" : "compare")) return;
     // Queued selector changes remain valid within a mode; item actions belong to one displayed session.
     if (!this.isSelectionMessage(message) && message.viewContext !== undefined && message.viewContext !== this.contentSession?.revisionId) return;
-    if (message.type === "cancelBrowseLoads" && this.browseMode) {
+    if (message.type === "switchMode") {
+      if (message.viewContext === this.contentSession.revisionId) await this.switchMode(message);
+      return;
+    }
+    if (message.type === "cancelModeSwitch") { this.cancelModeSwitch(); return; }
+    if (message.type === "setRetainedSide" && (message.side === "left" || message.side === "right" || message.side === "")) {
+      this.cancelModeSwitch();
+      await this.workspaceState.update(modePreferencesKey, { ...readModePreferences(this.workspaceState.get(modePreferencesKey)), retainedSide: message.side || undefined });
+      return;
+    }
+    if (this.isSelectionMessage(message) || ["navigateItem", "revealItemResult", "loadRoot", "selectBrowseItem", "selectFieldDiffItem", "refreshAll"].includes(String(message.type))) this.cancelModeSwitch();
+    if (message.type === "cancelContentLoads" || (message.type === "cancelBrowseLoads" && this.browseMode)) {
       this.cancelRequests();
       await this.clearFieldDiffSelection();
       await this.postState();
@@ -2446,6 +2546,7 @@ export class ComparisonPanelManager implements vscode.Disposable {
     side: TreeSide,
     source: "favorite" | "site" = "favorite",
   ): FavoriteNavigation {
+    this.cancelModeSwitch();
     this.lookupController?.abort();
     this.favoriteNavigationGeneration += 1;
     this.resolvePendingFavoriteReveals(false);
@@ -3047,6 +3148,7 @@ export class ComparisonPanelManager implements vscode.Disposable {
       return;
     }
 
+    const current = this.contentSession?.capture() ?? (() => true);
     let selection = this.getSelection();
     if (
       selection.languagesLocked &&
@@ -3060,6 +3162,7 @@ export class ComparisonPanelManager implements vscode.Disposable {
           this.getLanguages(leftConnectionId),
           this.getLanguages(rightConnectionId),
         ]);
+        if (!current()) return;
         const pair = sameLanguage(selection.leftLanguage, selection.rightLanguage)
           ? lockedLanguagePair(selection.leftLanguage, leftLanguages, rightLanguages)
           : undefined;
@@ -3081,6 +3184,7 @@ export class ComparisonPanelManager implements vscode.Disposable {
         }
         this.warnedInvalidLanguageLock = undefined;
       } catch {
+        if (!current()) return;
         await Promise.all([
           this.loadAndPostLanguages("left", leftConnectionId),
           this.loadAndPostLanguages("right", rightConnectionId),
@@ -3096,7 +3200,7 @@ export class ComparisonPanelManager implements vscode.Disposable {
         this.loadTreeLevel(
           "left",
           selection.leftConnectionId,
-          { path: "/" },
+          { path: this.sessionEndpoint("left")?.rootPath ?? "/" },
         ),
       );
     }
@@ -3106,7 +3210,7 @@ export class ComparisonPanelManager implements vscode.Disposable {
         this.loadTreeLevel(
           "right",
           selection.rightConnectionId,
-          { path: "/" },
+          { path: this.sessionEndpoint("right")?.rootPath ?? "/" },
         ),
       );
     }
@@ -3680,23 +3784,41 @@ export class ComparisonPanelManager implements vscode.Disposable {
     };
   }
 
+  private sessionEndpoint(side: TreeSide): ContentEndpoint | undefined {
+    const session = this.contentSession?.state;
+    return session?.mode === "browse" ? side === "left" ? session.source : undefined : session?.[side];
+  }
+
   private setSessionSelection(selection: ComparisonSelection, browse: boolean): void {
     if (!this.contentSession || !selection.leftConnectionId) return;
-    const left = { connectionId: selection.leftConnectionId, language: selection.leftLanguage, rootPath: "/" };
+    const endpoint = (side: TreeSide): ContentEndpoint => {
+      const previous = this.sessionEndpoint(side);
+      const connectionId = selection[`${side}ConnectionId`]!;
+      return { ...(previous?.connectionId === connectionId ? previous : { rootPath: "/" }), connectionId, language: selection[`${side}Language`] };
+    };
+    const left = endpoint("left");
     if (browse) this.contentSession.openConnection(left);
     else if (selection.rightConnectionId) this.contentSession.openCompare(left,
-      { connectionId: selection.rightConnectionId, language: selection.rightLanguage, rootPath: "/" },
+      endpoint("right"),
       selection.languagesLocked && sameLanguage(selection.leftLanguage, selection.rightLanguage));
   }
 
   private async saveSelection(selection: ComparisonSelection): Promise<void> {
     const browse = this.browseMode;
     this.setSessionSelection(selection, browse);
-    if (!browse) await this.workspaceState.update(selectionKey, selection);
+    if (!browse) {
+      await this.workspaceState.update(selectionKey, selection);
+      if (selection.leftConnectionId && selection.rightConnectionId) {
+        const preferences = readModePreferences(this.workspaceState.get(modePreferencesKey));
+        await this.workspaceState.update(modePreferencesKey, readModePreferences({ ...preferences,
+          partners: { ...preferences.partners, [selection.leftConnectionId]: { connectionId: selection.rightConnectionId,
+            language: selection.rightLanguage, languagesLocked: selection.languagesLocked } } }));
+      }
+    }
     this.comparisonStateEmitter.fire();
   }
 
-  private async postState(): Promise<void> {
+  private async postState(retainedFrom?: TreeSide): Promise<void> {
     if (!this.panel) {
       return;
     }
@@ -3712,6 +3834,8 @@ export class ComparisonPanelManager implements vscode.Disposable {
       type: "stateChanged",
       viewContext: this.contentSession?.revisionId,
       mode: this.browseMode ? "browse" : "compare",
+      retainedFrom,
+      retainedSide: readModePreferences(this.workspaceState.get(modePreferencesKey)).retainedSide,
       connections,
       selection: this.getSelection(),
       textNormalization: vscode.workspace
@@ -3744,6 +3868,7 @@ export class ComparisonPanelManager implements vscode.Disposable {
   }
 
   private cancelRequests(): void {
+    this.modeSwitchPicker?.cancel();
     this.contentSession?.cancelPending();
     this.lookupController?.abort();
     this.pendingLanguageView = undefined;

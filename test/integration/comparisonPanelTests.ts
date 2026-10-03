@@ -1,5 +1,6 @@
 import { FieldDiffViewProvider } from "../../src/comparison/fieldDiffView";
 import { ContentSession } from "../../src/comparison/contentSession";
+import { modePreferencesKey, readModePreferences } from "../../src/comparison/modeSwitching";
 import { deepStrictEqual, strictEqual, rejects } from "node:assert/strict";
 import * as vscode from "vscode";
 import { mock } from "node:test";
@@ -37,6 +38,66 @@ interface ComparisonPanelHarness {
 }
 
 export const comparisonPanelTests: readonly IntegrationTest[] = [{
+  name: "mode switching remembers the partner across reload and retains the chosen side navigation",
+  async execute(): Promise<void> {
+    const workspaceState = new MemoryMemento({ [modePreferencesKey]: {
+      partners: { one: { connectionId: "one", language: "fr", languagesLocked: false } }, retainedSide: "right",
+    } });
+    const session = new ContentSession();
+    session.openConnection({ connectionId: "one", language: "en", rootPath: "/" });
+    const posted: Array<Record<string, unknown>> = [];
+    const roots: unknown[] = [];
+    const manager = Object.create(ComparisonPanelManager.prototype) as ComparisonPanelHarness;
+    Object.assign(manager, { contentSession: session, modeIntent: 0, modeNavigation: new Map(), workspaceState,
+      connectionStore: { list: () => [connection("one", "One")], get: () => connection("one", "One") },
+      panel: { webview: { postMessage: async (message: Record<string, unknown>) => { posted.push(message); return true; } } },
+      getLanguages: async () => [language("en"), language("fr")],
+      cancelRequests: () => session.cancelPending(), clearFieldDiffSelection: async () => undefined,
+      comparisonStateEmitter: { fire() {} }, loadAndPostLanguages: async () => undefined,
+      loadTreeLevel: async (side: string, _id: string, locator: unknown) => { roots.push([side, locator]); },
+    });
+    await manager.handleMessage({ type: "switchMode", mode: "compare", viewContext: session.revisionId,
+      navigation: { left: { rootPath: "/sitecore/home", selectedItemId: "page" } } });
+    strictEqual(session.state?.mode, "compare");
+    if (session.state?.mode !== "compare") throw Error("Expected Compare");
+    strictEqual(session.state.right.language, "fr");
+    deepStrictEqual(roots, [["left", { path: "/sitecore/home" }], ["right", { path: "/" }]]);
+    await manager.handleMessage({ type: "switchMode", mode: "browse", viewContext: session.revisionId,
+      navigation: { left: { rootPath: "/sitecore/home", selectedItemId: "page" }, right: { rootPath: "/sitecore/other", selectedItemId: "other" } } });
+    deepStrictEqual(session.state, { mode: "browse", source: { connectionId: "one", language: "fr", rootPath: "/sitecore/other", selectedItemId: "other" } });
+    strictEqual(posted.at(-1)?.retainedFrom, "right");
+    const reloaded = readModePreferences(JSON.parse(JSON.stringify(workspaceState.get(modePreferencesKey))));
+    strictEqual(reloaded.partners.one?.language, "en");
+    strictEqual(reloaded.retainedSide, "right");
+    session.dispose();
+  },
+}, {
+  name: "cancelled and superseded mode pickers leave the live Browse session intact",
+  async execute(): Promise<void> {
+    const session = new ContentSession();
+    session.openConnection({ connectionId: "one", language: "en", rootPath: "/sitecore/home" });
+    const initial = session.state;
+    const workspaceState = new MemoryMemento();
+    const manager = Object.create(ComparisonPanelManager.prototype) as ComparisonPanelHarness;
+    Object.assign(manager, { contentSession: session, modeIntent: 0, modeNavigation: new Map(), workspaceState,
+      connectionStore: { list: () => [connection("one", "One")], get: () => connection("one", "One") },
+    });
+    const cancelled = mock.method(vscode.window, "showQuickPick", async () => undefined);
+    try {
+      await manager.handleMessage({ type: "switchMode", mode: "compare", viewContext: session.revisionId });
+      strictEqual(session.state, initial);
+    } finally { cancelled.mock.restore(); }
+    let finish!: (value: unknown) => void;
+    const pending = mock.method(vscode.window, "showQuickPick", () => new Promise(resolve => { finish = resolve; }));
+    try {
+      const switching = manager.handleMessage({ type: "switchMode", mode: "compare", viewContext: session.revisionId });
+      await manager.handleMessage({ type: "setRetainedSide", side: "left", viewContext: session.revisionId });
+      finish({ id: "one" });
+      await switching;
+      strictEqual(session.state, initial);
+    } finally { pending.mock.restore(); session.dispose(); }
+  },
+}, {
   name: "Item Details provider rejects stale, right-side and mutation messages in Browse",
   async execute(): Promise<void> {
     const calls: string[] = [];
