@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.25.1
+
+- Always retain the left comparison side when switching to Browse, preserving its language and navigation. Remove the Keep in Browse selector and side-choice prompt; ignore old retained-side preferences.
+
 ## 0.25.0
 
 - Add a visible Browse / Compare selector with the active mode highlighted.

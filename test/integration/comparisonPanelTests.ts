@@ -38,7 +38,7 @@ interface ComparisonPanelHarness {
 }
 
 export const comparisonPanelTests: readonly IntegrationTest[] = [{
-  name: "mode switching remembers the partner across reload and retains the chosen side navigation",
+  name: "mode switching remembers the partner across reload and always retains left navigation despite a legacy right preference",
   async execute(): Promise<void> {
     const workspaceState = new MemoryMemento({ [modePreferencesKey]: {
       partners: { one: { connectionId: "one", language: "fr", languagesLocked: false } }, retainedSide: "right",
@@ -64,11 +64,11 @@ export const comparisonPanelTests: readonly IntegrationTest[] = [{
     deepStrictEqual(roots, [["left", { path: "/sitecore/home" }], ["right", { path: "/" }]]);
     await manager.handleMessage({ type: "switchMode", mode: "browse", viewContext: session.revisionId,
       navigation: { left: { rootPath: "/sitecore/home", selectedItemId: "page" }, right: { rootPath: "/sitecore/other", selectedItemId: "other" } } });
-    deepStrictEqual(session.state, { mode: "browse", source: { connectionId: "one", language: "fr", rootPath: "/sitecore/other", selectedItemId: "other" } });
-    strictEqual(posted.at(-1)?.retainedFrom, "right");
+    deepStrictEqual(session.state, { mode: "browse", source: { connectionId: "one", language: "en", rootPath: "/sitecore/home", selectedItemId: "page" } });
+    strictEqual(posted.at(-1)?.mode, "browse");
     const reloaded = readModePreferences(JSON.parse(JSON.stringify(workspaceState.get(modePreferencesKey))));
-    strictEqual(reloaded.partners.one?.language, "en");
-    strictEqual(reloaded.retainedSide, "right");
+    strictEqual(reloaded.partners.one?.language, "fr");
+    strictEqual(Object.hasOwn(reloaded, "retainedSide"), false);
     session.dispose();
   },
 }, {
@@ -91,7 +91,7 @@ export const comparisonPanelTests: readonly IntegrationTest[] = [{
     const pending = mock.method(vscode.window, "showQuickPick", () => new Promise(resolve => { finish = resolve; }));
     try {
       const switching = manager.handleMessage({ type: "switchMode", mode: "compare", viewContext: session.revisionId });
-      await manager.handleMessage({ type: "setRetainedSide", side: "left", viewContext: session.revisionId });
+      await manager.handleMessage({ type: "cancelModeSwitch", viewContext: session.revisionId });
       finish({ id: "one" });
       await switching;
       strictEqual(session.state, initial);

@@ -32,11 +32,11 @@ async function webview() {
   return { run, messages, switchTo };
 }
 
-test("retaining right keeps its language, selected item, expansion and narrowed root", async () => {
+test("Browse always retains left navigation even if an old message requests right", async () => {
   const view = await webview();
   view.run("state.rootRowKey = 'id:bb'");
-  view.switchTo("browse", { leftConnectionId: "b", leftLanguage: "fr", rightLanguage: "en" }, "right");
-  strictEqual(view.run("state.trees.left.language"), "fr");
+  view.switchTo("browse", { leftConnectionId: "a", leftLanguage: "en", rightLanguage: "en" }, "right");
+  strictEqual(view.run("state.trees.left.language"), "en");
   strictEqual(view.run("state.trees.left.root.itemId"), "bb");
   strictEqual(view.run("state.selectedRowKey"), "left:cc");
   strictEqual(view.run("state.expandedRows.has('root:bb:missing')"), true);

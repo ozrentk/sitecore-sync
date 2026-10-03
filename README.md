@@ -310,7 +310,7 @@ Click a connection in Connections, or choose **Browse Connection**, to open one 
 
 Use the **Browse / Compare** buttons at the top to switch modes; the active mode is highlighted. Compare keeps the browsed connection on the left and restores its last partner and partner language, saved per connection in this workspace. On first use or after deleting a partner, choose a connection (including the same connection). Unavailable languages require a new choice. If a remembered lock conflicts with the two languages, explicitly unlock or cancel; cancelling keeps the current tree intact. The right connection and language selectors remain changeable.
 
-When returning to Browse, choose which side to keep. **Keep in Browse** lets you change the remembered side or ask on every switch. The retained side keeps its language, root and selected item; loaded branches and scroll are restored within the open panel where available. Navigation snapshots stay in memory, while partner/language and retained-side preferences survive reloads. Refresh remains in context menus. **Cancel loading** appears only during cancellable tree/language loads in either mode; search keeps its existing Cancel control.
+Returning to Browse always keeps the **left side**, including its language, root and selected item; loaded branches and scroll are restored within the open panel where available. Navigation snapshots stay in memory, while partner/language preferences survive reloads. Refresh remains in context menus. **Cancel loading** appears only during cancellable tree/language loads in either mode; search keeps its existing Cancel control.
 
 B18 subtasks #1–#4 are implemented. Full integrated acceptance remains in #5; see `BACKLOG.md`.
 

@@ -8,7 +8,6 @@ export interface ComparisonPartner {
 }
 export interface ModePreferences {
   readonly partners: Readonly<Record<string, ComparisonPartner>>;
-  readonly retainedSide?: "left" | "right";
 }
 const isModePreferencesObject = (value: unknown): value is Record<string, unknown> =>
   value !== null && typeof value === "object" && !Array.isArray(value);
@@ -23,8 +22,7 @@ export function readModePreferences(value: unknown): ModePreferences {
     const p = partner as unknown as ComparisonPartner;
     return [id, { connectionId: p.connectionId, language: p.language, languagesLocked: p.languagesLocked }];
   }) : [];
-  return { partners: Object.fromEntries(partners),
-    retainedSide: value.retainedSide === "left" || value.retainedSide === "right" ? value.retainedSide : undefined };
+  return { partners: Object.fromEntries(partners) };
 }
 
 export function navigationEndpoint(endpoint: ContentEndpoint, value: unknown): ContentEndpoint {

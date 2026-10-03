@@ -11,9 +11,9 @@ function choices(overrides: Partial<ModeSwitchChoices> = {}): ModeSwitchChoices 
 
 test("mode preferences survive serialization and discard unknown or malformed data", () => {
   const saved = readModePreferences(JSON.parse(JSON.stringify({ partners: { a: { ...partner, secret: "not persisted" }, b: null }, retainedSide: "right", token: "not persisted" })));
-  deepStrictEqual(saved, { partners: { a: partner }, retainedSide: "right" });
+  deepStrictEqual(saved, { partners: { a: partner } });
   deepStrictEqual(readModePreferences(null), { partners: {} });
-  deepStrictEqual(readModePreferences({ partners: [], retainedSide: "other" }), { partners: {}, retainedSide: undefined });
+  deepStrictEqual(readModePreferences({ partners: [], retainedSide: "other" }), { partners: {} });
 });
 
 test("remembered comparison preserves source navigation and independent partner language", async () => {
