@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.24.0
+
+- Add read-only Item Details to Browse with item metadata, one field column, scope/source markers and separate All/Hidden visibility controls.
+- Enable Standard, Traced and Power Publish, matching item tasks, public-page links and copying item IDs/paths from Browse.
+- Reject stale detail responses and action contexts while preserving Compare field differences and transfers.
+
 ## 0.23.0
 
 - Open connections in Browse with one full-width content tree, connection-scoped search, sites/favorites and navigation controls.

@@ -76,7 +76,7 @@ export class ItemTaskRunner implements vscode.Disposable {
     this.javaScriptHost = new JavaScriptTaskHost(authoringClient);
   }
 
-  async selectAndRun(candidates: readonly ItemTaskCandidateContext[]): Promise<void> {
+  async selectAndRun(candidates: readonly ItemTaskCandidateContext[], singleItem = false): Promise<void> {
     if (this.running) {
       await vscode.window.showInformationMessage(
         "Another item task is already running. Wait for it to finish or cancel it first.",
@@ -96,7 +96,7 @@ export class ItemTaskRunner implements vscode.Disposable {
         if (matchesItem(plugin.matches, candidate.item)) {
           choices.push({
             label: plugin.name,
-            description: `${capitalize(candidate.side)} · ${candidate.connection.name} · ${candidate.language}`,
+            description: `${singleItem ? "" : `${capitalize(candidate.side)} · `}${candidate.connection.name} · ${candidate.language}`,
             detail: `${candidate.item.path}${plugin.description ? ` — ${plugin.description}` : ""}`,
             plugin,
             context: candidate,
@@ -108,13 +108,13 @@ export class ItemTaskRunner implements vscode.Disposable {
       await vscode.window.showInformationMessage(
         plugins.length === 0
           ? "No item task plug-ins were found under .xm-cloud-sync/tasks."
-          : "No item task plug-ins match this item on either side.",
+          : singleItem ? "No item task plug-ins match this item." : "No item task plug-ins match this item on either side.",
       );
       return;
     }
     const choice = await vscode.window.showQuickPick(choices, {
       title: "Run item task",
-      placeHolder: "Select a task and comparison side",
+      placeHolder: singleItem ? "Select a task for this item" : "Select a task and comparison side",
       matchOnDescription: true,
       matchOnDetail: true,
       ignoreFocusOut: true,

@@ -66,6 +66,8 @@ interface ComparisonSelection {
 }
 
 interface WebviewMessage {
+  readonly viewMode?: unknown;
+  readonly viewContext?: unknown;
   readonly searchRequestId?: unknown;
   readonly query?: unknown;
   readonly roots?: unknown;
@@ -891,16 +893,47 @@ export class ComparisonPanelManager implements vscode.Disposable {
   }
 
   private async handleMessage(message: WebviewMessage): Promise<void> {
+    if (!message || typeof message !== "object") return;
+    if (message.viewMode !== undefined && message.viewMode !== (this.browseMode ? "browse" : "compare")) return;
+    // Queued selector changes remain valid within a mode; item actions belong to one displayed session.
+    if (!this.isSelectionMessage(message) && message.viewContext !== undefined && message.viewContext !== this.contentSession?.revisionId) return;
     if (message.type === "cancelBrowseLoads" && this.browseMode) {
       this.cancelRequests();
+      await this.clearFieldDiffSelection();
+      await this.postState();
       await this.panel?.webview.postMessage({ type: "browseLoadsCancelled" });
       return;
     }
     if (this.browseMode && (message.side === "right" || [
       "swapConnections", "setLanguageLock", "syncSubtree", "copyField", "copyFieldValue",
-      "standardPublish", "tracedPublish", "powerPublish", "runItemTask", "openPublicPage",
       "showDetailedFieldDiff", "selectFieldDiffItem", "openFieldDiff", "loadItemDetails",
     ].includes(String(message.type)))) return;
+    if (this.browseMode && ["selectBrowseItem", "showBrowseItem", "standardPublish", "tracedPublish",
+      "powerPublish", "runItemTask", "openPublicPage", "copyBrowseIdentity"].includes(String(message.type)) &&
+      message.viewContext !== this.contentSession.revisionId) return;
+    if (this.browseMode && (message.type === "selectBrowseItem" || message.type === "showBrowseItem") &&
+      typeof message.leftItemId === "string" && message.leftItemId.trim() && !this.pendingLanguageView) {
+      this.selectedFieldDiffItem = { mode: "browse", leftItemId: message.leftItemId,
+        leftName: typeof message.leftName === "string" ? message.leftName : undefined };
+      if (message.type === "showBrowseItem" || !this.fieldDiffViewProvider.visible) {
+        await vscode.commands.executeCommand(`${fieldDiffViewId}.focus`, { preserveFocus: message.type === "selectBrowseItem" });
+      }
+      await this.refreshFieldDiffView();
+      return;
+    }
+    if (this.browseMode && message.type === "copyBrowseIdentity" && typeof message.itemId === "string" &&
+      (message.fieldId === "id" || message.fieldId === "path") && !this.pendingLanguageView) {
+      const selection = this.getSelection();
+      if (!selection.leftConnectionId) return;
+      const current = this.contentSession.capture();
+      try {
+        const details = await this.getItemDetails(selection.leftConnectionId, selection.leftLanguage, message.itemId);
+        if (current()) await vscode.env.clipboard.writeText(message.fieldId === "id" ? details.itemId : details.path);
+      } catch (error: unknown) {
+        if (current()) await vscode.window.showErrorMessage(`Unable to copy item identity: ${errorMessage(error)}`);
+      }
+      return;
+    }
     if (message.type === "openPublicPage" && (message.side === "left" || message.side === "right") && typeof message.itemId === "string") {
       if (!this.pendingLanguageView) { await this.openPublicPage(message.side, message.itemId); }
       return;
@@ -1228,6 +1261,7 @@ export class ComparisonPanelManager implements vscode.Disposable {
   }
 
   private async runItemTask(message: WebviewMessage): Promise<void> {
+    const current = this.contentSession?.capture() ?? (() => true);
     const selection = this.getSelection();
     const requestedSide = message.side === "left" || message.side === "right"
       ? message.side
@@ -1301,10 +1335,11 @@ export class ComparisonPanelManager implements vscode.Disposable {
           }
         },
       );
+      if (!current()) return;
       if (candidates.length === 0) {
-        throw new Error("Item details could not be loaded for either comparison side.");
+        throw new Error(this.browseMode ? "Item details could not be loaded." : "Item details could not be loaded for either comparison side.");
       }
-      await this.itemTaskRunner.selectAndRun(candidates);
+      await this.itemTaskRunner.selectAndRun(candidates, this.browseMode);
     } catch (error: unknown) {
       await vscode.window.showErrorMessage(
         `Unable to prepare the item task: ${errorMessage(error)}`,
@@ -1678,6 +1713,7 @@ export class ComparisonPanelManager implements vscode.Disposable {
       this.treeLevelCache.clear();
       this.itemDetailsCache.clear();
       this.clearItemIconCaches();
+      await this.postState();
       await this.panel?.webview.postMessage({ type: "itemIconsReset" });
       await this.loadSubtree(rowKey, leftItemId, rightItemId, "refreshAll");
     } finally {
@@ -2602,11 +2638,13 @@ export class ComparisonPanelManager implements vscode.Disposable {
   }
 
   private async clearFieldDiffSelection(): Promise<void> {
+    this.publicPageController?.abort();
     this.selectedFieldDiffItem = undefined;
-    await this.fieldDiffViewProvider.clear();
+    await this.fieldDiffViewProvider.clear(this.browseMode ? "browse" : "compare");
   }
 
   private async openSelectedFieldDiff(fieldId: string): Promise<void> {
+    if (this.browseMode) return;
     const selected = this.selectedFieldDiffItem;
     if (!selected) {
       return;
@@ -2622,7 +2660,7 @@ export class ComparisonPanelManager implements vscode.Disposable {
     fieldId: string,
     direction: "leftToRight" | "rightToLeft",
   ): Promise<void> {
-    if (this.pendingLanguageView) {
+    if (this.browseMode || this.pendingLanguageView) {
       return;
     }
     const normalizedFieldId = normalizeItemId(fieldId);
@@ -2839,6 +2877,8 @@ export class ComparisonPanelManager implements vscode.Disposable {
     rightItemId: string | undefined,
     fieldId: string,
   ): Promise<void> {
+    if (this.browseMode) return;
+    const current = this.contentSession?.capture() ?? (() => true);
     const selection = this.getSelection();
     const [leftDetails, rightDetails] = await Promise.all([
       leftItemId && selection.leftConnectionId
@@ -2848,6 +2888,7 @@ export class ComparisonPanelManager implements vscode.Disposable {
         ? this.getItemDetails(selection.rightConnectionId, selection.rightLanguage, rightItemId)
         : undefined,
     ]);
+    if (!current()) return;
     const normalizedFieldId = normalizeItemId(fieldId);
     const leftField = leftDetails?.fields.find(
       (field) => normalizeItemId(field.fieldId) === normalizedFieldId,
@@ -2895,6 +2936,7 @@ export class ComparisonPanelManager implements vscode.Disposable {
   }
 
   private async openPublicPage(side: TreeSide, itemId: string): Promise<void> {
+    const current = this.contentSession?.capture() ?? (() => true);
     const selection = this.getSelection();
     const connectionId = selection[`${side}ConnectionId`];
     if (!connectionId || this.pendingLanguageView) { return; }
@@ -2903,7 +2945,7 @@ export class ComparisonPanelManager implements vscode.Disposable {
     this.requestControllers.add(controller);
     try {
       const target = await new PublicPageService(this.connectionStore, this.authoringClient).resolve(connectionId, itemId, selection[`${side}Language`], controller.signal);
-      if (!this.isCurrentSelection(side, connectionId, selection[`${side}Language`])) { return; }
+      if (!current() || !this.isCurrentSelection(side, connectionId, selection[`${side}Language`])) { return; }
       if (!target) { await vscode.window.showInformationMessage("Configure Public Page URLs to enable public-page links."); return; }
       if (!controller.signal.aborted) { await vscode.env.openExternal(vscode.Uri.parse(target.url)); }
     } catch (error: unknown) {
@@ -2912,13 +2954,14 @@ export class ComparisonPanelManager implements vscode.Disposable {
   }
 
   private async refreshFieldDiffView(): Promise<void> {
+    const current = this.contentSession?.capture() ?? (() => true);
     this.publicPageController?.abort();
     if (!this.fieldDiffViewProvider.visible) {
       return;
     }
     const selected = this.selectedFieldDiffItem;
     if (!selected) {
-      await this.fieldDiffViewProvider.clear();
+      await this.fieldDiffViewProvider.clear(this.browseMode ? "browse" : "compare");
       return;
     }
     const selection = this.getSelection();
@@ -2948,7 +2991,7 @@ export class ComparisonPanelManager implements vscode.Disposable {
       const rightError = rightResult.status === "rejected"
         ? errorMessage(rightResult.reason)
         : undefined;
-      if (selected !== this.selectedFieldDiffItem || !this.fieldDiffViewProvider.visible) {
+      if (!current() || selected !== this.selectedFieldDiffItem || !this.fieldDiffViewProvider.visible) {
         return;
       }
       const snapshot = {
@@ -2982,7 +3025,7 @@ export class ComparisonPanelManager implements vscode.Disposable {
       }));
       clearTimeout(timeout);
       this.requestControllers.delete(controller);
-      if (controller.signal.aborted || selected !== this.selectedFieldDiffItem || !this.fieldDiffViewProvider.visible) { return; }
+      if (!current() || controller.signal.aborted || selected !== this.selectedFieldDiffItem || !this.fieldDiffViewProvider.visible) { return; }
       await this.fieldDiffViewProvider.showSnapshot({
         leftPublicPageUrl: pages[0].status === "fulfilled" ? pages[0].value?.url : undefined,
         rightPublicPageUrl: pages[1].status === "fulfilled" ? pages[1].value?.url : undefined,
@@ -2991,7 +3034,7 @@ export class ComparisonPanelManager implements vscode.Disposable {
         ...snapshot,
       });
     } catch (error: unknown) {
-      if (selected === this.selectedFieldDiffItem) {
+      if (current() && selected === this.selectedFieldDiffItem) {
         await this.fieldDiffViewProvider.showError(
           `Unable to load field details: ${errorMessage(error)}`,
         );
@@ -3667,6 +3710,7 @@ export class ComparisonPanelManager implements vscode.Disposable {
 
     await this.panel.webview.postMessage({
       type: "stateChanged",
+      viewContext: this.contentSession?.revisionId,
       mode: this.browseMode ? "browse" : "compare",
       connections,
       selection: this.getSelection(),

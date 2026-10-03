@@ -1,3 +1,4 @@
+import { FieldDiffViewProvider } from "../../src/comparison/fieldDiffView";
 import { ContentSession } from "../../src/comparison/contentSession";
 import { deepStrictEqual, strictEqual, rejects } from "node:assert/strict";
 import * as vscode from "vscode";
@@ -14,6 +15,7 @@ import type { ConnectionStore } from "../../src/connections/connectionStore";
 import type { XmCloudConnection } from "../../src/connections/connection";
 import { AuthoringItemNotFoundError } from "../../src/sitecore/authoringClient";
 import type {
+  AuthoringItemDetails,
   AuthoringLanguage,
   AuthoringTreeLevel,
 } from "../../src/sitecore/authoringClient";
@@ -35,6 +37,123 @@ interface ComparisonPanelHarness {
 }
 
 export const comparisonPanelTests: readonly IntegrationTest[] = [{
+  name: "Item Details provider rejects stale, right-side and mutation messages in Browse",
+  async execute(): Promise<void> {
+    const calls: string[] = [];
+    const messages: Array<Record<string, unknown>> = [];
+    let receive!: (message: unknown) => Promise<void>;
+    const disposable = { dispose() {} };
+    const view = { title: "", visible: true, onDidChangeVisibility: () => disposable,
+      webview: { cspSource: "test", options: {}, html: "", asWebviewUri: (uri: vscode.Uri) => uri,
+        onDidReceiveMessage: (listener: typeof receive) => { receive = listener; return disposable; },
+        postMessage: async (message: Record<string, unknown>) => { messages.push(message); return true; } } };
+    const provider = new FieldDiffViewProvider(vscode.Uri.file(process.cwd()), () => undefined,
+      async () => { calls.push("diff"); }, async () => { calls.push("transfer"); },
+      async () => { calls.push("copy"); return true; }, async () => { calls.push("page"); });
+    try {
+      provider.resolveWebviewView(view as unknown as vscode.WebviewView);
+      await provider.showLoading({ mode: "browse", leftItemId: "item" });
+      strictEqual(view.title, "Item Details");
+      const contextId = messages.at(-1)?.contextId;
+      await receive({ type: "openTextDiff", fieldId: "field", contextId });
+      await receive({ type: "copyFieldValue", fieldId: "field", direction: "leftToRight", contextId });
+      await receive({ type: "openPublicPage", side: "right", itemId: "item", contextId });
+      await receive({ type: "openPublicPage", side: "left", itemId: "item", contextId: -1 });
+      deepStrictEqual(calls, []);
+      await receive({ type: "openPublicPage", side: "left", itemId: "item", contextId });
+      await receive({ type: "copyItemId", side: "left", itemId: "item", contextId });
+      deepStrictEqual(calls, ["page", "copy"]);
+      await provider.clear("compare");
+      strictEqual(view.title, "Field Diff");
+      await receive({ type: "openTextDiff", fieldId: "field", contextId });
+      strictEqual(calls.length, 2);
+      await receive({ type: "openTextDiff", fieldId: "field", contextId: messages.at(-1)?.contextId });
+      strictEqual(calls.at(-1), "diff");
+    } finally { provider.dispose(); }
+  },
+}, {
+  name: "Browse publishing and tasks use the browsed endpoint and reject stale or right-side actions",
+  async execute(): Promise<void> {
+    const session = new ContentSession();
+    session.openConnection({ connectionId: "browse", language: "fr", rootPath: "/" });
+    const calls: unknown[] = [];
+    const tasks: unknown[] = [];
+    const manager = Object.create(ComparisonPanelManager.prototype) as ComparisonPanelHarness;
+    Object.assign(manager, { contentSession: session,
+      connectionStore: { get: () => connection("browse", "Browse") },
+      getItemDetails: async (connectionId: string, language: string, itemId: string) => {
+        deepStrictEqual([connectionId, language, itemId], ["browse", "fr", "item"]);
+        return itemDetails(itemId);
+      },
+      publishingManager: { start: async (...args: unknown[]) => { calls.push(args); } },
+      itemTaskRunner: { selectAndRun: async (candidates: unknown) => { tasks.push(candidates); } },
+      log: { warn() {} },
+    });
+    for (const type of ["standardPublish", "tracedPublish", "powerPublish"]) {
+      await manager.handleMessage({ type, viewContext: session.revisionId, side: "left", itemId: "item", path: "/sitecore/item" });
+    }
+    deepStrictEqual(calls, ["standard", "traced", "power"].map(mode => [mode,
+      { connectionId: "browse", language: "fr", side: "left", itemId: "item", path: "/sitecore/item" }]));
+    await manager.handleMessage({ type: "runItemTask", viewContext: session.revisionId, side: "left", leftItemId: "item", rightItemId: "stale" });
+    const candidates = tasks[0] as Array<{ connection: { id: string }; language: string; item: { itemId: string } }>;
+    strictEqual(candidates.length, 1);
+    deepStrictEqual([candidates[0]?.connection.id, candidates[0]?.language, candidates[0]?.item.itemId], ["browse", "fr", "item"]);
+    const oldContext = session.revisionId;
+    session.openConnection({ connectionId: "other", language: "de", rootPath: "/" });
+    for (const message of [
+      { type: "standardPublish", viewContext: oldContext, side: "left" },
+      { type: "standardPublish", viewContext: session.revisionId, side: "right" },
+      { type: "runItemTask", viewContext: oldContext, side: "left" },
+      { type: "syncSubtree", viewContext: session.revisionId, side: "left" },
+    ]) await manager.handleMessage({ ...message, itemId: "item", path: "/sitecore/item", leftItemId: "item" });
+    strictEqual(calls.length, 3);
+    strictEqual(tasks.length, 1);
+    session.dispose();
+  },
+}, {
+  name: "Browse item details ignore replaced selections and cancelled sessions",
+  async execute(): Promise<void> {
+    const session = new ContentSession();
+    session.openConnection({ connectionId: "browse", language: "fr", rootPath: "/" });
+    const snapshots: Array<Record<string, unknown>> = [];
+    const pending = new Map<string, (value: AuthoringItemDetails) => void>();
+    const manager = Object.create(ComparisonPanelManager.prototype) as ComparisonPanelHarness;
+    Object.assign(manager, { contentSession: session,
+      connectionStore: { get: () => connection("browse", "Browse") },
+      getItemDetails: async (_connectionId: string, language: string, id: string) => {
+        strictEqual(language, "fr");
+        return new Promise<AuthoringItemDetails>(resolve => pending.set(id, resolve));
+      },
+      fieldDiffViewProvider: { visible: true, showLoading: async () => undefined,
+        showSnapshot: async (snapshot: Record<string, unknown>) => { snapshots.push(snapshot); } },
+    });
+    const select = (id: string) => manager.handleMessage({ type: "selectBrowseItem", leftItemId: id, viewContext: session.revisionId });
+    const first = select("first");
+    await new Promise(resolve => setImmediate(resolve));
+    const second = select("second");
+    await new Promise(resolve => setImmediate(resolve));
+    pending.get("second")?.(itemDetails("second"));
+    await second;
+    pending.get("first")?.(itemDetails("first"));
+    await first;
+    strictEqual(snapshots.length, 1);
+    strictEqual(snapshots[0]?.mode, "browse");
+    strictEqual((snapshots[0]?.leftDetails as AuthoringItemDetails).itemId, "second");
+    strictEqual(snapshots[0]?.rightDetails, undefined);
+    const cancelled = select("cancelled");
+    await new Promise(resolve => setImmediate(resolve));
+    session.cancelPending();
+    pending.get("cancelled")?.(itemDetails("cancelled"));
+    await cancelled;
+    strictEqual(snapshots.length, 1);
+    Object.assign(manager, { getItemDetails: async () => { throw new Error("Authoring unavailable"); } });
+    await select("failed");
+    strictEqual(snapshots.length, 2);
+    strictEqual(snapshots[1]?.leftError, "Authoring unavailable");
+    strictEqual(snapshots[1]?.leftDetails, undefined);
+    session.dispose();
+  },
+}, {
   name: "Browse has one source, preserves Compare preferences and blocks paired actions",
   async execute(): Promise<void> {
     const one = connection("one", "One"); const two = connection("two", "Two");
@@ -837,4 +956,9 @@ function treeLevel(path: string, itemId = `{${path}}`): AuthoringTreeLevel {
     },
     children: [],
   };
+}
+
+function itemDetails(itemId: string): AuthoringItemDetails {
+  return { itemId, name: itemId, displayName: itemId, path: "/sitecore/" + itemId, hasChildren: false,
+    language: "fr", version: 1, template: { templateId: "template", name: "Page" }, availableVersions: [], fields: [] };
 }

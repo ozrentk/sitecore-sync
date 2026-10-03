@@ -1,4 +1,6 @@
-const vscode = acquireVsCodeApi();
+const api = acquireVsCodeApi();
+const vscode = { getState: () => api.getState(), setState: value => api.setState(value),
+  postMessage: message => api.postMessage({ ...message, contextId: state.contextId }) };
 const persistedVisibility = vscode.getState()?.visibility ?? {};
 
 function visibilityMode(value, allowed, fallback) {
@@ -6,6 +8,13 @@ function visibilityMode(value, allowed, fallback) {
 }
 
 const state = {
+  mode: "compare",
+  contextId: undefined,
+  browseVisibility: {
+    content: visibilityMode(api.getState()?.browseVisibility?.content, ["hidden", "all"], "all"),
+    standard: visibilityMode(api.getState()?.browseVisibility?.standard, ["hidden", "all"], "all"),
+    system: visibilityMode(api.getState()?.browseVisibility?.system, ["hidden", "all"], "hidden"),
+  },
   snapshot: undefined,
   loadingSelection: undefined,
   error: undefined,
@@ -48,7 +57,8 @@ function normalizedValue(value) {
 
 function createPair(left, right) {
   const flags = [];
-  if (!left) flags.push("Only right");
+  if (state.mode === "browse") { /* A single item has no comparison flags. */ }
+  else if (!left) flags.push("Only right");
   else if (!right) flags.push("Only left");
   else {
     if (left.name !== right.name || left.label !== right.label) flags.push("Name");
@@ -88,15 +98,16 @@ function fieldCategory(pair) {
 }
 
 function pairIsVisible(pair) {
-  const mode = state.visibility[fieldCategory(pair)];
+  const mode = (state.mode === "browse" ? state.browseVisibility : state.visibility)[fieldCategory(pair)];
   if (mode === "hidden") return false;
   return mode === "all" || pair.flags.length > 0;
 }
 
 function updateVisibilityControls() {
   for (const group of visibilityGroups) {
-    const selectedMode = state.visibility[group.dataset.category];
+    const selectedMode = (state.mode === "browse" ? state.browseVisibility : state.visibility)[group.dataset.category];
     for (const button of group.querySelectorAll("button[data-mode]")) {
+      button.hidden = state.mode === "browse" ? button.dataset.mode === "differences" : button.classList.contains("browse-only");
       button.setAttribute("aria-pressed", String(button.dataset.mode === selectedMode));
     }
   }
@@ -117,7 +128,7 @@ function metaLine(details, error) {
 function createSummary(snapshot) {
   const summary = document.createElement("section");
   summary.className = "summary paired-grid";
-  for (const side of ["left", "right"]) {
+  for (const side of state.mode === "browse" ? ["left"] : ["left", "right"]) {
     const details = snapshot[`${side}Details`];
     const cell = document.createElement("div");
     cell.className = `summary-cell ${side}`;
@@ -143,8 +154,8 @@ function createSummary(snapshot) {
       copy.dataset.copyItemId = side;
       copy.dataset.itemId = details.itemId;
       copy.textContent = details.itemId;
-      copy.title = `Copy ${side} item ID`;
-      copy.setAttribute("aria-label", `Copy ${side} item ID ${details.itemId}`);
+      copy.title = state.mode === "browse" ? "Copy item ID" : `Copy ${side} item ID`;
+      copy.setAttribute("aria-label", state.mode === "browse" ? `Copy item ID ${details.itemId}` : `Copy ${side} item ID ${details.itemId}`);
       copy.addEventListener("click", () => {
         copy.disabled = true;
         vscode.postMessage({ type: "copyItemId", side, itemId: details.itemId });
@@ -157,7 +168,8 @@ function createSummary(snapshot) {
     if (publicUrl && details) {
       const openPage = document.createElement("button");
       openPage.type = "button";
-      openPage.textContent = `Open ${side} page`;
+      openPage.className = "public-page";
+      openPage.textContent = state.mode === "browse" ? "Open public page" : `Open ${side} page`;
       openPage.title = publicUrl;
       openPage.addEventListener("click", () => vscode.postMessage({ type: "openPublicPage", side, itemId: details.itemId }));
       cell.append(openPage);
@@ -167,7 +179,7 @@ function createSummary(snapshot) {
       cell.append(unavailable);
     }
     summary.append(cell);
-    if (side === "left") summary.append(document.createElement("div"));
+    if (side === "left" && state.mode !== "browse") summary.append(document.createElement("div"));
   }
   return summary;
 }
@@ -227,6 +239,10 @@ function createFieldCell(field, pair) {
 function createFieldRow(pair) {
   const row = document.createElement("section");
   row.className = `field-row paired-grid${pair.flags.length ? " different" : ""}`;
+  if (state.mode === "browse") {
+    row.append(createFieldCell(pair.left, pair));
+    return row;
+  }
   const differences = document.createElement("div");
   differences.className = "differences";
   for (const flag of pair.flags) {
@@ -274,6 +290,8 @@ function createFieldRow(pair) {
 }
 
 function render() {
+  document.getElementById("details-title").textContent = state.mode === "browse" ? "Item Details · read-only" : "Field visibility";
+  document.body.classList.toggle("browse", state.mode === "browse");
   updateVisibilityControls();
   if (state.error) {
     content.innerHTML = `<p class="state error"></p>`;
@@ -281,11 +299,11 @@ function render() {
     return;
   }
   if (state.loadingSelection) {
-    content.innerHTML = `<p class="state">Loading field details…</p>`;
+    content.innerHTML = state.mode === "browse" ? `<p class="state">Loading item details…</p>` : `<p class="state">Loading field details…</p>`;
     return;
   }
   if (!state.snapshot) {
-    content.innerHTML = `<p class="state">Right-click an item in the comparison and choose <strong>Show Detailed Field Diff</strong>.</p>`;
+    content.innerHTML = state.mode === "browse" ? `<p class="state">Select an item to inspect its read-only details.</p>` : `<p class="state">Right-click an item in the comparison and choose <strong>Show Detailed Field Diff</strong>.</p>`;
     return;
   }
   const pairs = pairFields(
@@ -309,17 +327,22 @@ for (const group of visibilityGroups) {
   group.addEventListener("click", (event) => {
     const button = event.target.closest("button[data-mode]");
     if (!button) return;
-    state.visibility[group.dataset.category] = button.dataset.mode;
+    (state.mode === "browse" ? state.browseVisibility : state.visibility)[group.dataset.category] = button.dataset.mode;
     vscode.setState({
       ...vscode.getState(),
       visibility: { ...state.visibility },
+      browseVisibility: { ...state.browseVisibility },
     });
     render();
   });
 }
 window.addEventListener("message", (event) => {
   const message = event.data;
+  if (message?.mode) state.mode = message.mode;
+  if (message?.contextId !== undefined) state.contextId = message.contextId;
   if (message?.type === "loading") {
+    state.snapshot = undefined;
+    state.copyingFieldIds.clear();
     state.loadingSelection = message.selection;
     state.error = undefined;
   } else if (message?.type === "snapshot") {

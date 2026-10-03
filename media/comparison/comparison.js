@@ -1,7 +1,11 @@
 const api = acquireVsCodeApi();
 const vscode = { postMessage(message) {
-  if (state.mode === "browse" && ["selectFieldDiffItem", "showDetailedFieldDiff", "loadItemDetails"].includes(message.type)) return;
-  api.postMessage(message);
+  if (state.mode === "browse") {
+    if (message.type === "loadItemDetails") return;
+    if (message.type === "selectFieldDiffItem") message = { ...message, type: "selectBrowseItem" };
+    if (message.type === "showDetailedFieldDiff") message = { ...message, type: "showBrowseItem" };
+  }
+  api.postMessage(state.viewContext === undefined ? message : { ...message, viewContext: state.viewContext, viewMode: state.mode });
 } };
 
 function emptyTreeState(connectionId, language) {
@@ -982,6 +986,7 @@ function createContextMenuSeparator() {
 }
 
 function showContextMenu(event, pair, clickedSide, forceDisabled = false) {
+  if (state.mode === "browse") clickedSide = "left";
   event.preventDefault();
   closeContextMenu();
 
@@ -1081,11 +1086,11 @@ function showContextMenu(event, pair, clickedSide, forceDisabled = false) {
   const detailedDiff = document.createElement("button");
   detailedDiff.className = "context-menu-item";
   detailedDiff.type = "button";
-  detailedDiff.textContent = "Show Detailed Field Diff";
+  detailedDiff.textContent = state.mode === "browse" ? "Show Item Details" : "Show Detailed Field Diff";
   detailedDiff.disabled = disabled || (!pair.left && !pair.right);
   detailedDiff.title = detailedDiff.disabled
     ? "Field details are unavailable while this item is locked."
-    : "Open the Field Diff panel for this item.";
+    : state.mode === "browse" ? "Open read-only Item Details." : "Open the Field Diff panel for this item.";
   detailedDiff.addEventListener("click", () => {
     cancelLanguageRestoration();
     state.selectedRowKey = pair.key;
@@ -1161,12 +1166,12 @@ function showContextMenu(event, pair, clickedSide, forceDisabled = false) {
   openPage.type = "button";
   openPage.textContent = "Open public page";
   openPage.disabled = disabled || !clickedItem;
-  openPage.title = "Resolve and preview the public URL for this side's page or owning page.";
+  openPage.title = "Open the public URL for this item or its owning page.";
   openPage.addEventListener("click", () => {
     vscode.postMessage({ type: "openPublicPage", side: clickedSide, itemId: clickedItem?.itemId });
     closeContextMenu();
   });
-  if (state.mode !== "browse") menu.append(openPage);
+  menu.append(openPage);
   const publishFlyout = document.createElement("div");
   publishFlyout.className = "context-submenu-flyout";
   publishFlyout.setAttribute("role", "menu");
@@ -1240,7 +1245,23 @@ function showContextMenu(event, pair, clickedSide, forceDisabled = false) {
       ? [syncRightToLeft]
       : [syncLeftToRight, syncRightToLeft];
   if (state.mode === "browse") {
-    menu.append(addFavorite, itemAction, expandLoaded, load, refreshSubtree);
+    runTask.title = "Select a matching workspace task for this item.";
+    addFavorite.title = "Add this path to the browsed connection's favorites.";
+    publishTrigger.title = clickedItem ? `Publish ${clickedItem.path} from the browsed connection.` : "Choose an item to publish.";
+    const identityActions = ["id", "path"].map(fieldId => {
+      const action = document.createElement("button");
+      action.className = "context-menu-item";
+      action.type = "button";
+      action.textContent = fieldId === "id" ? "Copy item ID" : "Copy item path";
+      action.disabled = disabled || !pair.left;
+      action.addEventListener("click", () => {
+        vscode.postMessage({ type: "copyBrowseIdentity", itemId: pair.left?.itemId, fieldId });
+        closeContextMenu();
+      });
+      return action;
+    });
+    menu.append(detailedDiff, publishMenu, runTask, ...identityActions, addFavorite,
+      createContextMenuSeparator(), itemAction, expandLoaded, load, refreshItem, refreshSubtree);
   } else menu.append(
     detailedDiff,
     publishMenu,
@@ -1395,7 +1416,7 @@ function createItemCell(node, side, depth, pair) {
       `Standard Template fields: ${standardTemplateFields.length}`,
       `Using Standard Values: ${standardValueCount}`,
       `Populated Standard Template overrides: ${populatedStandardOverrides}`,
-      `Equal Standard Template fields hidden by default: ${hiddenEqualStandardFields}`,
+      ...(state.mode === "browse" ? [] : [`Equal Standard Template fields hidden by default: ${hiddenEqualStandardFields}`]),
     );
   }
   cell.title = tooltipLines.join("\n");
@@ -2549,6 +2570,7 @@ window.addEventListener("message", (event) => {
     }
     if (mode === "browse" && state.mode !== mode) clearNodeDetails(state.trees.left.root);
     state.mode = mode;
+    state.viewContext = message.viewContext;
     state.connections = message.connections;
     state.selection = message.selection;
     state.textNormalization = message.textNormalization || "none";
