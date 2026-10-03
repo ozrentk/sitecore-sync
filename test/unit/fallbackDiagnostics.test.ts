@@ -12,9 +12,17 @@ const page = (more = false, cursor = "next") => ({ data: { item: { version: 0, f
 const signal = new AbortController().signal;
 interface TestReport {
   schema: { status: string };
-  observations: { status: string; pages: { data: { item: null | { fields: { nodes: Record<string, unknown>[] } } } }[] }[];
+  observations: { status: string; outcome?: string; pages: { data: { item: null | { fields: { nodes: Record<string, unknown>[] } } } }[] }[];
 }
 const asJson = (report: unknown): TestReport => JSON.parse(JSON.stringify(report)) as TestReport;
+
+test("version-zero null fields are preserved as no-local-fields, not a malformed response", async () => {
+  const report = asJson(await collectFallbackDiagnostic(probes.slice(0, 1), async op => op === "IntrospectionQuery" ? schema
+    : { data: { item: { version: 0, language: { name: "en-NZ" }, fields: null } } }, signal));
+  strictEqual(report.observations[0].status, "complete");
+  strictEqual(report.observations[0].outcome, "no-local-fields");
+  strictEqual(report.observations[0].pages[0].data.item!.fields, null);
+});
 
 test("diagnostic preserves raw missing/null provenance and paginates each exact and cross-check read", async () => {
   const calls: Readonly<Record<string, unknown>>[] = [];
@@ -68,7 +76,8 @@ test("diagnostic cancels before requests and after a request that ignores cancel
 
 test("diagnostic client uses existing authentication, fixed queries and strips known credentials from report", async () => {
   const runtime = new QueuedHttpRuntime([tokenResponse(), jsonResponse(schema),
-    jsonResponse({ data: { item: null } }), jsonResponse({ data: { item: { fields: { nodes: [{ value: "client-secret access-token" }], pageInfo: { hasNextPage: false } } } } })]);
+    jsonResponse({ data: { item: null } }), jsonResponse({ data: { item: { fields: { nodes: [{ value: "client-secret access-token" }], pageInfo: { hasNextPage: false } } } } }),
+    jsonResponse({ data: { item: null } })]);
   const client = new AuthoringContentClient(noOpLogger, runtime);
   const text = await client.collectFallbackDiagnostic(testConnection, "client-secret", { itemId: id, languages: ["en"] }, signal);
   strictEqual(text.includes("client-secret"), false);
@@ -80,6 +89,9 @@ test("diagnostic client uses existing authentication, fixed queries and strips k
   }
   strictEqual((requestBody(runtime, 2).query as string).includes("withLanguageFallback: false"), true);
   strictEqual((requestBody(runtime, 3).query as string).includes("withLanguageFallback: true"), true);
+  strictEqual((requestBody(runtime, 4).query as string).includes("withLanguageFallback: false"), true);
+  deepStrictEqual((requestBody(runtime, 4).variables as { where: unknown }).where,
+    { database: "master", language: "en", path: "/sitecore/system/Languages/en" });
   deepStrictEqual(JSON.parse(serializeFallbackDiagnostic({ value: 'a"b\nc' }, ['a"b\nc'])), { value: "[REDACTED]" });
   deepStrictEqual(JSON.parse(serializeFallbackDiagnostic({ ":": ":" }, [":"])), { "[REDACTED]": "[REDACTED]" });
 });
