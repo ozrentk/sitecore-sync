@@ -314,3 +314,5 @@ B18 subtasks #1–#3 are implemented. Remembered partners, the complete mode-swi
 Browse empty-field feedback distinguishes fields hidden by filters from an empty Authoring response. Empty responses show the selected language/version and available versions; language fallback remains disabled. Show all fields restores all three Browse visibility categories. The shared bottom-panel container is named Item Details, with the paired Field Diff view retained in Compare.
 
 Invalid publishing-status responses identify the failed contract fields and received types without exposing response values. They leave the remote outcome unknown and do not trigger an automatic republish.
+
+Publishing status may return null language metadata. This is treated as unavailable metadata; polling and completion/failure decisions still use the validated job state and flags. Malformed non-null language values remain errors.
