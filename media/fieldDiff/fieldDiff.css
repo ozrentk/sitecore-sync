@@ -1,4 +1,10 @@
 :root { color-scheme: light dark; }
+[hidden] { display: none !important; }
+body:not(.browse) .browse-only { display: none; }
+body.browse .paired-grid { grid-template-columns: minmax(0, 1fr); min-width: 0; }
+body.browse .summary-cell span { white-space: normal; overflow-wrap: anywhere; }
+body.browse .public-page { justify-self: start; padding: 3px 8px; border: 1px solid var(--vscode-button-border, transparent); color: var(--vscode-button-foreground); background: var(--vscode-button-background); font: inherit; cursor: pointer; }
+body.browse .public-page:focus-visible { outline: 1px solid var(--vscode-focusBorder); outline-offset: 2px; }
 * { box-sizing: border-box; }
 body {
   margin: 0;

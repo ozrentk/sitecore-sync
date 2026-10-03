@@ -41,6 +41,7 @@ export class ContentSession {
   private readonly loads = new Map<string, AbortController>();
 
   get state(): ContentSessionState | undefined { return this.current; }
+  get revisionId(): number { return this.revision; }
 
   /** Fence asynchronous panel adapters that publish several progress messages. */
   capture(): () => boolean {

@@ -4,6 +4,7 @@ import type { AuthoringItemDetails } from "../sitecore/authoringClient";
 export const fieldDiffViewId = "xmCloudSync.fieldDiff";
 
 export interface FieldDiffSelection {
+  readonly mode?: "browse" | "compare";
   readonly leftItemId?: string;
   readonly rightItemId?: string;
   readonly leftName?: string;
@@ -25,6 +26,7 @@ export interface FieldDiffSnapshot extends FieldDiffSelection {
 }
 
 interface FieldDiffMessage {
+  readonly contextId?: unknown;
   readonly type?: unknown;
   readonly fieldId?: unknown;
   readonly itemId?: unknown;
@@ -35,6 +37,8 @@ interface FieldDiffMessage {
 export class FieldDiffViewProvider implements vscode.WebviewViewProvider, vscode.Disposable {
   private view: vscode.WebviewView | undefined;
   private readonly disposables: vscode.Disposable[] = [];
+  private mode: "browse" | "compare" = "compare";
+  private contextId = 0;
 
   constructor(
     private readonly extensionUri: vscode.Uri,
@@ -53,6 +57,7 @@ export class FieldDiffViewProvider implements vscode.WebviewViewProvider, vscode
 
   resolveWebviewView(view: vscode.WebviewView): void {
     this.view = view;
+    view.title = this.mode === "browse" ? "Item Details" : "Field Diff";
     const mediaUri = vscode.Uri.joinPath(this.extensionUri, "media", "fieldDiff");
     view.webview.options = {
       enableScripts: true,
@@ -66,6 +71,9 @@ export class FieldDiffViewProvider implements vscode.WebviewViewProvider, vscode
         }
       }),
       view.webview.onDidReceiveMessage(async (message: FieldDiffMessage) => {
+        if (!message || typeof message !== "object") return;
+        if (message.type !== "ready" && message.contextId !== this.contextId) return;
+        if (this.mode === "browse" && (message.type === "openTextDiff" || message.type === "copyFieldValue" || message.side === "right")) return;
         if (message.type === "openPublicPage" && (message.side === "left" || message.side === "right") && typeof message.itemId === "string") {
           await this.onOpenPublicPage?.(message.side, message.itemId);
         } else if (message.type === "ready" && view.visible) {
@@ -99,10 +107,13 @@ export class FieldDiffViewProvider implements vscode.WebviewViewProvider, vscode
   }
 
   async showLoading(selection: FieldDiffSelection): Promise<void> {
+    this.setMode(selection.mode ?? "compare");
+    this.contextId += 1;
     await this.post({ type: "loading", selection });
   }
 
   async showSnapshot(snapshot: FieldDiffSnapshot): Promise<void> {
+    this.setMode(snapshot.mode ?? "compare");
     await this.post({ type: "snapshot", snapshot });
   }
 
@@ -110,13 +121,20 @@ export class FieldDiffViewProvider implements vscode.WebviewViewProvider, vscode
     await this.post({ type: "error", message });
   }
 
-  async clear(): Promise<void> {
+  async clear(mode: "browse" | "compare" = "compare"): Promise<void> {
+    this.setMode(mode);
+    this.contextId += 1;
     await this.post({ type: "clear" });
   }
 
-  private async post(message: unknown): Promise<void> {
+  private setMode(mode: "browse" | "compare"): void {
+    this.mode = mode;
+    if (this.view) this.view.title = mode === "browse" ? "Item Details" : "Field Diff";
+  }
+
+  private async post(message: Record<string, unknown>): Promise<void> {
     if (this.view) {
-      await this.view.webview.postMessage(message);
+      await this.view.webview.postMessage({ ...message, mode: this.mode, contextId: this.contextId });
     }
   }
 
@@ -134,10 +152,11 @@ export class FieldDiffViewProvider implements vscode.WebviewViewProvider, vscode
 </head>
 <body>
   <header class="toolbar" aria-label="Field visibility">
-    <strong class="toolbar-title">Field visibility</strong>
+    <strong id="details-title" class="toolbar-title">Field visibility</strong>
     <div class="visibility-control">
       <span id="content-visibility-label">Content fields</span>
       <div class="visibility-options" role="group" aria-labelledby="content-visibility-label" data-category="content">
+        <button type="button" data-mode="hidden" class="browse-only">Hidden</button>
         <button type="button" data-mode="all">All</button>
         <button type="button" data-mode="differences">Differences</button>
       </div>
