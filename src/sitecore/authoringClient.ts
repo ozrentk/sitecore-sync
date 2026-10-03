@@ -1,4 +1,5 @@
 import type { XmCloudConnection } from "../connections/connection";
+import { buildFallbackProbes, collectFallbackDiagnostic, serializeFallbackDiagnostic } from "./fallbackDiagnostics";
 import { randomUUID } from "node:crypto";
 import { print } from "graphql";
 import {
@@ -1151,6 +1152,20 @@ export class AuthoringContentClient {
       { name: "Sitecore item icon request", signal, retryable: true },
     );
     return readItemIconDataUri(response);
+  }
+
+  async collectFallbackDiagnostic(
+    connection: XmCloudConnection, clientSecret: string,
+    selection: { readonly itemId: string; readonly languages: readonly string[] } | undefined,
+    signal: AbortSignal, progress: (message: string) => void = () => undefined,
+  ): Promise<string> {
+    const probes = selection ? buildFallbackProbes(selection.itemId, selection.languages) : [];
+    signal.throwIfAborted();
+    const accessToken = await this.getAccessToken(connection, clientSecret, signal);
+    const report = await collectFallbackDiagnostic(probes, (operation, query, variables) =>
+      this.postGraphQl(connection.serverUrl, accessToken, "Authoring fallback diagnostic", operation, query, variables, signal),
+    signal, progress);
+    return serializeFallbackDiagnostic(report, [clientSecret, accessToken]);
   }
 
   async loadItemDetails(

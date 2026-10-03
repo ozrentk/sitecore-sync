@@ -1,46 +1,10 @@
 import { readFileSync } from "node:fs";
 import {
-  buildClientSchema, buildSchema, getIntrospectionQuery, Kind, parse, print, validate, visit,
+  buildClientSchema, buildSchema, getIntrospectionQuery, parse, validate,
   type IntrospectionQuery,
 } from "graphql";
-import { itemDetailsQuery } from "../src/sitecore/graphql/authoringQueries";
-
-export interface FallbackProbe {
-  readonly label: string;
-  readonly query: string;
-  readonly variables: {
-    readonly where: { readonly database: string; readonly itemId: string; readonly language: string };
-    readonly pageSize: number;
-    readonly after: null;
-  };
-}
-
-/** Generates requests only. No network, credentials, content writes or inferred configuration. */
-export function buildFallbackProbes(itemId: string, languages: readonly string[]): readonly FallbackProbe[] {
-  if (!/^\{?[\da-f]{8}-(?:[\da-f]{4}-){3}[\da-f]{12}\}?$/iu.test(itemId)
-    || itemId.startsWith("{") !== itemId.endsWith("}")) {
-    throw new Error("Supply an item GUID.");
-  }
-  if (languages.length < 1 || languages.length > 8
-    || languages.some(language => !/^[a-z]{2,8}(?:-[a-z\d]{1,8})*$/iu.test(language))
-    || new Set(languages.map(language => language.toLowerCase())).size !== languages.length) {
-    throw new Error("Supply 1–8 distinct language names: requested locale first, then known candidates.");
-  }
-  const exact = print(itemDetailsQuery);
-  const crossCheck = print(visit(itemDetailsQuery, {
-    Argument(node) {
-      return node.name.value === "withLanguageFallback"
-        ? { ...node, value: { kind: Kind.BOOLEAN, value: true } }
-        : undefined;
-    },
-  }));
-  const probe = (language: string, fallback: boolean): FallbackProbe => ({
-    label: `${language}: ${fallback ? "Sitecore cross-check" : "exact locale"}`,
-    query: fallback ? crossCheck : exact,
-    variables: { where: { database: "master", itemId, language }, pageSize: 100, after: null },
-  });
-  return [...languages.map(language => probe(language, false)), probe(languages[0]!, true)];
-}
+import { buildFallbackProbes, type FallbackProbe } from "../src/sitecore/fallbackDiagnostics";
+export { buildFallbackProbes } from "../src/sitecore/fallbackDiagnostics";
 
 /** Checks the exported environment contract without treating schema compatibility as runtime proof. */
 export function validateFallbackProbes(schemaText: string, probes: readonly FallbackProbe[]): readonly string[] {

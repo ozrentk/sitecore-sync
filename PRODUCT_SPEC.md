@@ -450,3 +450,10 @@ Browse empty-field feedback distinguishes fields hidden by filters from an empty
 Invalid publishing-status responses identify the failed contract fields and received types without exposing response values. They leave the remote outcome unknown and do not trigger an automatic republish.
 
 Publishing status may return null language metadata. This is treated as unavailable metadata; polling and completion/failure decisions still use the validated job state and flags. Malformed non-null language values remain errors.
+
+
+### Authoring fallback evidence collection
+
+A Command Palette action, **XM Cloud Sync: Collect Authoring Fallback Diagnostic**, uses a chosen saved connection and its SecretStorage credentials through the existing Authoring client. It reads the authenticated schema without requiring the browser IDE. Optionally, it collects one item by GUID in one to eight supplied locales with fallback disabled, followed by a fallback-enabled read of the original requested locale. Supplied candidates are not asserted to be the configured fallback chain. Raw null/missing values and provenance flags remain in evidence; no resolver or write target is inferred.
+
+Collection is cancellable and bounded to 50 pages per probe and 6 MiB of retained evidence. Failed schema reads do not block independent item probes. Unavailable, malformed and limit-reached results are explicit; completed collection does not establish provenance or snapshot consistency. Open the report in an unsaved JSON editor, remove known authentication credentials, omit raw server error messages and avoid automatic persistence/upload. Reports can contain selected item content and must be reviewed before sharing. No mutation, fallback-mode UI, transfer-policy change or publishing/editor integration is included.
