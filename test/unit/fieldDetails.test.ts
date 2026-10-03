@@ -45,3 +45,16 @@ test("Browse summary has one identity and Compare retains paired fields and diff
   strictEqual(v.run('createFieldRow(pair).children.length'), 3);
   strictEqual(v.run('pairIsVisible(pair)'), true);
 });
+
+test("empty Browse fields distinguish hidden values, API absence and failures", async () => {
+  const v = await view();
+  v.run('state.mode = "browse";');
+  strictEqual(v.run('emptyFieldsMessage({}, 4)'), "All 4 returned field(s) are hidden by the current filters.");
+  strictEqual(v.run('emptyFieldsMessage({ leftDetails: { language: "en-UK", version: 0, availableVersions: [{ language: "en", version: 2 }] } }, 0)'),
+    "Authoring returned no fields for en-UK (version 0). Language fallback is not applied. Available versions: en (v2).");
+  strictEqual(v.run('emptyFieldsMessage({ leftError: "Failed" }, 0)'), "Fields are unavailable because item details could not be loaded.");
+  v.run('render = () => undefined; state.browseVisibility.content = "hidden"; showAllBrowseFields();');
+  strictEqual(v.run('state.browseVisibility.content'), "all");
+  strictEqual(v.run('state.browseVisibility.system'), "all");
+  strictEqual(v.run('state.visibility.content'), "differences");
+});

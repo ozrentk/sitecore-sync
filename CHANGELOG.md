@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.24.1
+
+- Correct the shared bottom-panel tab name to Item Details.
+- Distinguish hidden fields from an empty Authoring response, report language/version context and provide Show all fields.
+- Identify invalid publishing-status fields without exposing response values; report the remote outcome as unknown.
+
 ## 0.24.0
 
 - Add read-only Item Details to Browse with item metadata, one field column, scope/source markers and separate All/Hidden visibility controls.
