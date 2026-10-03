@@ -2,7 +2,7 @@
 
 Consolidated planning inventory as of 2026-09-14, reviewed against version 0.20.0. Unchecked entries are outstanding, not a commitment to implement them in this order. Product requirements remain in [PRODUCT_SPEC.md](PRODUCT_SPEC.md); completed release details are in [CHANGELOG.md](CHANGELOG.md).
 
-Status: B01–B06 are explicit TODOs; B07–B15 are deferred enhancements; B16 is a known limitation; B17 is documentation cleanup; B18 has a session foundation, single-tree navigation and read-only details/actions; complete mode switching remains pending. Grouping does not change their priority or scope.
+Status: B01–B06 are explicit TODOs; B07–B15 are deferred enhancements; B16 is a known limitation; B17 is documentation cleanup; B18 has a session foundation, single-tree navigation, read-only details/actions and mode switching; full integrated acceptance remains pending. Grouping does not change their priority or scope.
 
 Added 2026-10-01: B19–B21 are feature ideas requiring detailed planning; the earlier inventory has not been re-audited for completion.
 
@@ -39,7 +39,7 @@ Also recorded: B22–B29 cover environment database/IAR diagnostics, finishing P
 - [x] **#1 — Browse/Compare mode foundation (internal only).** `ContentSession` owns immutable Browse/Compare selections, single-connection entry, explicit comparison entry, retained-side state, cancellable transitions and superseding load publication. The single-tree panel now consumes this lifecycle. Existing comparison commands and their language-lock policy are unchanged.
 - [x] **#2 — Full-width single-tree UI/navigation.** Connection clicks and Browse Connection open one tree with one selector pair, connection-scoped search, site/favorite navigation, icons, lazy loads, refresh/cancel and keyboard navigation. The session fences stale responses; comparison controls and actions are hidden and guarded. Explicit Compare behavior is retained.
 - [x] **#3 — Single-item details/actions.** Browse selection opens read-only Item Details with metadata, one set of fields, separate visibility preferences, scope/source markers and eligible public links. The tree provides identity copying, all three publishing modes and matching task plug-ins through existing service and trust boundaries. Stale actions/detail responses and Browse diff/transfer requests are guarded. No field editing is included.
-- [ ] **#4 — Remembered partner and complete switching UX.**
+- [x] **#4 — Remembered partner and complete switching UX.** Visible active-mode buttons, per-connection partner/language persistence, explicit missing-partner/unavailable-language/unlock choices, changeable retained side and in-panel navigation restoration. Cancelled/superseded choices preserve the live view. Browse toolbar Refresh is removed; Cancel loading appears only during cancellable loads in either mode. Automated domain, webview and extension-host checks plus browser UI smoke cover the implementation; live Sitecore and desktop manual acceptance remain in #5.
 - [ ] **#5 — Full B18 acceptance/delivery.** The reported Standard Publish validation failure was traced to null language metadata and fixed in 0.24.2. Live confirmation remains pending. Version 0 explains the no-local-fields observation without language fallback.
 
 ### B18 — Agreed high-level plan
@@ -56,7 +56,7 @@ Also recorded: B22–B29 cover environment database/IAR diagnostics, finishing P
 
 **Compare to Browse and state.** Let the user choose which comparison side to retain and remember that choice for subsequent switches, while allowing it to be changed. Preserve the retained side's connection, language, root and selected item. Preserve expansion and scroll state where practical, and keep mode-specific navigation state so switching does not unnecessarily restart browsing. New navigation or mode changes must supersede pending loads and prevent stale results from replacing the current view.
 
-**Implementation acceptance.** Verify opening with one configured connection; search and details in Browse; publishing and task availability; absence of diff/transfer controls; first-time partner selection and cancellation; remembered partner/language after reload; deleted partners and unavailable languages; same-connection cross-language comparison; explicit language-lock behavior; and state restoration during cancelled or superseded loading. Use domain tests and extension-host checks where appropriate, plus focused manual checks for tree layout, keyboard access and mode transitions. The complete behavior remains pending; the foundation and navigation in subtasks #1–#3 are delivered.
+**Implementation acceptance.** Verify opening with one configured connection; search and details in Browse; publishing and task availability; absence of diff/transfer controls; first-time partner selection and cancellation; remembered partner/language after reload; deleted partners and unavailable languages; same-connection cross-language comparison; explicit language-lock behavior; and state restoration during cancelled or superseded loading. Use domain tests and extension-host checks where appropriate, plus focused manual checks for tree layout, keyboard access and mode transitions. Subtasks #1–#4 are delivered; full integrated acceptance remains in #5.
 
 ## Editors and publishing integration
 

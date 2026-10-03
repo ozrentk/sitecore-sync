@@ -1,5 +1,6 @@
 const api = acquireVsCodeApi();
 const vscode = { postMessage(message) {
+  if (["navigateItem", "revealItemResult", "loadRoot", "refreshAll", "selectConnection", "selectLanguage"].includes(message.type)) modeRestoration = undefined;
   if (state.mode === "browse") {
     if (message.type === "loadItemDetails") return;
     if (message.type === "selectFieldDiffItem") message = { ...message, type: "selectBrowseItem" };
@@ -68,8 +69,98 @@ const languageSwitchStatusRight = document.getElementById("language-switch-statu
 const languageSwitchTextRight = document.getElementById("language-switch-text-right");
 const languageSwitchRetryRight = document.getElementById("language-switch-retry-right");
 
-document.getElementById("browse-refresh").addEventListener("click", () => startRefreshAll());
-document.getElementById("browse-cancel").addEventListener("click", () => vscode.postMessage({ type: "cancelBrowseLoads" }));
+document.getElementById("mode-browse").addEventListener("click", () => requestMode("browse"));
+document.getElementById("mode-compare").addEventListener("click", () => requestMode("compare"));
+document.getElementById("retained-side").addEventListener("change", event => {
+  state.retainedSide = event.target.value;
+  vscode.postMessage({ type: "setRetainedSide", side: event.target.value });
+});
+document.getElementById("content-cancel").addEventListener("click", () => vscode.postMessage({ type: "cancelContentLoads" }));
+const modeSnapshots = new Map();
+let modeRestoration;
+function modeSnapshotKey(mode, selection) {
+  return JSON.stringify([mode, selection.leftConnectionId, selection.leftLanguage,
+    mode === "compare" ? selection.rightConnectionId : undefined, mode === "compare" ? selection.rightLanguage : undefined]);
+}
+function visitModePairs(visit) {
+  if (!state.trees.left.root && !state.trees.right.root) return;
+  refreshLoadedItemIndexes();
+  const seen = new Set();
+  const walk = pair => {
+    if (seen.has(pair.key)) return;
+    seen.add(pair.key); visit(pair);
+    for (const child of pairChildren(pair.left?.children ?? [], pair.right?.children ?? [])) walk(child);
+  };
+  walk(createPair(state.trees.left.root, state.trees.right.root, "root"));
+}
+function captureModeNavigation() {
+  const result = { scroll: workspace.scrollTop, windowScroll: window.scrollY, sides: {} };
+  const displayedRoot = findLoadedPair(state.rootRowKey);
+  for (const side of ["left", "right"]) {
+    const tree = JSON.parse(JSON.stringify({ ...state.trees[side], root: displayedRoot?.[side] || state.trees[side].root }));
+    tree.loading = false; clearNodeLoadingState(tree.root); clearNodeDetails(tree.root);
+    result.sides[side] = { tree, expanded: [], selected: undefined };
+  }
+  visitModePairs(pair => {
+    for (const side of ["left", "right"]) if (pair[side]) {
+      if (state.expandedRows.has(pair.key)) result.sides[side].expanded.push(normalizeItemId(pair[side].itemId));
+      if (state.selectedRowKey === pair.key) result.sides[side].selected = normalizeItemId(pair[side].itemId);
+    }
+  });
+  return result;
+}
+function requestMode(mode) {
+  if (mode === state.mode) { vscode.postMessage({ type: "cancelModeSwitch" }); return; }
+  const snapshot = captureModeNavigation();
+  const navigation = {};
+  for (const side of ["left", "right"]) navigation[side] = {
+    rootPath: snapshot.sides[side].tree.root?.path || "/", selectedItemId: snapshot.sides[side].selected,
+  };
+  vscode.postMessage({ type: "switchMode", mode, navigation });
+}
+function restoreModeNavigation(previous, message) {
+  const cached = modeSnapshots.get(modeSnapshotKey(state.mode, state.selection));
+  const retained = state.mode === "browse" ? previous.sides[message.retainedFrom || "left"] : previous.sides.left;
+  const right = cached?.sides.right || [...modeSnapshots.values()].reverse().flatMap(snapshot => Object.values(snapshot.sides))
+    .find(value => value.tree.connectionId === state.selection.rightConnectionId && value.tree.language === state.selection.rightLanguage);
+  const sides = { left: retained, right: state.mode === "compare" ? right : undefined };
+  for (const side of ["left", "right"]) {
+    const value = sides[side];
+    if (!value || value.tree.connectionId !== state.selection[`${side}ConnectionId`] || value.tree.language !== state.selection[`${side}Language`]) {
+      sides[side] = undefined; continue;
+    }
+    state.trees[side] = JSON.parse(JSON.stringify(value.tree));
+  }
+  modeRestoration = { sides, scroll: previous.scroll, windowScroll: previous.windowScroll };
+  applyModeRestoration();
+}
+function applyModeRestoration() {
+  const pending = modeRestoration;
+  if (!pending || !state.trees.left.root || (state.mode === "compare" && !state.trees.right.root)) return;
+  let waiting = false;
+  let selected;
+  visitModePairs(pair => {
+    for (const side of ["left", "right"]) {
+      const id = pair[side] && normalizeItemId(pair[side].itemId);
+      if (!id) continue;
+      if (pending.sides[side]?.expanded.includes(id)) {
+        state.expandedRows.add(pair.key);
+        for (const node of [pair.left, pair.right]) if (node?.hasChildren && !node.childrenLoaded && !node.error) waiting = true;
+        loadMissingPairLevels(pair);
+      }
+      if (side === "left" && pending.sides.left?.selected === id) selected = pair.key;
+    }
+  });
+  if (waiting) return;
+  modeRestoration = undefined;
+  state.selectedRowKey = selected;
+  const pair = findLoadedPair(state.selectedRowKey);
+  if (pair) vscode.postMessage({ type: "selectFieldDiffItem", leftItemId: pair.left?.itemId, rightItemId: pair.right?.itemId,
+    leftName: pair.left?.displayName || pair.left?.name, rightName: pair.right?.displayName || pair.right?.name });
+  render();
+  workspace.scrollTop = pending.scroll || 0;
+  window.scrollTo?.(0, pending.windowScroll || 0);
+}
 const navigationInput = document.getElementById("item-navigation-input");
 const navigationMode = document.getElementById("item-navigation-mode");
 const navigationStatus = document.getElementById("item-navigation-status");
@@ -589,6 +680,7 @@ function createLegendGroup(flags, kind) {
 }
 
 function togglePairExpansion(pair) {
+  vscode.postMessage({ type: "cancelModeSwitch" });
   cancelLanguageRestoration();
   if (!pairCanExpand(pair) || isPairRefreshing(pair)) {
     return;
@@ -604,6 +696,7 @@ function togglePairExpansion(pair) {
 }
 
 function expandPairItem(pair) {
+  vscode.postMessage({ type: "cancelModeSwitch" });
   cancelLanguageRestoration();
   if (
     !pairCanExpand(pair) ||
@@ -620,6 +713,7 @@ function expandPairItem(pair) {
 }
 
 function collapsePairItem(pair) {
+  vscode.postMessage({ type: "cancelModeSwitch" });
   cancelLanguageRestoration();
   if (!state.expandedRows.has(pair.key) || isPairRefreshing(pair)) {
     return;
@@ -1879,6 +1973,13 @@ function createComparisonWorkspace() {
 
 function render() {
   const browse = state.mode === "browse";
+  document.getElementById("mode-browse").setAttribute("aria-pressed", String(browse));
+  document.getElementById("mode-compare").setAttribute("aria-pressed", String(!browse));
+  document.getElementById("retained-side-label").hidden = browse;
+  document.getElementById("retained-side").value = state.retainedSide || "";
+  document.getElementById("content-cancel").hidden = !["left", ...(browse ? [] : ["right"])].some(side =>
+    state.trees[side].loading || state.languages[side].loading || (state.trees[side].root && subtreeStructureIsLoading(state.trees[side].root))) &&
+    state.subtreeLoadOperations.size === 0 && state.refreshOperations.size === 0;
   document.body.classList.toggle("browse", browse);
   rightSelect.closest(".selector").hidden = browse;
   swapButton.closest(".toolbar-actions").hidden = browse;
@@ -2054,6 +2155,7 @@ function captureLanguageTreeState() {
 }
 
 function cancelLanguageRestoration() {
+  modeRestoration = undefined;
   if (state.languageSwitch) {
     state.languageSwitch = undefined;
     vscode.postMessage({ type: "languageViewReady", comparisonKey: comparisonLanguageKey() });
@@ -2561,6 +2663,13 @@ window.addEventListener("message", (event) => {
   } else if (message?.type === "stateChanged") {
     if (JSON.stringify(state.selection) !== JSON.stringify(message.selection)) { clearItemLookupUi(); }
     const mode = message.mode || "compare";
+    const previousMode = state.mode;
+    const previous = state.mode !== mode ? captureModeNavigation() : undefined;
+    if (previous) {
+      modeSnapshots.set(modeSnapshotKey(state.mode, state.selection), previous);
+      while (modeSnapshots.size > 8) modeSnapshots.delete(modeSnapshots.keys().next().value);
+      modeRestoration = undefined;
+    }
     if (state.mode !== mode) {
       closeContextMenu(); clearItemLookupUi();
       state.languageSwitch = undefined; cancelLanguageRestoration();
@@ -2570,12 +2679,22 @@ window.addEventListener("message", (event) => {
     }
     if (mode === "browse" && state.mode !== mode) clearNodeDetails(state.trees.left.root);
     state.mode = mode;
+    state.retainedSide = message.retainedSide;
     state.viewContext = message.viewContext;
     state.connections = message.connections;
     state.selection = message.selection;
     state.textNormalization = message.textNormalization || "none";
     updateTreeConnections();
+    if (previous && previousMode !== mode) {
+      state.languageSwitch = undefined; cancelLanguageRestoration();
+      restoreModeNavigation(previous, message);
+    }
+  } else if (message?.type === "requestCompareMode") {
+    requestMode("compare");
+    return;
   } else if (message?.type === "browseLoadsCancelled") {
+    modeRestoration = undefined;
+    for (const language of Object.values(state.languages)) language.loading = false;
     for (const tree of Object.values(state.trees)) {
       tree.loading = false; clearNodeLoadingState(tree.root);
       if (!tree.root) tree.error = "Loading cancelled.";
@@ -2655,6 +2774,7 @@ window.addEventListener("message", (event) => {
     return;
   }
   if (["stateChanged", "treeLoaded", "treeLoadFailed", "itemDetailsLoaded", "itemDetailsLoadFailed"].includes(message?.type)) {
+    applyModeRestoration();
     advanceLanguageRestoration();
     finishBackgroundLanguageSwitch();
   }

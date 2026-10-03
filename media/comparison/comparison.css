@@ -641,5 +641,8 @@ body.browse .root-statuses > div:not(.left), body.browse .comparison-inline-stat
 body.browse .comparison-cell, body.browse .row-control { border-left: 0; }
 body.browse .language-switch-status { left: 50%; width: max-content; }
 
-.browse-actions { display: none; }
-body.browse .browse-actions { display: flex; gap: 8px; }
+.mode-controls { grid-column: 1 / -1; display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.mode-controls button[aria-pressed="true"] { background: var(--vscode-button-background); color: var(--vscode-button-foreground); outline: 1px solid var(--vscode-focusBorder); }
+#retained-side-label { margin-left: auto; }
+#content-cancel { margin-left: auto; }
+[hidden] { display: none !important; }

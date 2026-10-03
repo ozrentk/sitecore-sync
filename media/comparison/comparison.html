@@ -9,6 +9,16 @@
 </head>
 <body>
   <header class="toolbar">
+    <div class="mode-controls" role="group" aria-label="Content mode">
+      <button id="mode-browse" type="button" aria-pressed="false">Browse</button>
+      <button id="mode-compare" type="button" aria-pressed="true">Compare</button>
+      <label id="retained-side-label">Keep in Browse
+        <select id="retained-side" aria-label="Side to keep in Browse">
+          <option value="">Ask when switching</option><option value="left">Left</option><option value="right">Right</option>
+        </select>
+      </label>
+      <button id="content-cancel" type="button" hidden>Cancel loading</button>
+    </div>
     <div class="selector">
       <select id="left-connection" aria-label="Left XM Cloud connection"></select>
       <select id="left-language" aria-label="Left content language"></select>
@@ -26,7 +36,6 @@
       <select id="right-connection" aria-label="Right XM Cloud connection"></select>
       <select id="right-language" aria-label="Right content language"></select>
     </div>
-    <div class="browse-actions"><button id="browse-refresh" type="button">Refresh</button><button id="browse-cancel" type="button">Cancel loading</button></div>
     <div id="language-switch-status" class="language-switch-status language-switch-left" role="status" hidden>
       <span id="language-switch-text"></span>
       <button id="language-switch-retry" type="button" hidden>Retry</button>
