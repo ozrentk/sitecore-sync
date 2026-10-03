@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.28.1
+
+- Keep fallback test and diagnostic GUID/locale textboxes open when switching windows to copy values.
+
 ## 0.28.0
 
 - Add Create Fallback Test Items and Diagnose Fallback Test Items commands, with confirmed template-based creation, workspace recovery records and exact/fallback evidence collection.

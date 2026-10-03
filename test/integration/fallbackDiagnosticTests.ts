@@ -22,8 +22,10 @@ export const fallbackDiagnosticTests: readonly IntegrationTest[] = [{
       return items[0]?.connection ? items[0] : items[probeScope ? 1 : 0];
     });
     let inputIndex = 0;
-    const input = mock.method(vscode.window, "showInputBox", async () =>
-      inputIndex++ % 2 === 0 ? "00000000-0000-0000-0000-000000000001" : "en-NZ, en");
+    const input = mock.method(vscode.window, "showInputBox", async (options: vscode.InputBoxOptions) => {
+      strictEqual(options.ignoreFocusOut, true);
+      return inputIndex++ % 2 === 0 ? "00000000-0000-0000-0000-000000000001" : "en-NZ, en";
+    });
     const errors: string[] = [];
     const error = mock.method(vscode.window, "showErrorMessage", async (message: string) => { errors.push(message); });
     const collect = mock.method(client, "collectFallbackDiagnostic", async (...[actual, secret, selection]: Parameters<AuthoringContentClient["collectFallbackDiagnostic"]>) => {

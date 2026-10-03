@@ -21,7 +21,10 @@ export const fallbackFixtureTests: readonly IntegrationTest[] = [{
         sortOrder: 0, sectionName: "Content", sectionSortOrder: 0, isStandardTemplate: false, containsFallbackValue: false,
         containsInheritedValue: false, containsStandardValue: false, textual: true }] };
     const picks = mock.method(vscode.window, "showQuickPick", async (items: readonly unknown[]) => items[0]);
-    let inputs = 0; const input = mock.method(vscode.window, "showInputBox", async () => ++inputs % 3 === 0 ? "en-NZ, en-AU, en" : id);
+    let inputs = 0; const input = mock.method(vscode.window, "showInputBox", async (options: vscode.InputBoxOptions) => {
+      strictEqual(options.ignoreFocusOut, true);
+      return ++inputs % 3 === 0 ? "en-NZ, en-AU, en" : id;
+    });
     let confirm = false;
     const warning = mock.method(vscode.window, "showWarningMessage", async () => confirm ? "Create test items" : undefined);
     const load = mock.method(client, "loadItemDetails", async () => details);

@@ -463,3 +463,5 @@ The item diagnostic in 0.27.0 additionally collects exact language-definition ev
 
 
 The fallback spike includes Command Palette actions to create controlled test items from an existing representative item's template and diagnose the resulting set. Creation confirms the development connection/content parent/template/field and creates four uniquely named children, using source-only item-fallback enabled/disabled cases and requested-locale local-value/empty controls. Mutations reuse the Authoring client without retries, checkpoint intended paths and outcomes in workspace state, and do not alter existing items, templates, language settings or publishing. Diagnostic collection operates only on confirmed IDs in recorded runs and refuses a changed connection server. These fixtures are evidence gathering, not a complete mixed-version/reset matrix or B04 implementation. Configuration discovery supports observed locale-name links as well as GUID links, with bounded traversal and explicit unknowns.
+
+Fallback test creation and diagnostic GUID/locale textboxes stay open when focus moves to another window, allowing IDs to be copied and pasted. Press Escape to cancel.
