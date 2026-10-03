@@ -114,4 +114,29 @@ Eight isolated test items were created through confirmed MCP plans: four page co
 
 Schema introspection remains unavailable. Configuration traversal is bounded and partial; effective environment switches and mixed-field source rules are not established. These observations do not complete B04's implementation gate.
 
-Version 0.30.0 adds previewed first-language-version creation and explicit field reset to support the next experiments. The version preview validates its mutation contract using `@skip` before allowing execution. These new operations have automated coverage but have not yet been exercised on the development environment. Next: add a local version to an isolated source-enabled control, compare literal empty versus reset with its populated English source, then test an intermediate-language override. Repeat for the component and retain exact/cross-check evidence after each change.
+Version 0.30.0 adds previewed first-language-version creation and explicit field reset to support the next experiments. The version preview validates its mutation contract using `@skip` before allowing execution. The version-creation contract and field-reset operation have now also been exercised on the development environment through confirmed MCP plans; see the following results.
+
+
+### Existing local version: empty versus reset
+
+The same isolated page and component source-enabled controls were each given an `en-NZ` version 1, retaining their English marker and leaving `en-AU` initially absent. Each stage was followed by exact reads in all three locales and a fallback-enabled read in the original `en-NZ` locale. Both selected fields behaved alike:
+
+| Controlled state in `en-NZ` | Exact value | Fallback-enabled value | `containsFallbackValue` on cross-check |
+| --- | --- | --- | --- |
+| Newly created version, field untouched | Empty | English marker | true |
+| Explicit local marker | Local marker | Local marker | false |
+| Literal empty written over local marker (`reset: false`) | Empty | Empty | false |
+| Explicit reset after literal empty (`reset: true`) | Empty | English marker | true |
+
+All four stages retained version 1. Exact reads of untouched, literal-empty and reset states returned the same empty value with fallback/inherited/Standard Value flags all false. Therefore the current exact field response cannot distinguish an explicit empty override from an unset/reset field. A resolver must not treat an empty exact value as permission to walk the chain, or it would override intentionally empty content. Preserve the original-locale cross-check; without stronger raw-state evidence, unresolved distinctions must remain explicit.
+
+These are observations for one page text field and one component rich-text field under the observed development configuration, not a universal rule for all Sitecore fields or deployments. The tests changed only the previously created controls. Existing real content, templates, language definitions and publishing remained untouched.
+
+
+### Intermediate-language precedence and final state
+
+After the reset stage, both controls received `en-AU` version 1 and distinct intermediate markers while their `en-NZ` fields remained reset. The fallback-enabled original `en-NZ` reads returned the corresponding Australian marker with `containsFallbackValue: true`, ahead of the still-populated English marker. Exact Australian reads confirmed the distinct values. This controlled intervention supports precedence in the observed `en-NZ -> en-AU -> en` chain; it does not turn value equality alone into a general provenance guarantee.
+
+The run completed 12 confirmed mutations (four version creations, six literal writes and two resets) and ten diagnostic reports, with all 40 item probes complete. Final exact reads verified the English marker and version 1 unchanged on each control. The two test items now retain version 1 in `en`, `en-NZ` and `en-AU`; requested-language fields are reset and intermediate-language markers remain available for follow-up. No publishing, deletion, template edit or language-configuration edit occurred.
+
+Remaining evidence includes mixed field sources on a single item, shared/unversioned and populated Standard Value behavior, intermediate explicit-empty handling, per-language field-rule overrides and effective environment switches. Full schema introspection remains unavailable despite successful validation/execution of the narrow version mutation. Partial configuration coverage and independent read times remain limitations. No fallback resolver or comparison behavior was changed by this evidence-only follow-up.
