@@ -1,3 +1,4 @@
+import { FallbackFixtureCommands } from "./connections/fallbackFixtureCommands";
 import { ConnectionSettingsPanel } from "./connections/connectionSettingsPanel";
 import { runFallbackDiagnostic } from "./connections/fallbackDiagnosticCommand";
 import * as vscode from "vscode";
@@ -49,6 +50,7 @@ export function activate(context: vscode.ExtensionContext): void {
   const authoringClient = new AuthoringContentClient(log);
   const diagnosticLifetime = new AbortController();
   context.subscriptions.push({ dispose: () => diagnosticLifetime.abort() });
+  const fallbackFixtures = new FallbackFixtureCommands(connectionStore, authoringClient, context.workspaceState, diagnosticLifetime.signal);
   const deploymentClient = new DeploymentClient(log);
   const taskOutput = vscode.window.createOutputChannel("XM Cloud Tasks");
   const publishOutput = vscode.window.createOutputChannel("XM Cloud Publish");
@@ -286,6 +288,8 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.commands.registerCommand("xmCloudSync.testConnection", async (argument) => {
       await testConnection(argument, connectionStore, connectionProvider, authoringClient);
     }),
+    vscode.commands.registerCommand("xmCloudSync.createFallbackTestItems", () => fallbackFixtures.run(false)),
+    vscode.commands.registerCommand("xmCloudSync.diagnoseFallbackTestItems", () => fallbackFixtures.run(true)),
     vscode.commands.registerCommand("xmCloudSync.collectFallbackDiagnostic", async () => {
       await runFallbackDiagnostic(connectionStore, authoringClient, diagnosticLifetime.signal);
     }),

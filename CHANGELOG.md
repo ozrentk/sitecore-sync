@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.28.0
+
+- Add Create Fallback Test Items and Diagnose Fallback Test Items commands, with confirmed template-based creation, workspace recovery records and exact/fallback evidence collection.
+- Follow configured fallback-language names as well as GUID references.
+- Keep test content unpublished and preserve existing content and template settings.
+
 ## 0.27.0
 
 - Extend the Authoring fallback diagnostic with exact language-chain reference, field-definition and template/Standard Values evidence, explicit limits and unknown environment settings.
