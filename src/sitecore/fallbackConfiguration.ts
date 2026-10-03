@@ -64,9 +64,12 @@ export async function collectFallbackConfiguration(
     if (id) { visited.add(id); }
     for (const field of fields(evidence).filter(field => typeof field.name === "string" && field.name.toLowerCase() === "fallback language")) {
       const targetId = guid(field.value);
-      links.push({ from: id, fieldId: field.fieldId, value: field.value, targetId,
-        interpretation: targetId ? "reference-observed" : field.value === "" ? "empty-setting" : "unrecognized-reference" });
+      const targetLanguage = !targetId && typeof field.value === "string" && /^[a-z]{2,8}(?:-[a-z\d]{1,8})*$/iu.test(field.value)
+        ? field.value : undefined;
+      links.push({ from: id, fieldId: field.fieldId, value: field.value, targetId, targetLanguage,
+        interpretation: targetId || targetLanguage ? "reference-observed" : field.value === "" ? "empty-setting" : "unrecognized-reference" });
       if (targetId && !visited.has(targetId)) { queue.push({ itemId: targetId }); }
+      if (targetLanguage) { queue.push({ path: `/sitecore/system/Languages/${targetLanguage}` }); }
     }
   }
   const definitions = new Map<string, { name: unknown; fallbackObserved: boolean }>();

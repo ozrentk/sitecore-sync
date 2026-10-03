@@ -62,3 +62,16 @@ test("configuration preserves unavailable reads and stops on cancellation", asyn
   strictEqual(JSON.stringify(result).includes('"status":"unavailable"'), true);
   await rejects(collectFallbackConfiguration([], ["en"], async () => { throw new Error("must not read"); }, AbortSignal.abort()), { name: "AbortError" });
 });
+
+test("configuration follows locale-name references and terminates case-insensitive cycles", async () => {
+  const paths: string[] = [];
+  const result = await collectFallbackConfiguration([], ["en-NZ"], async (_label, locator) => {
+    const path = "path" in locator ? locator.path : locator.itemId;
+    paths.push(path);
+    const next = path.endsWith("en-NZ") ? "en-AU" : path.endsWith("en-AU") ? "en" : "EN-nz";
+    return evidence(id(paths.length), [setting("Fallback Language", next)]);
+  }, new AbortController().signal) as Configuration;
+  deepStrictEqual(paths, ["/sitecore/system/Languages/en-NZ", "/sitecore/system/Languages/en-AU", "/sitecore/system/Languages/en"]);
+  strictEqual(result.links.every(link => link.interpretation === "reference-observed"), true);
+  strictEqual(result.coverage.languageTraversalTruncated, false);
+});
