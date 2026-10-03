@@ -520,3 +520,66 @@ test("exact lookup distinguishes an absent item from a malformed response", asyn
   const malformed = new AuthoringContentClient(noOpLogger, new QueuedHttpRuntime([tokenResponse(), jsonResponse({ data: {} })]));
   await rejects(malformed.loadTreeLevel(testConnection, "secret", { path: "/missing" }, "en", signal), error => error instanceof Error && !(error instanceof AuthoringItemNotFoundError));
 });
+
+
+test("version contract validation skips execution and rejects malformed or unsupported contracts", async () => {
+  const input = { itemId: "item-id", language: "en-NZ" };
+  for (const payload of [{ data: { __typename: "Mutation" } }, { data: {} }, { errors: [{ message: "Unknown type" }] }]) {
+    const runtime = new QueuedHttpRuntime([tokenResponse(), jsonResponse(payload)]);
+    const task = new AuthoringContentClient(noOpLogger, runtime).validateAddItemVersion(testConnection, "secret", input, signal);
+    if ("data" in payload && payload.data?.__typename) { await task; } else { await rejects(task); }
+    const body = requestBody(runtime, 1);
+    match(String(body.query), /@skip\(if: \$validateOnly\)/u);
+    deepStrictEqual(body.variables, { input: { database: "master", ...input }, validateOnly: true });
+    strictEqual(runtime.requests.length, 2);
+  }
+});
+
+test("version creation validates identity, language and version and never retries a failed write", async () => {
+  for (const item of [null, { itemId: "other", language: { name: "en" }, version: 1 },
+    { itemId: "item-id", language: { name: "fr" }, version: 1 },
+    { itemId: "item-id", language: { name: "en" }, version: 0 }]) {
+    const runtime = new QueuedHttpRuntime([tokenResponse(), jsonResponse({ data: { addItemVersion: { item } } })]);
+    await rejects(new AuthoringContentClient(noOpLogger, runtime).addItemVersion(testConnection, "secret", { itemId: "item-id", language: "en" }, signal));
+    strictEqual((requestBody(runtime, 1).variables as { validateOnly: boolean }).validateOnly, false);
+    strictEqual(runtime.requests.length, 2);
+  }
+  const failed = new QueuedHttpRuntime([tokenResponse(), jsonResponse({}, 503)]);
+  await rejects(new AuthoringContentClient(noOpLogger, failed).addItemVersion(testConnection, "secret", { itemId: "item-id", language: "en" }, signal));
+  strictEqual(failed.requests.length, 2); deepStrictEqual(failed.waits, []);
+});
+
+test("field reset sends reset true while literal empty update sends false", async () => {
+  for (const reset of [true, false]) {
+    const runtime = new QueuedHttpRuntime([tokenResponse(), jsonResponse({ data: { updateItem: null } })]);
+    const client = new AuthoringContentClient(noOpLogger, runtime);
+    const input = { itemId: "item-id", language: "en", version: 1 };
+    await rejects(reset ? client.resetItemField(testConnection, "secret", { ...input, fieldName: "Title" }, signal)
+      : client.updateItemFields(testConnection, "secret", { ...input, fields: { Title: "" } }, signal));
+    deepStrictEqual((requestBody(runtime, 1).variables as { input: unknown }).input,
+      { database: "master", ...input, fields: [{ name: "Title", value: "", reset }] });
+    strictEqual(runtime.requests.length, 2);
+  }
+});
+
+
+test("new version and reset read back the exact acknowledged locale and version", async () => {
+  for (const reset of [true, false]) {
+    const item = { itemId: "item-id", name: "Test", displayName: "Test", path: "/sitecore/content/Test", hasChildren: false,
+      language: { name: "en" }, version: 1, template: { templateId: "template-id", name: "Page" }, versions: [],
+      fields: { nodes: [], pageInfo: { hasNextPage: false, endCursor: null } } };
+    const runtime = new QueuedHttpRuntime([tokenResponse(),
+      jsonResponse({ data: { [reset ? "updateItem" : "addItemVersion"]: { item } } }),
+      jsonResponse({ data: { item } }), jsonResponse({ data: { item } })]);
+    const client = new AuthoringContentClient(noOpLogger, runtime);
+    const input = { itemId: "item-id", language: "en" };
+    const result = reset ? await client.resetItemField(testConnection, "secret", { ...input, version: 1, fieldName: "Title" }, signal)
+      : await client.addItemVersion(testConnection, "secret", input, signal);
+    strictEqual(result.version, 1); strictEqual(result.language, "en");
+    deepStrictEqual((requestBody(runtime, 2).variables as { where: unknown }).where,
+      { database: "master", itemId: "item-id", language: "en", version: 1 });
+  }
+  const runtime = new QueuedHttpRuntime([]);
+  await rejects(new AuthoringContentClient(noOpLogger, runtime).addItemVersion(testConnection, "secret", { itemId: "item-id", language: "en" }, AbortSignal.abort()));
+  strictEqual(runtime.requests.length, 0);
+});

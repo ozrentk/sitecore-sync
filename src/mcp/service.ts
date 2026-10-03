@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import * as z from "zod";
 import type { ConnectionStore } from "../connections/connectionStore";
 import type { XmCloudConnection } from "../connections/connection";
@@ -9,12 +9,12 @@ import { fieldStateFingerprint } from "../transfers/transferTypes";
 import { isMcpToolName, McpAccessError, toolSchemas } from "./tools";
 
 type Connections = Pick<ConnectionStore, "get" | "listVerifiedSites" | "getClientSecret">;
-type Client = Pick<AuthoringContentClient, "loadItem" | "loadLanguages" | "searchItemsByName" | "collectFallbackDiagnostic" | "createItem" | "updateItemFields">;
+type Client = Pick<AuthoringContentClient, "loadItem" | "loadLanguages" | "searchItemsByName" | "collectFallbackDiagnostic" | "createItem" | "updateItemFields" | "resetItemField" | "validateAddItemVersion" | "addItemVersion">;
 const operationSchema = z.object({ id: z.string().uuid(), connectionId: z.string(), serverUrl: z.string(),
-  kind: z.enum(["create-fixtures", "update-field"]), startedAt: z.string(),
+  kind: z.enum(["create-fixtures", "update-field", "reset-field", "create-version"]), startedAt: z.string(),
   status: z.enum(["prepared", "outcome-unknown", "completed", "stopped"]),
   targets: z.array(z.object({ path: z.string(), itemId: z.string().optional(), language: z.string(),
-    status: z.enum(["planned", "outcome-unknown", "created", "updated"]), fieldId: z.string().optional() }).strict()).max(4),
+    status: z.enum(["planned", "outcome-unknown", "created", "updated", "reset", "version-created"]), fieldId: z.string().optional(), version: z.number().int().positive().optional() }).strict()).max(4),
 }).strict();
 export type McpOperation = z.infer<typeof operationSchema>;
 export interface McpServiceHost {
@@ -28,10 +28,12 @@ interface Plan {
   readonly expiresAt: number;
   readonly preview: unknown;
   readonly mutation: { kind: "create-fixtures"; fixtures: FallbackFixture[] }
-    | { kind: "update-field"; itemId: string; path: string; language: string; version: number; fieldId: string; value: string; fingerprint: string };
+    | { kind: "update-field" | "reset-field"; itemId: string; path: string; language: string; version: number; fieldId: string; value: string; fingerprint: string }
+    | { kind: "create-version"; itemId: string; path: string; language: string; fingerprint: string };
 }
 const normalized = (value: string): string => value.replace(/[{}-]/gu, "").toLowerCase();
 const locate = (value: string): { path: string } | { itemId: string } => value.startsWith("/") ? { path: value } : { itemId: fixtureGuid(value) };
+const itemFingerprint = (item: AuthoringItemDetails): string => createHash("sha256").update(JSON.stringify(item)).digest("hex");
 
 export class McpService {
   private readonly plans = new Map<string, Plan>();
@@ -98,17 +100,37 @@ export class McpService {
             field: field.name, languages: value.languages, fixtures,
             notice: "Creates four new children, preserving template defaults. No publishing. Controls do not cover mixed versions or reset semantics." }); break;
       }
+      case "preview_language_version": {
+        const value = toolSchemas.preview_language_version.parse(input);
+        const item = await this.client.loadItem(connection, secret, locate(value.item), value.language, undefined, signal);
+        this.missingVersion(item, value.language);
+        const languages = await this.client.loadLanguages(connection, secret, signal);
+        if (!languages.some(language => language.name.toLowerCase() === value.language.toLowerCase())) {
+          throw new McpAccessError("Choose a configured language.");
+        }
+        await this.client.validateAddItemVersion(connection, secret, { itemId: item.itemId, language: value.language }, signal);
+        result = this.addPlan(connection.id, { kind: "create-version", itemId: item.itemId, path: item.path,
+          language: value.language, fingerprint: itemFingerprint(item) },
+        { connection: connection.name, serverUrl: connection.serverUrl, path: item.path, language: value.language,
+          notice: "Creates the first local language version. Field defaults are controlled by Sitecore; no source values are copied by this tool. Nothing is published." }); break;
+      }
+      case "preview_field_reset":
       case "preview_field_update": {
-        const value = toolSchemas.preview_field_update.parse(input);
+        const value = name === "preview_field_update" ? toolSchemas.preview_field_update.parse(input) : toolSchemas.preview_field_reset.parse(input);
         const item = await this.client.loadItem(connection, secret, locate(value.item), value.language, undefined, signal);
         const field = this.editableField(item, value.fieldId);
-        if (item.version !== value.version) { throw new McpAccessError("Requested version is not the latest existing version. Read the item again."); }
-        result = this.addPlan(connection.id, { kind: "update-field", itemId: item.itemId, path: item.path,
-          language: value.language, version: value.version, fieldId: field.fieldId, value: value.value,
+        if (item.version !== value.version || item.language.toLowerCase() !== value.language.toLowerCase()) {
+          throw new McpAccessError("Requested locale/version is not the latest existing version. Read the item again.");
+        }
+        const reset = name === "preview_field_reset";
+        const newValue = "value" in value && typeof value.value === "string" ? value.value : "";
+        result = this.addPlan(connection.id, { kind: reset ? "reset-field" : "update-field", itemId: item.itemId, path: item.path,
+          language: value.language, version: value.version, fieldId: field.fieldId, value: newValue,
           fingerprint: fieldStateFingerprint(item, field) },
         { connection: connection.name, serverUrl: connection.serverUrl, path: item.path, language: value.language,
-          version: value.version, field: field.name, previousValue: field.value, newValue: value.value,
-          notice: "Writes a literal local value (including empty); it does not reset to Standard Values or create a version." }); break;
+          version: value.version, field: field.name, previousValue: field.value, ...(reset ? { reset: true } : { newValue }),
+          notice: reset ? "Resets the local field to Standard Values/defaults. Diagnose effective fallback separately; the result need not be empty."
+            : "Writes a literal local value (including empty); it does not reset to Standard Values or create a version." }); break;
       }
     }
     signal.throwIfAborted(); this.connection(connection.id);
@@ -138,6 +160,13 @@ export class McpService {
       throw new McpAccessError("Choose an existing local version and a versioned content text field. System, shared and fallback-derived fields cannot be changed.");
     }
     return field;
+  }
+  private missingVersion(item: AuthoringItemDetails, language: string): void {
+    if (!/^\/sitecore\/content\//iu.test(item.path) || item.version !== 0
+      || item.language.toLowerCase() !== language.toLowerCase()
+      || item.availableVersions.some(version => version.language.toLowerCase() === language.toLowerCase() && version.version > 0)) {
+      throw new McpAccessError("Choose a content item with no existing local version in this language.");
+    }
   }
   private addPlan(connectionId: string, mutation: Plan["mutation"], preview: unknown): unknown {
     for (const [id, plan] of this.plans) { if (plan.expiresAt < Date.now()) { this.plans.delete(id); } }
@@ -172,7 +201,7 @@ export class McpService {
         kind: mutation.kind, startedAt: new Date().toISOString(), status: "prepared",
         targets: mutation.kind === "create-fixtures" ? mutation.fixtures.map(fixture => ({ path: fixture.expectedPath,
           language: fixture.input.language, status: "planned" })) : [{ path: mutation.path, itemId: mutation.itemId,
-          language: mutation.language, fieldId: mutation.fieldId, status: "planned" }] };
+          language: mutation.language, ...("fieldId" in mutation ? { fieldId: mutation.fieldId } : {}), status: "planned" }] };
       records.push(record);
       const checkpoint = (): Promise<void> => this.host.saveJournal(records);
       await checkpoint();
@@ -187,6 +216,18 @@ export class McpService {
               status: fixture.status, itemId: fixture.itemId }));
             await checkpoint();
           }, signal);
+        } else if (mutation.kind === "create-version") {
+          const current = await this.client.loadItem(connection, secret, { itemId: mutation.itemId }, mutation.language, undefined, signal);
+          this.missingVersion(current, mutation.language);
+          if (itemFingerprint(current) !== mutation.fingerprint) { throw new McpAccessError("Item changed after preview. Prepare a fresh preview."); }
+          record.status = "outcome-unknown"; record.targets[0]!.status = "outcome-unknown"; await checkpoint();
+          signal.throwIfAborted(); this.connection(connection.id);
+          const result = await this.client.addItemVersion(connection, secret, { itemId: mutation.itemId, language: mutation.language }, signal);
+          if (normalized(result.itemId) !== normalized(mutation.itemId) || result.path !== mutation.path
+            || result.language.toLowerCase() !== mutation.language.toLowerCase() || result.version !== 1) {
+            throw new Error("Version creation verification failed");
+          }
+          record.targets[0]!.status = "version-created"; record.targets[0]!.version = result.version;
         } else {
           const current = await this.client.loadItem(connection, secret, { itemId: mutation.itemId }, mutation.language, undefined, signal);
           const field = this.editableField(current, mutation.fieldId);
@@ -195,12 +236,17 @@ export class McpService {
           }
           record.status = "outcome-unknown"; record.targets[0]!.status = "outcome-unknown"; await checkpoint();
           signal.throwIfAborted(); this.connection(connection.id);
-          const result = await this.client.updateItemFields(connection, secret, { itemId: mutation.itemId,
-            language: mutation.language, version: mutation.version, fields: { [field.name]: mutation.value } }, signal);
+          const result = mutation.kind === "reset-field"
+            ? await this.client.resetItemField(connection, secret, { itemId: mutation.itemId,
+              language: mutation.language, version: mutation.version, fieldName: field.name }, signal)
+            : await this.client.updateItemFields(connection, secret, { itemId: mutation.itemId,
+              language: mutation.language, version: mutation.version, fields: { [field.name]: mutation.value } }, signal);
           const updated = this.editableField(result, mutation.fieldId);
           if (normalized(result.itemId) !== normalized(mutation.itemId) || result.language.toLowerCase() !== mutation.language.toLowerCase()
-            || result.version !== mutation.version || updated.value !== mutation.value) { throw new Error("Write verification failed"); }
-          record.targets[0]!.status = "updated";
+            || result.version !== mutation.version || result.path !== mutation.path
+            || (mutation.kind === "update-field" && updated.value !== mutation.value)) { throw new Error("Write verification failed"); }
+          // A reset acknowledgement and exact read do not establish effective fallback provenance.
+          record.targets[0]!.status = mutation.kind === "reset-field" ? "reset" : "updated";
         }
         record.status = "completed"; await checkpoint();
         return record;

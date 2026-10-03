@@ -7,7 +7,7 @@ import { descriptorSchema, type BridgeHandler } from "./bridge";
 import { isMcpToolName, toolDescriptions, toolSchemas } from "./tools";
 
 export function createMcpServer(call: BridgeHandler): Server {
-  const server = new Server({ name: "xm-cloud-sync", version: "0.29.0" }, { capabilities: { tools: {} } });
+  const server = new Server({ name: "xm-cloud-sync", version: "0.30.0" }, { capabilities: { tools: {} } });
   server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools: Object.entries(toolSchemas).map(([name, schema]) => ({
     name, description: toolDescriptions[name as keyof typeof toolSchemas], inputSchema: z.toJSONSchema(schema) as { type: "object" },
     annotations: { readOnlyHint: name !== "execute_plan", destructiveHint: name === "execute_plan", openWorldHint: true },
