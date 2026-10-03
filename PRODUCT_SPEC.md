@@ -428,10 +428,12 @@ Search uses the documented Authoring `search` query on `sitecore_master_index` (
 
 The installable VSIX is distributed through GitHub Releases without Marketplace publishing. Version tag pushes must match the manifest and lockfile and reference a commit on `main`. CI scans Git history and the built package for secrets, then publishes the verified VSIX only after type checking and both test suites pass. Ordinary CI artifacts expire after 14 days; release assets are the download location for users. Updates are installed manually from the newer VSIX. Publishing credentials use the workflow token with write access confined to the release job.
 
-## B18 internal mode foundation
+## B18 Browse mode and session foundation
 
 `src/comparison/contentSession.ts` defines a panel-independent Browse/Compare lifecycle. Opening one endpoint produces Browse; Compare requires two explicit endpoints and preserves independent languages even when both use the same connection. A retained side carries its connection, language, root and selected item into Browse. Language lock is explicit and inconsistent locked pairs are rejected without changing the previous state.
 
 Transitions commit atomically after asynchronous preparation. Cancelled or failed preparation preserves the committed state; newer transitions, selection changes, cancellation and disposal invalidate earlier work. Same-key loads supersede each other, while separate keys may coexist. Results are published only while their originating session revision is current, including when transport ignores cancellation or selection returns to the same values.
 
-This is an internal foundation only, not an enabled Browse feature. The existing comparison panel, command behavior and persisted comparison selection remain unchanged. B18 #2 must integrate the lifecycle with the single-tree surface and all asynchronous publication paths before enabling Browse. Details/actions, partner persistence, switching UX and full acceptance remain in #3–#5. No new stored schema or credentials are introduced.
+Connection selection now opens Browse with one full-width tree and a single connection/language selector. Search is limited to that connection; site/favorite navigation, icons, lazy loading, refresh, cancellation and keyboard navigation reuse the existing tree. The panel consumes the session lifecycle and rejects stale tree, language and detail responses after session changes. Comparison-only controls and actions are hidden and guarded in Browse. Explicit comparison commands retain two-sided behavior and independent languages on the same connection. Browse does not overwrite the saved comparison selection.
+
+B18 #1–#2 are implemented. Single-item details/actions, partner persistence, complete switching UX and full acceptance remain in #3–#5. No new stored schema or credentials are introduced.

@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.23.0
+
+- Open connections in Browse with one full-width content tree, connection-scoped search, sites/favorites and navigation controls.
+- Keep comparison actions out of Browse and preserve explicit two-sided Compare workflows. Single-item details/actions and complete mode switching remain planned.
+
 ## 0.22.4
 
 - Distinguish valid Experience Edge tokens from site-catalog mismatches; show Authoring and Edge sites and allow an explicit scope override on Save.

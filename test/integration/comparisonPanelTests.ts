@@ -1,3 +1,4 @@
+import { ContentSession } from "../../src/comparison/contentSession";
 import { deepStrictEqual, strictEqual, rejects } from "node:assert/strict";
 import * as vscode from "vscode";
 import { mock } from "node:test";
@@ -34,6 +35,66 @@ interface ComparisonPanelHarness {
 }
 
 export const comparisonPanelTests: readonly IntegrationTest[] = [{
+  name: "Browse has one source, preserves Compare preferences and blocks paired actions",
+  async execute(): Promise<void> {
+    const one = connection("one", "One"); const two = connection("two", "Two");
+    const session = new ContentSession();
+    const saved = { leftConnectionId: "one", rightConnectionId: "one", leftLanguage: "en", rightLanguage: "de", languagesLocked: false };
+    const workspaceState = new MemoryMemento({ [selectionKey]: saved });
+    const loads: string[] = [];
+    const manager = Object.create(ComparisonPanelManager.prototype) as {
+      getSelection(): Record<string, unknown>;
+      saveSelection(value: unknown): Promise<void>;
+      loadInitialTrees(): Promise<void>;
+      handleMessage(value: unknown): Promise<void>;
+    };
+    Object.assign(manager, { contentSession: session, workspaceState, panel: {},
+      connectionStore: { list: () => [one, two], get: (id: string) => id === "one" ? one : two },
+      comparisonStateEmitter: { fire() {} },
+      loadAndPostLanguages: async (side: string) => { loads.push(`languages:${side}`); },
+      loadTreeLevel: async (side: string) => { loads.push(`tree:${side}`); },
+    });
+    session.openConnection({ connectionId: "two", language: "fr", rootPath: "/" });
+    strictEqual(manager.getSelection().rightConnectionId, undefined);
+    await manager.loadInitialTrees();
+    deepStrictEqual(loads.sort(), ["languages:left", "tree:left"]);
+    for (const type of ["syncSubtree", "swapConnections", "setLanguageLock", "standardPublish", "runItemTask", "openPublicPage", "selectFieldDiffItem", "loadItemDetails"]) {
+      await manager.handleMessage({ type, side: "left", itemId: "item", language: "en", connectionId: "one" });
+    }
+    await manager.handleMessage({ type: "loadRoot", side: "right", connectionId: "one" });
+    strictEqual(loads.length, 2);
+    await manager.saveSelection({ leftConnectionId: "two", leftLanguage: "de", rightLanguage: "en", languagesLocked: false });
+    strictEqual(manager.getSelection().leftLanguage, "de");
+    deepStrictEqual(workspaceState.get(selectionKey), saved);
+    session.openCompare({ connectionId: "one", language: "en", rootPath: "/" }, { connectionId: "one", language: "de", rootPath: "/" });
+    strictEqual(manager.getSelection().rightLanguage, "de");
+    session.dispose();
+  },
+}, {
+  name: "Browse tree responses cannot publish after cancellation or a mode round trip",
+  async execute(): Promise<void> {
+    for (const cancel of [true, false]) {
+      const session = new ContentSession(); const source = { connectionId: "one", language: "en", rootPath: "/" };
+      session.openConnection(source);
+      const messages: { type: string }[] = [];
+      let finish!: (value: AuthoringTreeLevel) => void;
+      const result = new Promise<AuthoringTreeLevel>(resolve => { finish = resolve; });
+      const manager = Object.create(ComparisonPanelManager.prototype) as { loadAndPostTreeLevel(side: string, id: string, locator: unknown): Promise<unknown> };
+      Object.assign(manager, { contentSession: session,
+        panel: { webview: { postMessage: async (message: { type: string }) => { messages.push(message); return true; } } },
+        sideLanguage: () => "en", isCurrentSelection: () => true, getTreeLevel: async () => result,
+        log: { debug() {}, info() {} },
+      });
+      const pending = manager.loadAndPostTreeLevel("left", "one", { path: "/" });
+      if (cancel) session.cancelPending();
+      else { session.openCompare(source, source); session.openConnection(source); }
+      finish(treeLevel("/sitecore"));
+      await rejects(pending, /selection changed/);
+      deepStrictEqual(messages.map(value => value.type), ["treeLoading"]);
+      session.dispose();
+    }
+  },
+}, {
   name: "public pages open directly and cancelled or stale resolutions do not launch",
   async execute(): Promise<void> {
     const manager = Object.create(ComparisonPanelManager.prototype) as ComparisonPanelHarness;

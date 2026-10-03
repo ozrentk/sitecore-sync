@@ -293,6 +293,9 @@ export function activate(context: vscode.ExtensionContext): void {
         connectionIsInUse,
       );
     }),
+    vscode.commands.registerCommand("xmCloudSync.browseConnection", async (argument) => {
+      if (argument instanceof ConnectionTreeItem) await comparisonPanelManager.openBrowse(argument.connection.id);
+    }),
     vscode.commands.registerCommand("xmCloudSync.openComparison", async () => {
       await comparisonPanelManager.open();
     }),

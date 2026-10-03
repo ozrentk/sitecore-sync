@@ -628,3 +628,18 @@ select:focus {
 .navigation-results[hidden] { display: none; }
 .navigation-results button { text-align: left; white-space: normal; overflow-wrap: anywhere; }
 .navigation-scope { color: var(--vscode-descriptionForeground); }
+
+/* Browse keeps the existing tree nodes/navigation but has no comparison column or gutter. */
+[hidden] { display: none !important; }
+body.browse .toolbar { grid-template-columns: minmax(0, 1fr); }
+body.browse .selector { grid-template-columns: minmax(0, 1fr) minmax(120px, 220px); }
+body.browse .comparison { min-width: 0; }
+body.browse .comparison-row { grid-template-columns: 30px minmax(0, 1fr); }
+body.browse .root-statuses, body.browse .comparison-inline-status, body.browse .connection-footer { grid-template-columns: minmax(0, 1fr); }
+body.browse .right, body.browse .connection-footer-gutter,
+body.browse .root-statuses > div:not(.left), body.browse .comparison-inline-status > div:not(.left) { display: none; }
+body.browse .comparison-cell, body.browse .row-control { border-left: 0; }
+body.browse .language-switch-status { left: 50%; width: max-content; }
+
+.browse-actions { display: none; }
+body.browse .browse-actions { display: flex; gap: 8px; }

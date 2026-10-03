@@ -306,4 +306,6 @@ Search uses the documented Authoring `search` query on `sitecore_master_index` (
 
 ## Browse mode development status
 
-B18 development status: an internal Browse/Compare session lifecycle is available in `src/comparison/contentSession.ts` and covered by unit tests. Browse is not yet exposed in the extension; the current comparison workflow remains unchanged. See `BACKLOG.md` for the remaining UI, details/actions, switching and acceptance subtasks.
+Click a connection in Connections, or choose **Browse Connection**, to open one full-width content tree with a connection and language selector. ID/path/name search uses only that connection. Sites and favorites on the browsed connection reveal their items; lazy loading, refresh, cancellation, icons and keyboard navigation remain available. Comparison controls and paired field details are hidden. Use the existing explicit Compare commands for two trees, including independent languages on the same connection.
+
+B18 subtasks #1–#2 are implemented. Single-item details and actions, remembered partners, the complete mode-switching interface and full acceptance remain in #3–#5; see `BACKLOG.md`.
