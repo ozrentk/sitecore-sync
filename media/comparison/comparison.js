@@ -1,4 +1,8 @@
-const vscode = acquireVsCodeApi();
+const api = acquireVsCodeApi();
+const vscode = { postMessage(message) {
+  if (state.mode === "browse" && ["selectFieldDiffItem", "showDetailedFieldDiff", "loadItemDetails"].includes(message.type)) return;
+  api.postMessage(message);
+} };
 
 function emptyTreeState(connectionId, language) {
   return {
@@ -11,6 +15,7 @@ function emptyTreeState(connectionId, language) {
 }
 
 const state = {
+  mode: "compare",
   connections: [],
   selection: {},
   languages: {
@@ -59,6 +64,8 @@ const languageSwitchStatusRight = document.getElementById("language-switch-statu
 const languageSwitchTextRight = document.getElementById("language-switch-text-right");
 const languageSwitchRetryRight = document.getElementById("language-switch-retry-right");
 
+document.getElementById("browse-refresh").addEventListener("click", () => startRefreshAll());
+document.getElementById("browse-cancel").addEventListener("click", () => vscode.postMessage({ type: "cancelBrowseLoads" }));
 const navigationInput = document.getElementById("item-navigation-input");
 const navigationMode = document.getElementById("item-navigation-mode");
 const navigationStatus = document.getElementById("item-navigation-status");
@@ -302,6 +309,7 @@ function requestChildren(side, node) {
 }
 
 function requestItemDetails(side, node) {
+  if (state.mode === "browse") return;
   const connectionId = state.trees[side].connectionId;
   if (
     connectionId &&
@@ -529,7 +537,7 @@ function loadMissingPairLevels(pair) {
 function createRootStatus(side) {
   const tree = state.trees[side];
   const status = document.createElement("div");
-  status.className = "root-status";
+  status.className = `root-status ${side}`;
   if (tree.error) {
     const message = document.createElement("span");
     message.className = "error-text";
@@ -621,7 +629,7 @@ function findLoadedPairContext(rowKey) {
   refreshLoadedItemIndexes();
   const leftRoot = state.trees.left.root;
   const rightRoot = state.trees.right.root;
-  if (!leftRoot || !rightRoot) {
+  if (!leftRoot || (state.mode !== "browse" && !rightRoot)) {
     return undefined;
   }
 
@@ -1158,7 +1166,7 @@ function showContextMenu(event, pair, clickedSide, forceDisabled = false) {
     vscode.postMessage({ type: "openPublicPage", side: clickedSide, itemId: clickedItem?.itemId });
     closeContextMenu();
   });
-  menu.append(openPage);
+  if (state.mode !== "browse") menu.append(openPage);
   const publishFlyout = document.createElement("div");
   publishFlyout.className = "context-submenu-flyout";
   publishFlyout.setAttribute("role", "menu");
@@ -1231,7 +1239,9 @@ function showContextMenu(event, pair, clickedSide, forceDisabled = false) {
     : clickedSide === "right"
       ? [syncRightToLeft]
       : [syncLeftToRight, syncRightToLeft];
-  menu.append(
+  if (state.mode === "browse") {
+    menu.append(addFavorite, itemAction, expandLoaded, load, refreshSubtree);
+  } else menu.append(
     detailedDiff,
     publishMenu,
     addFavorite,
@@ -1251,8 +1261,8 @@ function showContextMenu(event, pair, clickedSide, forceDisabled = false) {
   contextMenu = menu;
 
   const bounds = menu.getBoundingClientRect();
-  menu.style.left = `${Math.max(4, Math.min(event.clientX, window.innerWidth - bounds.width - 4))}px`;
-  menu.style.top = `${Math.max(4, Math.min(event.clientY, window.innerHeight - bounds.height - 4))}px`;
+  menu.style.left = `${Math.max(4, Math.min(event.clientX || 0, window.innerWidth - bounds.width - 4))}px`;
+  menu.style.top = `${Math.max(4, Math.min(event.clientY || 0, window.innerHeight - bounds.height - 4))}px`;
   (activeSubtreeLoad ? menu.firstElementChild : itemAction).focus();
 }
 
@@ -1361,7 +1371,7 @@ function createItemCell(node, side, depth, pair) {
   const tooltipLines = [
     node.path,
     `Item ID: ${node.itemId}`,
-    `Field comparison: ${fieldComparisonStatus(pair)}`,
+    ...(state.mode === "browse" ? [] : [`Field comparison: ${fieldComparisonStatus(pair)}`]),
   ];
   if (displayName !== node.name) {
     tooltipLines.push(`Item name: ${node.name}`);
@@ -1639,7 +1649,7 @@ function createRowControl(pair, refreshing, refreshRoot) {
     const expanded = state.expandedRows.has(pair.key);
     const loading = pairLoading(pair) || refreshRoot;
     disclosure.textContent = loading ? "" : expanded ? "▾" : "▸";
-    disclosure.title = expanded ? "Collapse both sides" : "Expand both sides";
+    disclosure.title = state.mode === "browse" ? (expanded ? "Collapse item" : "Expand item") : (expanded ? "Collapse both sides" : "Expand both sides");
     disclosure.setAttribute("aria-label", disclosure.title);
     disclosure.setAttribute("aria-expanded", String(expanded));
     disclosure.disabled = refreshing;
@@ -1654,12 +1664,12 @@ function createRowControl(pair, refreshing, refreshRoot) {
     disclosure.setAttribute("aria-hidden", "true");
   }
 
-  const warning = createOperationalWarning(pair);
+  const warning = state.mode === "browse" ? undefined : createOperationalWarning(pair);
   control.append(disclosure);
   if (warning) {
     control.append(warning);
   }
-  control.append(createDifferenceBadges(pair.flags));
+  if (state.mode !== "browse") control.append(createDifferenceBadges(pair.flags));
   return control;
 }
 
@@ -1696,7 +1706,7 @@ function renderPair(pair, depth, ancestorRefreshing = false) {
   row.setAttribute("role", "treeitem");
   row.setAttribute("aria-level", String(depth + 1));
   row.dataset.rowKey = pair.key;
-  if (pair.flags.length) {
+  if (state.mode !== "browse" && pair.flags.length) {
     row.classList.add("different");
   } else {
     row.classList.add("same");
@@ -1741,14 +1751,28 @@ function renderPair(pair, depth, ancestorRefreshing = false) {
         : undefined;
     showContextMenu(event, pair, clickedSide, refreshing);
   });
-  row.append(
+  if (state.mode === "browse") {
+    row.append(createRowControl(pair, refreshing, refreshRoot), createItemCell(pair.left, "left", depth, pair));
+    row.addEventListener("keydown", event => {
+      if (event.key === "ArrowRight") { event.preventDefault(); expandPairItem(pair); }
+      if (event.key === "ArrowLeft") { event.preventDefault(); collapsePairItem(pair); }
+      if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+        event.preventDefault();
+        const rows = [...workspace.querySelectorAll(".comparison-row .comparison-cell.left")];
+        rows[rows.indexOf(row.querySelector(".comparison-cell.left")) + (event.key === "ArrowDown" ? 1 : -1)]?.focus();
+      }
+      if (event.key === "ContextMenu" || (event.shiftKey && event.key === "F10")) {
+        event.preventDefault(); showContextMenu(event, pair, "left", refreshing);
+      }
+    });
+  } else row.append(
     createItemCell(pair.left, "left", depth, pair),
     createRowControl(pair, refreshing, refreshRoot),
     createItemCell(pair.right, "right", depth, pair),
   );
   fragment.append(row);
 
-  if (!refreshing && state.detailExpandedRows.has(pair.key)) {
+  if (state.mode !== "browse" && !refreshing && state.detailExpandedRows.has(pair.key)) {
     for (const side of ["left", "right"]) {
       const node = pair[side];
       if (node) {
@@ -1798,9 +1822,9 @@ function createComparisonWorkspace() {
   const tree = document.createElement("div");
   tree.className = "paired-tree";
   tree.setAttribute("role", "tree");
-  tree.setAttribute("aria-label", "XM Cloud structural comparison");
+  tree.setAttribute("aria-label", state.mode === "browse" ? "XM Cloud content tree" : "XM Cloud structural comparison");
 
-  if (!leftRoot || !rightRoot) {
+  if (!leftRoot || (state.mode !== "browse" && !rightRoot)) {
     const rootStatuses = document.createElement("div");
     rootStatuses.className = "root-statuses";
     rootStatuses.append(
@@ -1833,6 +1857,13 @@ function createComparisonWorkspace() {
 }
 
 function render() {
+  const browse = state.mode === "browse";
+  document.body.classList.toggle("browse", browse);
+  rightSelect.closest(".selector").hidden = browse;
+  swapButton.closest(".toolbar-actions").hidden = browse;
+  leftSelect.setAttribute("aria-label", browse ? "XM Cloud connection" : "Left XM Cloud connection");
+  leftLanguageSelect.setAttribute("aria-label", browse ? "Content language" : "Left content language");
+  document.getElementById("item-navigation").title = browse ? "Search the entire browsed connection." : "Search the left connection first, then the right if no match exists.";
   refreshLoadedItemIndexes();
   renderOptions(leftSelect, state.selection.leftConnectionId);
   renderOptions(rightSelect, state.selection.rightConnectionId);
@@ -1927,7 +1958,7 @@ function finishBackgroundLanguageSwitch() {
   const visit = (pair) => {
     if (visited.has(pair.key)) { return; }
     visited.add(pair.key);
-    if (state.detailExpandedRows.has(pair.key) || pair.key === state.selectedRowKey) {
+    if (state.mode !== "browse" && (state.detailExpandedRows.has(pair.key) || pair.key === state.selectedRowKey)) {
       for (const side of ["left", "right"]) {
         const node = pair[side];
         if (!node) { continue; }
@@ -2155,7 +2186,7 @@ function updateTreeConnections() {
     selectedRowKey: state.selectedRowKey,
     rootRowKey: state.rootRowKey,
   };
-  const canPrepare = sameConnections && languageChanged && previous.trees.left.root && previous.trees.right.root;
+  const canPrepare = sameConnections && languageChanged && previous.trees.left.root && (state.mode === "browse" || previous.trees.right.root);
   const returningToDisplayed = canPrepare && ["left", "right"].every((side) =>
     previous.trees[side].language === state.selection[`${side}Language`],
   );
@@ -2508,10 +2539,29 @@ window.addEventListener("message", (event) => {
     return;
   } else if (message?.type === "stateChanged") {
     if (JSON.stringify(state.selection) !== JSON.stringify(message.selection)) { clearItemLookupUi(); }
+    const mode = message.mode || "compare";
+    if (state.mode !== mode) {
+      closeContextMenu(); clearItemLookupUi();
+      state.languageSwitch = undefined; cancelLanguageRestoration();
+      state.selectedRowKey = undefined; state.rootRowKey = undefined;
+      state.expandedRows.clear(); state.detailExpandedRows.clear();
+      state.refreshOperations.clear(); state.subtreeLoadOperations.clear(); state.syncOperations.clear();
+    }
+    if (mode === "browse" && state.mode !== mode) clearNodeDetails(state.trees.left.root);
+    state.mode = mode;
     state.connections = message.connections;
     state.selection = message.selection;
     state.textNormalization = message.textNormalization || "none";
     updateTreeConnections();
+  } else if (message?.type === "browseLoadsCancelled") {
+    for (const tree of Object.values(state.trees)) {
+      tree.loading = false; clearNodeLoadingState(tree.root);
+      if (!tree.root) tree.error = "Loading cancelled.";
+    }
+    state.subtreeLoadOperations.clear();
+    state.refreshOperations.clear();
+    cancelLanguageRestoration();
+    if (state.languageSwitch) state.languageSwitch.failed = true;
   } else if (message?.type === "languagesLoading") {
     applyLanguagesMessage(message, "loading");
   } else if (message?.type === "languagesLoaded") {

@@ -75,3 +75,14 @@ test("ancestor updates honor removals and never reuse descendants for a replacem
   view.run("load('right', root, [cta]);");
   strictEqual(view.run("revealFavorite('right', favorite.path)"), false);
 });
+
+test("Browse reveals a favorite with one tree without requesting paired details", async () => {
+  const view = await webview();
+  view.run("state.mode = 'browse'; state.trees.right = emptyTreeState(undefined, 'en');");
+  strictEqual(view.run("revealFavorite('left', favorite.path)"), true);
+  strictEqual(view.run("state.selectedRowKey"), "left:ee");
+  strictEqual(view.run("state.expandedRows.has('left:bb')"), true);
+  strictEqual(view.run("state.expandedRows.has('left:cc')"), false);
+  strictEqual(view.messages.some((message) => message.type === "selectFieldDiffItem" ||
+    message.type === "loadItemDetails"), false);
+});

@@ -1,4 +1,4 @@
-/** Internal B18 foundation. UI activation waits for the single-tree Browse surface. */
+/** Endpoint shared by Browse and Compare content navigation. */
 export interface ContentEndpoint {
   readonly connectionId: string;
   readonly language: string;
@@ -32,7 +32,7 @@ function snapshot(value: ContentSessionState): ContentSessionState {
   return Object.freeze({ mode: "compare", left, right, languagesLocked: value.languagesLocked });
 }
 
-/** Own one per future content panel; no secrets, persistence, VS Code or network dependency. */
+/** Own one per content panel; no secrets, persistence, VS Code or network dependency. */
 export class ContentSession {
   private current: ContentSessionState | undefined;
   private revision = 0;
@@ -41,6 +41,12 @@ export class ContentSession {
   private readonly loads = new Map<string, AbortController>();
 
   get state(): ContentSessionState | undefined { return this.current; }
+
+  /** Fence asynchronous panel adapters that publish several progress messages. */
+  capture(): () => boolean {
+    const revision = this.revision;
+    return () => !this.closed && revision === this.revision;
+  }
 
   openConnection(source: ContentEndpoint): void {
     this.setState({ mode: "browse", source });

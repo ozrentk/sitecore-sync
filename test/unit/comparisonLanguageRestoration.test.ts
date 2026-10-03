@@ -10,7 +10,8 @@ async function webview() {
   const context = createContext({
     acquireVsCodeApi: () => ({ postMessage: (message: Record<string, unknown>) => messages.push(message) }),
     document: {
-      getElementById: () => ({ addEventListener: () => undefined, setAttribute: () => undefined, replaceChildren: (value: unknown) => replacements.push(value) }),
+      body: { classList: { toggle: () => undefined } },
+      getElementById: () => ({ closest: () => ({}), addEventListener: () => undefined, setAttribute: () => undefined, replaceChildren: (value: unknown) => replacements.push(value) }),
       addEventListener: () => undefined,
       querySelectorAll: () => [],
     },
