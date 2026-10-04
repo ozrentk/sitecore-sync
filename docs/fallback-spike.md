@@ -168,3 +168,31 @@ This round completed seven confirmed mutations and seven diagnostic reports (28 
 The previously timed-out reset was prepared again and confirmed in a subsequent run. All four probes completed: the original requested-locale cross-check remained empty with fallback false after explicit reset, while English retained its canonical URL marker. This completes that control under the observed field configuration.
 
 Version 0.31.0 adds the missing isolated-template and version-2 tooling. Its recipe and ownership boundaries have automated coverage; live fixture creation and the full Standard Values/shared/unversioned matrix remain pending an extension reload. The next run should create the fixture, collect the seeded default/source comparison, exercise local/defaulted override-empty-reset, and compare shared/unversioned edits across locales and versions 1 and 2. Do not report the new matrix as verified until those live observations complete.
+
+### Controlled Standard Values and field scopes (2026-10-04)
+
+After reloading 0.31.0, the isolated recipe completed all 14 journaled writes: a new template, section, five text fields, localized Standard Values and one content item. All subsequent writes targeted this new content item. Existing content and templates were not changed; nothing was published or deleted.
+
+The defaulted versioned field had a distinct requested-language Standard Value and an explicit English source value. Observed results in `en-NZ` were:
+
+| State | Exact locale | Original-locale fallback cross-check |
+| --- | --- | --- |
+| Untouched | Requested Standard Value; standard true, fallback false | Explicit English value; standard false, fallback true |
+| Local override | Local marker; both flags false | Local marker; both flags false |
+| Literal empty over override | Empty; both flags false | Empty; both flags false |
+| Reset | Requested Standard Value; standard true, fallback false | Explicit English value; standard false, fallback true |
+
+In this controlled configuration, a requested-language Standard Value did not prevent the fallback-enabled read from returning an explicit source-language value. A local override did, including an explicitly stored empty string. Reset restored the seeded behavior. This establishes the observed case, not every possible ordering of inherited defaults, source defaults and per-language rules.
+
+The content item then received `en-NZ` version 2. Exact reads compared NZ versions 1 and 2 with Australian and English version 1 after each scope change:
+
+- Updating the shared field through NZ version 2 changed all four observed locale/version combinations.
+- Updating the unversioned field through NZ version 2 changed both NZ versions; Australian and English values stayed unchanged.
+- Updating the versioned field through NZ version 2 changed only that version; NZ version 1 and the other locales stayed unchanged.
+- Writing an explicit empty unversioned value cleared both NZ versions and suppressed the latest-version fallback cross-check, despite a populated English source. Reset left both exact NZ values empty but restored the English value with fallback true in the cross-check.
+
+The disabled versioned control remained empty with fallback false throughout all seven diagnostics, while enabled fields in the same responses resolved source values. Shared values never acquired a fallback flag in these observations.
+
+The round completed ten confirmed operations (23 individual writes), seven diagnostic reports with all 28 item probes complete, and 24 explicit-version reads. A local verification script asserted the expected values, flags, scopes of effect, returned versions and completed operation statuses against saved reports. Raw reports, IDs and the script remain outside Git. Final fixture state retains the shared marker across locales, the versioned NZ marker only in version 2, the reset defaulted field, and the reset unversioned NZ field with its English source intact.
+
+This completes the planned controlled Standard Values override/empty/reset and shared/unversioned cross-version checks. Per-language field-rule overrides, effective environment switches, and broader default/inheritance combinations remain unverified. Historical reads here were exact reads; fallback-enabled historical-version behavior was not tested. Source-language identity is still not generally proven by value equality, and exact empty values still cannot distinguish explicit empty from reset. These findings support using Sitecore's original-locale effective read with explicit unknown provenance, while preserving exact stored-locale comparison and transfer behavior. No resolver, UI or publishing behavior changed in this evidence-only follow-up.
