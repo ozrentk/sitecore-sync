@@ -112,7 +112,7 @@ Eight isolated test items were created through confirmed MCP plans: four page co
 - A local requested-language marker is returned without a fallback flag. A local empty control with no populated source is empty without a fallback flag.
 - Temporarily writing a literal empty English source on both source-enabled controls produces an empty requested/intermediate cross-check value **with** `containsFallbackValue: true`. Restoring the English markers restores those cross-check values. Exact English reads verified both markers restored at version 1. An empty fallback-marked value therefore cannot be treated as a usable nonempty value.
 
-Schema introspection remains unavailable. Configuration traversal is bounded and partial; effective environment switches and mixed-field source rules are not established. These observations do not complete B04's implementation gate.
+Schema introspection remains unavailable. Configuration traversal is bounded and partial; effective environment switches are not established. Later sections record controlled mixed-field observations. These observations do not complete B04's implementation gate.
 
 Version 0.30.0 adds previewed first-language-version creation and explicit field reset to support the next experiments. The version preview validates its mutation contract using `@skip` before allowing execution. The version-creation contract and field-reset operation have now also been exercised on the development environment through confirmed MCP plans; see the following results.
 
@@ -139,4 +139,25 @@ After the reset stage, both controls received `en-AU` version 1 and distinct int
 
 The run completed 12 confirmed mutations (four version creations, six literal writes and two resets) and ten diagnostic reports, with all 40 item probes complete. Final exact reads verified the English marker and version 1 unchanged on each control. The two test items now retain version 1 in `en`, `en-NZ` and `en-AU`; requested-language fields are reset and intermediate-language markers remain available for follow-up. No publishing, deletion, template edit or language-configuration edit occurred.
 
-Remaining evidence includes mixed field sources on a single item, shared/unversioned and populated Standard Value behavior, intermediate explicit-empty handling, per-language field-rule overrides and effective environment switches. Full schema introspection remains unavailable despite successful validation/execution of the narrow version mutation. Partial configuration coverage and independent read times remain limitations. No fallback resolver or comparison behavior was changed by this evidence-only follow-up.
+At this stage the remaining evidence included mixed field sources, shared/unversioned and populated Standard Value behavior, intermediate explicit-empty handling, per-language field-rule overrides and effective environment switches. Subsequent checks are recorded below. Full schema introspection remains unavailable despite successful validation/execution of the narrow version mutation. Partial configuration coverage and independent read times remain limitations. No fallback resolver or comparison behavior was changed by this evidence-only follow-up.
+
+
+### Mixed-field and intermediate-empty checks (2026-10-04)
+
+Using the isolated page control and unchanged field definitions, an original `en-NZ` fallback-enabled read simultaneously returned a local description (fallback false), an Australian title (fallback true), and English keywords (fallback true). Distinct markers and exact candidate reads support independent per-field resolution in this controlled case. The three field definitions expose enabled shared language-fallback settings.
+
+Writing literal empty values over the Australian title/text markers on the isolated page and component made each original `en-NZ` cross-check return empty with `containsFallbackValue: true`, despite populated English sources. Thus the observed chain stops at an explicitly empty intermediate value; skipping all empty candidates would produce an incorrect result.
+
+Read-only scope observations found shared Standard Value fields with identical values across the three locales and no fallback flag. The page's unversioned fields were system fields; this is not a controlled test of unversioned content across item versions. Existing versioned defaults also showed a cross-check value with both `containsFallbackValue` and `containsStandardValue` true. Another default changed from empty in an exact read to populated/Standard Value in a cross-check without a fallback flag. Preserve the raw flags and observation mode; they are not mutually exclusive categories or sufficient source-language evidence.
+
+The available MCP mutation surface intentionally permits only existing versioned content text fields and creation of the first local version. It cannot create isolated test templates, alter shared/unversioned fields, or create/read a second version. A controlled Standard Values precedence/override matrix and unversioned mutation matrix therefore require additional fixture support; read-only observations must not be reported as completion of those checks.
+
+
+Resetting the intermediate title/text fields restored the original English markers on both page and component. The Australian test markers are now removed; the fields remain reset. The page retains a local requested-language description and English keyword marker for subsequent mixed-field checks.
+
+For the disabled-field comparison, `canonicalUrl` has empty shared and per-language fallback settings in its metadata-locale definition, unlike the enabled fields. A distinct English marker was written only on the isolated content item. Exact `en-NZ`/`en-AU` reads and the original `en-NZ` cross-check stayed empty with fallback false, while enabled fields on the same response continued returning their source markers. Effective environment/per-language switches remain independently unknown; this is observed behavior under the current configuration, not a claim that an absent setting always means disabled.
+
+
+A further requested-language reset was previewed to rule out an explicit empty local override in the disabled-field control. Its confirmation timed out before the pre-write journal checkpoint; the plan has no operation record and no write was retried. This final control remains pending, so the disabled-field comparison is observed evidence rather than the completed reset-controlled matrix.
+
+This round completed seven confirmed mutations and seven diagnostic reports (28 item probes, all complete). Source title/text markers remained populated in English throughout the diagnostic observations. Only the two isolated test items were modified; nothing was published or deleted. Shared/unversioned mutations and template changes were not attempted. Raw evidence and operation IDs remain in local reports outside Git. This follow-up changes documentation only and requires no new extension build.
