@@ -4,6 +4,7 @@ import { McpService, type McpOperation } from "../../src/mcp/service";
 import { toolSchemas } from "../../src/mcp/tools";
 import type { AuthoringItemDetails, AuthoringItemField } from "../../src/sitecore/authoringClient";
 import { testConnection } from "./sitecoreClientTestHelpers";
+import { scopeFields, type ScopeFixtureManifest } from "../../src/sitecore/scopeFixtures";
 
 const itemId = "00000000-0000-0000-0000-000000000001";
 const fieldId = "00000000-0000-0000-0000-000000000002";
@@ -22,12 +23,13 @@ function fixture() {
     addItemVersion: async () => {
       strictEqual(records.at(-1)?.status, "outcome-unknown"); writes++;
       if (fail) { throw new Error("private-credential raw server error"); }
-      details = { ...details, version: 1 }; return details;
+      details = { ...details, version: details.version + 1 }; return details;
     },
-    resetItemField: async () => {
+    resetItemField: async (_connection, _secret, input) => {
       strictEqual(records.at(-1)?.status, "outcome-unknown"); writes++;
       if (fail) { throw new Error("private-credential raw server error"); }
-      details = { ...details, fields: [{ ...details.fields[0]!, value: "Standard value", containsStandardValue: true }] }; return details;
+      details = { ...details, fields: details.fields.map(field => field.name === input.fieldName
+        ? { ...field, value: "Standard value", containsStandardValue: true } : field) }; return details;
     },
     searchItemsByName: async () => ({ items: [], hasMore: false, totalCount: 0 }),
     collectFallbackDiagnostic: async () => '{}',
@@ -39,12 +41,14 @@ function fixture() {
     updateItemFields: async (_connection, _secret, input) => {
       strictEqual(records.at(-1)?.status, "outcome-unknown"); writes++;
       if (fail) { throw new Error("private-credential raw server error"); }
-      details = { ...details, fields: [{ ...details.fields[0]!, value: input.fields.Title! }] }; return details;
+      details = { ...details, fields: details.fields.map(field => input.fields[field.name] === undefined
+        ? field : { ...field, value: input.fields[field.name]!, containsStandardValue: false }) }; return details;
     },
   }, [testConnection], { confirm: async () => confirmed, loadJournal: () => records,
     saveJournal: async value => { if (failSave) { throw new Error("storage failed"); } records = structuredClone(value) as McpOperation[]; } });
   const call = (name: string, input: unknown = {}) => service.call(name, input, new AbortController().signal);
   return { service, call, records: () => records, reads: () => reads, writes: () => writes,
+    seedJournal: (value: McpOperation[]) => { records = structuredClone(value); },
     mutate: (change: Partial<AuthoringItemDetails>) => { details = { ...details, ...change }; },
     changeValue: (value: string) => { details = { ...details, fields: [{ ...details.fields[0]!, value }] }; },
     changeField: (change: Partial<AuthoringItemField>) => { details = { ...details, fields: [{ ...details.fields[0]!, ...change }] }; },
@@ -166,4 +170,64 @@ test("MCP reset and version-creation failures retain unknown outcomes without re
     await rejects(f.call("execute_plan", { planId: plan.planId }), /Inspect list_operations/u);
     strictEqual(f.records()[0]!.status, "outcome-unknown"); strictEqual(f.writes(), 1);
   }
+});
+
+
+const scopeFixtureId = "00000000-0000-4000-8000-000000000030";
+function scopeRuntime() {
+  const f = fixture();
+  const fields: AuthoringItemField[] = scopeFields.map((definition, index) => ({
+    fieldId: (index + 10).toString(16).padStart(32, "0"), name: definition.name, label: definition.name,
+    scope: definition.scope, value: "old", type: "Single-Line Text", typeKey: "single-line text", textual: true,
+    isStandardTemplate: false, containsFallbackValue: false, containsInheritedValue: false, containsStandardValue: false,
+    sortOrder: 0, sectionName: "Fixture fields", sectionSortOrder: 0,
+  }));
+  const manifest: ScopeFixtureManifest = { itemId, path: "/sitecore/content/Test/xm-fallback-scope-123456abcdef",
+    templateId: itemId, templatePath: "/sitecore/templates/User Defined/xm-fallback-scope-123456abcdef",
+    languages: ["en-NZ", "en"], fields: fields.map(field => ({ fieldId: field.fieldId, name: field.name, scope: field.scope })) };
+  const record: McpOperation = { id: scopeFixtureId, connectionId: testConnection.id, serverUrl: testConnection.serverUrl,
+    kind: "create-scope-fixture", status: "completed", startedAt: new Date().toISOString(), targets: [], scopeFixture: manifest };
+  f.seedJournal([record]); f.mutate({ path: manifest.path, fields });
+  return { ...f, fields, record };
+}
+
+test("scope edits require completed ownership and do not open general shared/system editing", async () => {
+  const f = scopeRuntime(); const shared = f.fields.find(field => field.scope === "SHARED")!;
+  await rejects(f.call("preview_field_update", { ...update, fieldId: shared.fieldId }), /existing local version/u);
+  const input = { connectionId: testConnection.id, fixtureId: scopeFixtureId, language: "en", version: 1, fieldId: shared.fieldId, value: "new" };
+  const plan = await f.call("preview_scope_field", input) as { planId: string; preview: { scope: string } };
+  strictEqual(plan.preview.scope, "SHARED");
+  await rejects(f.call("execute_plan", { planId: plan.planId }), /Enable MCP/u);
+  f.service.enableMutations(testConnection.id);
+  const result = await f.call("execute_plan", { planId: plan.planId }) as McpOperation;
+  strictEqual(result.status, "completed"); strictEqual(f.writes(), 1);
+  await rejects(f.call("preview_scope_field", { ...input, fieldId: itemId }), /not part/u);
+  f.seedJournal([{ ...f.record, status: "outcome-unknown" }]);
+  await rejects(f.call("preview_scope_field", input), /completed isolated/u);
+  f.seedJournal([{ ...f.record, serverUrl: "https://other.example.test" }]);
+  await rejects(f.call("preview_scope_field", input), /completed isolated/u);
+});
+
+test("scope field reset and version 2 are bounded and recheck scope after preview", async () => {
+  const f = scopeRuntime(); f.service.enableMutations(testConnection.id);
+  const input = { connectionId: testConnection.id, fixtureId: scopeFixtureId, language: "en" };
+  const reset = await f.call("preview_scope_field", { ...input, version: 1, fieldId: f.fields[4]!.fieldId, reset: true }) as { planId: string };
+  strictEqual((await f.call("execute_plan", { planId: reset.planId }) as McpOperation).status, "completed");
+  const version = await f.call("preview_scope_version", input) as { planId: string };
+  strictEqual((await f.call("execute_plan", { planId: version.planId }) as McpOperation).targets[0]!.version, 2);
+  await rejects(f.call("preview_scope_version", input), /version 2 only/u);
+  const changed = scopeRuntime(); changed.service.enableMutations(testConnection.id);
+  const plan = await changed.call("preview_scope_field", { ...input, version: 1, fieldId: changed.fields[4]!.fieldId, value: "new" }) as { planId: string };
+  changed.mutate({ fields: changed.fields.map(field => ({ ...field, scope: "SHARED" })) });
+  await rejects(changed.call("execute_plan", { planId: plan.planId })); strictEqual(changed.writes(), 0);
+  strictEqual(changed.records().at(-1)!.status, "stopped");
+});
+
+test("MCP validates scope arguments and verifies an explicitly requested read version", async () => {
+  strictEqual(toolSchemas.preview_scope_field.safeParse({ connectionId: "x", fixtureId: scopeFixtureId, language: "en",
+    version: 1, fieldId, value: "value", reset: true }).success, false);
+  strictEqual(toolSchemas.preview_scope_fixture.safeParse({ connectionId: "x", parent: itemId, languages: ["en-NZ", "fr"] }).success, false);
+  strictEqual(toolSchemas.read_item.safeParse({ connectionId: "x", item: itemId, language: "en", version: 0 }).success, false);
+  const f = fixture();
+  await rejects(f.call("read_item", { connectionId: testConnection.id, item: itemId, language: "en", version: 2 }), /requested version/u);
 });

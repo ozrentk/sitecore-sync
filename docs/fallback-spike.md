@@ -161,3 +161,10 @@ For the disabled-field comparison, `canonicalUrl` has empty shared and per-langu
 A further requested-language reset was previewed to rule out an explicit empty local override in the disabled-field control. Its confirmation timed out before the pre-write journal checkpoint; the plan has no operation record and no write was retried. This final control remains pending, so the disabled-field comparison is observed evidence rather than the completed reset-controlled matrix.
 
 This round completed seven confirmed mutations and seven diagnostic reports (28 item probes, all complete). Source title/text markers remained populated in English throughout the diagnostic observations. Only the two isolated test items were modified; nothing was published or deleted. Shared/unversioned mutations and template changes were not attempted. Raw evidence and operation IDs remain in local reports outside Git. This follow-up changes documentation only and requires no new extension build.
+
+
+### Disabled-field control completed; isolated scope tooling (0.31.0)
+
+The previously timed-out reset was prepared again and confirmed in a subsequent run. All four probes completed: the original requested-locale cross-check remained empty with fallback false after explicit reset, while English retained its canonical URL marker. This completes that control under the observed field configuration.
+
+Version 0.31.0 adds the missing isolated-template and version-2 tooling. Its recipe and ownership boundaries have automated coverage; live fixture creation and the full Standard Values/shared/unversioned matrix remain pending an extension reload. The next run should create the fixture, collect the seeded default/source comparison, exercise local/defaulted override-empty-reset, and compare shared/unversioned edits across locales and versions 1 and 2. Do not report the new matrix as verified until those live observations complete.

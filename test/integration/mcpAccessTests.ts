@@ -55,6 +55,10 @@ export const mcpAccessTests: readonly IntegrationTest[] = [{
       const resetPlan = await call("preview_field_reset", { connectionId: connection.id, item: itemId, language: "en", version: 1, fieldId: itemId }) as { planId: string };
       await rejects(call("execute_plan", { planId: resetPlan.planId }), /cancelled/u);
       strictEqual(confirm.mock.callCount(), 2);
+      const explicitVersion = await call("read_item", { connectionId: connection.id, item: itemId, language: "en", version: 1 }) as AuthoringItemDetails;
+      strictEqual(explicitVersion.version, 1);
+      await rejects(call("preview_scope_version", { connectionId: connection.id,
+        fixtureId: "00000000-0000-4000-8000-000000000001", language: "en" }), /completed isolated/u);
       await manager.stop(); await rejects(call("list_connections", {}));
       await manager.start(); connections = await call("list_connections", {}) as { mutationsEnabled: boolean }[];
       strictEqual(connections[0]!.mutationsEnabled, false);
