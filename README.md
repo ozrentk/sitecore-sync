@@ -367,7 +367,7 @@ Next run **XM Cloud Sync: Diagnose Fallback Test Items**, choose the recorded ru
 Fallback test creation and diagnostic GUID/locale textboxes stay open when focus moves to another window, allowing IDs to be copied and pasted. Press Escape to cancel.
 
 
-## Local MCP access (0.30.0)
+## Local MCP access (0.31.0)
 
 The extension includes a local MCP server so an agent can find Sitecore items and run diagnostics without manual GUID copying. It requires a local, trusted VS Code window and Node.js 20.11 or newer on the MCP client's PATH. Remote extension hosts and browser-only clients are not supported by this local bridge.
 
@@ -388,3 +388,10 @@ Requests are limited to four concurrent calls, 64 KiB input, 8 MiB output and th
 The shipped `out/mcpServer.js` is bundled with the official MCP SDK; clients do not need to install npm dependencies. Starting access copies the bundled server to a stable private launcher path and displays that path in the setup document. One window owns an endpoint for a given workspace/profile. Stop access in the owning window before starting another. An agent's current tool list may require reconnecting or a new session to discover the configured server.
 
 `preview_language_version` creates only the first version in a configured locale with no local version. It validates the server mutation contract using a skipped operation before offering a plan, then rechecks the exact item snapshot before execution. `preview_field_reset` removes a local text-field override using Sitecore reset semantics; unlike a literal empty update, its result can be a Standard Value. Reset acknowledgement and exact readback do not establish effective fallback provenance; collect a fresh diagnostic. Both tools use the same session opt-in, VS Code confirmation and durable operation journal. Reload the updated extension, start MCP access and enable mutations again to expose new tools.
+
+
+For the remaining controlled scope tests, use `preview_scope_fixture` with a content parent and two or three configured locales (requested first, `en` last), then confirm `execute_plan`. It creates a uniquely named template beneath `/sitecore/templates/User Defined`, a section, five Single-Line Text fields, localized Standard Values and one new content item. Enabled/disabled versioned fields, a defaulted field, a shared field and an unversioned field have distinct seed values. The requested locale's default differs from the explicit English source. Existing templates are never edited. Each of the up to 14 mutations is checkpointed; failures retain partial paths/IDs and are never retried or deleted automatically. Inspect `list_operations` after any failure.
+
+A completed creation operation includes a `scopeFixture` manifest. Pass that operation ID as `fixtureId` to `preview_scope_field` to update or reset only its recorded text fields, or to `preview_scope_version` to add version 2 in one of its recorded locales. These still require session opt-in and native confirmation. Shared-field previews explicitly affect all languages/versions; unversioned previews affect every version of the selected locale. Only the latest local version can be edited. Identity, template, field IDs/types/scopes, unique names and stale fingerprints are checked again before writes. Ordinary field tools retain their versioned-content restrictions, and no generic template/system editing is exposed.
+
+`read_item` accepts an optional positive `version` for exact historical reads, allowing version 1 and 2 to be compared without modifying either. Fixture creation verifies scopes and the requested Standard Value before recording a completed manifest. Failed or incomplete fixtures cannot gain editing privileges. Reload the updated extension and restart MCP access to expose these tools; no MCP client configuration change is needed.

@@ -40,7 +40,7 @@ test("MCP SDK advertises tools and validates arguments without exposing internal
   const client = new Client({ name: "test", version: "1" }); const [left, right] = InMemoryTransport.createLinkedPair();
   try {
     await server.connect(right); await client.connect(left);
-    strictEqual((await client.listTools()).tools.length, 12);
+    strictEqual((await client.listTools()).tools.length, 15);
     const invalid = await client.callTool({ name: "read_item", arguments: { connectionId: "x", item: "../../file", language: "en" } });
     strictEqual(invalid.isError, true); strictEqual(calls, 0);
     const failed = await client.callTool({ name: "list_connections", arguments: {} });

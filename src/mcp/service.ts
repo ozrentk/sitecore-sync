@@ -5,16 +5,20 @@ import type { XmCloudConnection } from "../connections/connection";
 import type { AuthoringContentClient, AuthoringItemDetails, AuthoringItemField } from "../sitecore/authoringClient";
 import { createFallbackFixtures, fixtureGuid, planFallbackFixtures, type FallbackFixture } from "../sitecore/fallbackFixtures";
 import { serializeFallbackDiagnostic } from "../sitecore/fallbackDiagnostics";
+import { prepareScopeFixture, createScopeFixture, assertScopeItem, scopeFields, scopeSourceValues, type ScopeFixtureManifest, type ScopeFixturePlan } from "../sitecore/scopeFixtures";
 import { fieldStateFingerprint } from "../transfers/transferTypes";
 import { isMcpToolName, McpAccessError, toolSchemas } from "./tools";
 
 type Connections = Pick<ConnectionStore, "get" | "listVerifiedSites" | "getClientSecret">;
 type Client = Pick<AuthoringContentClient, "loadItem" | "loadLanguages" | "searchItemsByName" | "collectFallbackDiagnostic" | "createItem" | "updateItemFields" | "resetItemField" | "validateAddItemVersion" | "addItemVersion">;
 const operationSchema = z.object({ id: z.string().uuid(), connectionId: z.string(), serverUrl: z.string(),
-  kind: z.enum(["create-fixtures", "update-field", "reset-field", "create-version"]), startedAt: z.string(),
+  kind: z.enum(["create-fixtures", "update-field", "reset-field", "create-version", "create-scope-fixture"]), startedAt: z.string(),
   status: z.enum(["prepared", "outcome-unknown", "completed", "stopped"]),
   targets: z.array(z.object({ path: z.string(), itemId: z.string().optional(), language: z.string(),
-    status: z.enum(["planned", "outcome-unknown", "created", "updated", "reset", "version-created"]), fieldId: z.string().optional(), version: z.number().int().positive().optional() }).strict()).max(4),
+    status: z.enum(["planned", "outcome-unknown", "created", "updated", "reset", "version-created"]), fieldId: z.string().optional(), version: z.number().int().positive().optional() }).strict()).max(20),
+  scopeFixture: z.object({ templateId: z.string(), templatePath: z.string(), itemId: z.string(), path: z.string(),
+    languages: z.array(z.string()).min(2).max(3), fields: z.array(z.object({ fieldId: z.string(), name: z.string(),
+      scope: z.enum(["VERSIONED", "SHARED", "UNVERSIONED"]) }).strict()).length(5) }).strict().optional(),
 }).strict();
 export type McpOperation = z.infer<typeof operationSchema>;
 export interface McpServiceHost {
@@ -28,8 +32,9 @@ interface Plan {
   readonly expiresAt: number;
   readonly preview: unknown;
   readonly mutation: { kind: "create-fixtures"; fixtures: FallbackFixture[] }
-    | { kind: "update-field" | "reset-field"; itemId: string; path: string; language: string; version: number; fieldId: string; value: string; fingerprint: string }
-    | { kind: "create-version"; itemId: string; path: string; language: string; fingerprint: string };
+    | { kind: "update-field" | "reset-field"; itemId: string; path: string; language: string; version: number; fieldId: string; value: string; fingerprint: string; scopeFixtureId?: string }
+    | { kind: "create-version"; itemId: string; path: string; language: string; fingerprint: string; scopeFixtureId?: string }
+    | { kind: "create-scope-fixture"; fixture: ScopeFixturePlan };
 }
 const normalized = (value: string): string => value.replace(/[{}-]/gu, "").toLowerCase();
 const locate = (value: string): { path: string } | { itemId: string } => value.startsWith("/") ? { path: value } : { itemId: fixtureGuid(value) };
@@ -76,7 +81,11 @@ export class McpService {
       }
       case "read_item": {
         const value = toolSchemas.read_item.parse(input);
-        result = await this.client.loadItem(connection, secret, locate(value.item), value.language, undefined, signal); break;
+        result = await this.client.loadItem(connection, secret, locate(value.item), value.language, value.version, signal);
+        if (value.version !== undefined && (result as AuthoringItemDetails).version !== value.version) {
+          throw new McpAccessError("Authoring API did not return the requested version.");
+        }
+        break;
       }
       case "collect_fallback_diagnostic": {
         const value = toolSchemas.collect_fallback_diagnostic.parse(input);
@@ -99,6 +108,51 @@ export class McpService {
           { connection: connection.name, serverUrl: connection.serverUrl, parent: parent.path, template: example.template,
             field: field.name, languages: value.languages, fixtures,
             notice: "Creates four new children, preserving template defaults. No publishing. Controls do not cover mixed versions or reset semantics." }); break;
+      }
+      case "preview_scope_fixture": {
+        const value = toolSchemas.preview_scope_fixture.parse(input);
+        const configured = await this.client.loadLanguages(connection, secret, signal);
+        if (value.languages.some(language => !configured.some(candidate => candidate.name.toLowerCase() === language.toLowerCase()))) {
+          throw new McpAccessError("Choose configured fixture languages.");
+        }
+        const fixture = await prepareScopeFixture(this.client, connection, secret, locate(value.parent), value.languages,
+          randomUUID().replace(/-/gu, "").slice(0, 12), signal);
+        await this.client.validateAddItemVersion(connection, secret, { itemId: fixture.parentId, language: value.languages[0]! }, signal);
+        result = this.addPlan(connection.id, { kind: "create-scope-fixture", fixture },
+          { connection: connection.name, serverUrl: connection.serverUrl, templatePath: fixture.templatePath,
+            contentPath: `${fixture.parentPath}/${fixture.name}`, languages: value.languages, fields: scopeFields, sourceValues: scopeSourceValues,
+            defaults: { en: "Source standard default", [value.languages[0]!]: "Requested standard default" },
+            notice: "Creates a new template, section, five text fields, localized Standard Values and one new content item. Up to 14 journaled writes. No existing template changes, publishing, deletion or automatic retry." }); break;
+      }
+      case "preview_scope_field": {
+        const value = toolSchemas.preview_scope_field.parse(input);
+        const fixture = this.scopeFixture(connection, value.fixtureId);
+        const item = await this.client.loadItem(connection, secret, { itemId: fixture.itemId }, value.language, undefined, signal);
+        const field = this.scopeField(connection, value.fixtureId, item, value.fieldId);
+        if (item.version !== value.version || item.language.toLowerCase() !== value.language.toLowerCase()) {
+          throw new McpAccessError("Read the latest fixture locale/version before preparing a change.");
+        }
+        result = this.addPlan(connection.id, { kind: value.reset ? "reset-field" : "update-field", scopeFixtureId: value.fixtureId,
+          itemId: item.itemId, path: item.path, language: value.language, version: value.version,
+          fieldId: field.fieldId, value: value.value ?? "", fingerprint: fieldStateFingerprint(item, field) },
+          { connection: connection.name, serverUrl: connection.serverUrl, path: item.path, language: value.language,
+            version: value.version, field: field.name, scope: field.scope, previousValue: field.value,
+            ...(value.reset ? { reset: true } : { newValue: value.value }),
+            notice: field.scope === "SHARED" ? "Changes this fixture field in ALL languages and versions."
+              : field.scope === "UNVERSIONED" ? "Changes this fixture field in ALL versions of the selected language."
+                : "Changes this fixture field in the selected language/version." }); break;
+      }
+      case "preview_scope_version": {
+        const value = toolSchemas.preview_scope_version.parse(input);
+        const fixture = this.scopeFixture(connection, value.fixtureId);
+        const item = await this.client.loadItem(connection, secret, { itemId: fixture.itemId }, value.language, undefined, signal);
+        assertScopeItem(fixture, item);
+        if (item.version !== 1 || item.language.toLowerCase() !== value.language.toLowerCase()) { throw new McpAccessError("This fixture tool creates version 2 only."); }
+        await this.client.validateAddItemVersion(connection, secret, { itemId: item.itemId, language: value.language }, signal);
+        result = this.addPlan(connection.id, { kind: "create-version", scopeFixtureId: value.fixtureId,
+          itemId: item.itemId, path: item.path, language: value.language, fingerprint: itemFingerprint(item) },
+          { connection: connection.name, serverUrl: connection.serverUrl, path: item.path, language: value.language,
+            notice: "Creates version 2 on this isolated fixture. Sitecore controls copied/default values. Nothing is published." }); break;
       }
       case "preview_language_version": {
         const value = toolSchemas.preview_language_version.parse(input);
@@ -168,6 +222,23 @@ export class McpService {
       throw new McpAccessError("Choose a content item with no existing local version in this language.");
     }
   }
+  private scopeFixture(connection: XmCloudConnection, id: string): ScopeFixtureManifest {
+    const record = this.journal().find(candidate => candidate.id === id && candidate.connectionId === connection.id
+      && candidate.serverUrl === connection.serverUrl && candidate.kind === "create-scope-fixture" && candidate.status === "completed");
+    const fixture = record?.scopeFixture;
+    if (!fixture || !/^\/sitecore\/templates\/User Defined\/xm-fallback-scope-[a-f\d]{12}$/u.test(fixture.templatePath)
+      || !/^\/sitecore\/content\/.+\/xm-fallback-scope-[a-f\d]{12}$/u.test(fixture.path)
+      || scopeFields.some(expected => fixture.fields.filter(field => field.name === expected.name && field.scope === expected.scope).length !== 1)) {
+      throw new McpAccessError("Choose a completed isolated scope fixture on this connection.");
+    }
+    return fixture;
+  }
+  private scopeField(connection: XmCloudConnection, fixtureId: string, item: AuthoringItemDetails, fieldId: string): AuthoringItemField {
+    const fixture = this.scopeFixture(connection, fixtureId);
+    assertScopeItem(fixture, item);
+    if (!fixture.fields.some(field => normalized(field.fieldId) === normalized(fieldId))) { throw new McpAccessError("Field is not part of this isolated fixture."); }
+    return item.fields.find(field => normalized(field.fieldId) === normalized(fieldId))!;
+  }
   private addPlan(connectionId: string, mutation: Plan["mutation"], preview: unknown): unknown {
     for (const [id, plan] of this.plans) { if (plan.expiresAt < Date.now()) { this.plans.delete(id); } }
     if (this.plans.size >= 20) { throw new McpAccessError("Too many pending plans. Execute a plan or wait for expiry."); }
@@ -199,14 +270,23 @@ export class McpService {
       const mutation = plan.mutation;
       const record: McpOperation = { id, connectionId: connection.id, serverUrl: connection.serverUrl,
         kind: mutation.kind, startedAt: new Date().toISOString(), status: "prepared",
-        targets: mutation.kind === "create-fixtures" ? mutation.fixtures.map(fixture => ({ path: fixture.expectedPath,
+        targets: mutation.kind === "create-scope-fixture" ? [] : mutation.kind === "create-fixtures" ? mutation.fixtures.map(fixture => ({ path: fixture.expectedPath,
           language: fixture.input.language, status: "planned" })) : [{ path: mutation.path, itemId: mutation.itemId,
           language: mutation.language, ...("fieldId" in mutation ? { fieldId: mutation.fieldId } : {}), status: "planned" }] };
       records.push(record);
       const checkpoint = (): Promise<void> => this.host.saveJournal(records);
       await checkpoint();
       try {
-        if (mutation.kind === "create-fixtures") {
+        if (mutation.kind === "create-scope-fixture") {
+          const fresh = await prepareScopeFixture(this.client, connection, secret, { itemId: mutation.fixture.parentId },
+            mutation.fixture.languages, mutation.fixture.name.slice(-12), signal);
+          if (JSON.stringify(fresh) !== JSON.stringify(mutation.fixture)) { throw new McpAccessError("Fixture parent or metadata changed after preview."); }
+          record.scopeFixture = await createScopeFixture(mutation.fixture, this.client, connection, secret, async steps => {
+            this.connection(connection.id); signal.throwIfAborted();
+            record.targets = steps.map(step => ({ ...step }));
+            record.status = "outcome-unknown"; await checkpoint();
+          }, signal);
+        } else if (mutation.kind === "create-fixtures") {
           await createFallbackFixtures(mutation.fixtures, input => {
             this.connection(connection.id); signal.throwIfAborted();
             return this.client.createItem(connection, secret, input, signal);
@@ -218,19 +298,23 @@ export class McpService {
           }, signal);
         } else if (mutation.kind === "create-version") {
           const current = await this.client.loadItem(connection, secret, { itemId: mutation.itemId }, mutation.language, undefined, signal);
-          this.missingVersion(current, mutation.language);
+          if (mutation.scopeFixtureId) {
+            assertScopeItem(this.scopeFixture(connection, mutation.scopeFixtureId), current);
+            if (current.version !== 1) { throw new McpAccessError("Fixture version changed after preview."); }
+          } else { this.missingVersion(current, mutation.language); }
           if (itemFingerprint(current) !== mutation.fingerprint) { throw new McpAccessError("Item changed after preview. Prepare a fresh preview."); }
           record.status = "outcome-unknown"; record.targets[0]!.status = "outcome-unknown"; await checkpoint();
           signal.throwIfAborted(); this.connection(connection.id);
           const result = await this.client.addItemVersion(connection, secret, { itemId: mutation.itemId, language: mutation.language }, signal);
           if (normalized(result.itemId) !== normalized(mutation.itemId) || result.path !== mutation.path
-            || result.language.toLowerCase() !== mutation.language.toLowerCase() || result.version !== 1) {
+            || result.language.toLowerCase() !== mutation.language.toLowerCase() || result.version !== (mutation.scopeFixtureId ? 2 : 1)) {
             throw new Error("Version creation verification failed");
           }
           record.targets[0]!.status = "version-created"; record.targets[0]!.version = result.version;
         } else {
           const current = await this.client.loadItem(connection, secret, { itemId: mutation.itemId }, mutation.language, undefined, signal);
-          const field = this.editableField(current, mutation.fieldId);
+          const field = mutation.scopeFixtureId ? this.scopeField(connection, mutation.scopeFixtureId, current, mutation.fieldId)
+            : this.editableField(current, mutation.fieldId);
           if (fieldStateFingerprint(current, field) !== mutation.fingerprint || current.path !== mutation.path) {
             throw new McpAccessError("Item changed after preview. No update was sent; prepare a fresh preview.");
           }
@@ -241,7 +325,8 @@ export class McpService {
               language: mutation.language, version: mutation.version, fieldName: field.name }, signal)
             : await this.client.updateItemFields(connection, secret, { itemId: mutation.itemId,
               language: mutation.language, version: mutation.version, fields: { [field.name]: mutation.value } }, signal);
-          const updated = this.editableField(result, mutation.fieldId);
+          const updated = mutation.scopeFixtureId ? this.scopeField(connection, mutation.scopeFixtureId, result, mutation.fieldId)
+            : this.editableField(result, mutation.fieldId);
           if (normalized(result.itemId) !== normalized(mutation.itemId) || result.language.toLowerCase() !== mutation.language.toLowerCase()
             || result.version !== mutation.version || result.path !== mutation.path
             || (mutation.kind === "update-field" && updated.value !== mutation.value)) { throw new Error("Write verification failed"); }

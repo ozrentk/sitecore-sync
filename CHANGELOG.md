@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.31.0
+
+- Add confirmed isolated fallback scope fixtures with their own template, five text fields, localized Standard Values and content item.
+- Add journal-bound fixture field edits/resets and second-version creation without widening general shared/system editing.
+- Support explicit-version MCP item reads for controlled cross-version comparisons.
+
 ## 0.30.0
 
 - Add previewed MCP creation of the first local language version and explicit content-field reset for controlled fallback testing.
