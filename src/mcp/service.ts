@@ -7,12 +7,13 @@ import { createFallbackFixtures, fixtureGuid, planFallbackFixtures, type Fallbac
 import { serializeFallbackDiagnostic } from "../sitecore/fallbackDiagnostics";
 import { prepareScopeFixture, createScopeFixture, assertScopeItem, scopeFields, scopeSourceValues, type ScopeFixtureManifest, type ScopeFixturePlan } from "../sitecore/scopeFixtures";
 import { fieldStateFingerprint } from "../transfers/transferTypes";
+import { prepareScopeRule, executeScopeRule, type ScopeRulePlan } from "../sitecore/scopeRules";
 import { isMcpToolName, McpAccessError, toolSchemas } from "./tools";
 
 type Connections = Pick<ConnectionStore, "get" | "listVerifiedSites" | "getClientSecret">;
 type Client = Pick<AuthoringContentClient, "loadItem" | "loadLanguages" | "searchItemsByName" | "collectFallbackDiagnostic" | "createItem" | "updateItemFields" | "resetItemField" | "validateAddItemVersion" | "addItemVersion">;
 const operationSchema = z.object({ id: z.string().uuid(), connectionId: z.string(), serverUrl: z.string(),
-  kind: z.enum(["create-fixtures", "update-field", "reset-field", "create-version", "create-scope-fixture"]), startedAt: z.string(),
+  kind: z.enum(["create-fixtures", "update-field", "reset-field", "create-version", "create-scope-fixture", "update-scope-rule"]), startedAt: z.string(),
   status: z.enum(["prepared", "outcome-unknown", "completed", "stopped"]),
   targets: z.array(z.object({ path: z.string(), itemId: z.string().optional(), language: z.string(),
     status: z.enum(["planned", "outcome-unknown", "created", "updated", "reset", "version-created"]), fieldId: z.string().optional(), version: z.number().int().positive().optional() }).strict()).max(20),
@@ -34,7 +35,8 @@ interface Plan {
   readonly mutation: { kind: "create-fixtures"; fixtures: FallbackFixture[] }
     | { kind: "update-field" | "reset-field"; itemId: string; path: string; language: string; version: number; fieldId: string; value: string; fingerprint: string; scopeFixtureId?: string }
     | { kind: "create-version"; itemId: string; path: string; language: string; fingerprint: string; scopeFixtureId?: string }
-    | { kind: "create-scope-fixture"; fixture: ScopeFixturePlan };
+    | { kind: "create-scope-fixture"; fixture: ScopeFixturePlan }
+    | { kind: "update-scope-rule"; scopeFixtureId: string; rule: ScopeRulePlan };
 }
 const normalized = (value: string): string => value.replace(/[{}-]/gu, "").toLowerCase();
 const locate = (value: string): { path: string } | { itemId: string } => value.startsWith("/") ? { path: value } : { itemId: fixtureGuid(value) };
@@ -141,6 +143,17 @@ export class McpService {
             notice: field.scope === "SHARED" ? "Changes this fixture field in ALL languages and versions."
               : field.scope === "UNVERSIONED" ? "Changes this fixture field in ALL versions of the selected language."
                 : "Changes this fixture field in the selected language/version." }); break;
+      }
+      case "preview_scope_rule": {
+        const value = toolSchemas.preview_scope_rule.parse(input);
+        const fixture = this.scopeFixture(connection, value.fixtureId);
+        const rule = await prepareScopeRule(this.client, connection, secret, fixture,
+          { fieldId: value.fieldId, language: value.language, sharedEnabled: value.sharedEnabled, languageEnabled: value.languageEnabled }, signal);
+        result = this.addPlan(connection.id, { kind: "update-scope-rule", scopeFixtureId: value.fixtureId, rule },
+          { connection: connection.name, serverUrl: connection.serverUrl, path: rule.path, language: rule.language,
+            createFirstMetadataVersion: rule.createVersion, previousShared: rule.previousShared, previousLanguage: rule.previousLanguage,
+            sharedEnabled: rule.sharedEnabled, languageEnabled: rule.languageEnabled,
+            notice: "Changes only the two fallback checkboxes on this isolated test field definition. The shared setting affects every use of this field, including other locales. The local setting is not a disabling override; its effect depends on server configuration. At most two journaled writes. No environment changes or publishing." }); break;
       }
       case "preview_scope_version": {
         const value = toolSchemas.preview_scope_version.parse(input);
@@ -270,14 +283,20 @@ export class McpService {
       const mutation = plan.mutation;
       const record: McpOperation = { id, connectionId: connection.id, serverUrl: connection.serverUrl,
         kind: mutation.kind, startedAt: new Date().toISOString(), status: "prepared",
-        targets: mutation.kind === "create-scope-fixture" ? [] : mutation.kind === "create-fixtures" ? mutation.fixtures.map(fixture => ({ path: fixture.expectedPath,
+        targets: mutation.kind === "create-scope-fixture" || mutation.kind === "update-scope-rule" ? [] : mutation.kind === "create-fixtures" ? mutation.fixtures.map(fixture => ({ path: fixture.expectedPath,
           language: fixture.input.language, status: "planned" })) : [{ path: mutation.path, itemId: mutation.itemId,
           language: mutation.language, ...("fieldId" in mutation ? { fieldId: mutation.fieldId } : {}), status: "planned" }] };
       records.push(record);
       const checkpoint = (): Promise<void> => this.host.saveJournal(records);
       await checkpoint();
       try {
-        if (mutation.kind === "create-scope-fixture") {
+        if (mutation.kind === "update-scope-rule") {
+          const fixture = this.scopeFixture(connection, mutation.scopeFixtureId);
+          await executeScopeRule(this.client, connection, secret, fixture, mutation.rule, async steps => {
+            this.connection(connection.id); signal.throwIfAborted();
+            record.targets = steps.map(step => ({ ...step })); record.status = "outcome-unknown"; await checkpoint();
+          }, signal);
+        } else if (mutation.kind === "create-scope-fixture") {
           const fresh = await prepareScopeFixture(this.client, connection, secret, { itemId: mutation.fixture.parentId },
             mutation.fixture.languages, mutation.fixture.name.slice(-12), signal);
           if (JSON.stringify(fresh) !== JSON.stringify(mutation.fixture)) { throw new McpAccessError("Fixture parent or metadata changed after preview."); }

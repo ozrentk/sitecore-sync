@@ -27,6 +27,8 @@ export const toolSchemas = {
     version: z.number().int().min(1).max(2), fieldId: guid, value: z.string().max(16000).optional(), reset: z.boolean().optional() }).strict()
     .refine(value => value.reset === true ? value.value === undefined : value.value !== undefined),
   preview_scope_version: z.object({ connectionId: connection, fixtureId: z.string().uuid(), language: locale }).strict(),
+  preview_scope_rule: z.object({ connectionId: connection, fixtureId: z.string().uuid(), fieldId: guid,
+    language: locale, sharedEnabled: z.boolean(), languageEnabled: z.boolean() }).strict(),
   execute_plan: z.object({ planId: z.string().uuid() }).strict(),
   list_operations: z.object({}).strict(),
 } as const;
@@ -46,6 +48,7 @@ export const toolDescriptions: Record<McpToolName, string> = {
   preview_scope_fixture: "Preview a fixed isolated fallback fixture: new template beneath /sitecore/templates/User Defined, five text fields, localized Standard Values and one new content item. Supply two or three distinct locales, requested first and en last. No mutation.",
   preview_scope_field: "Preview a literal update or reset of a known field on a completed scope fixture. Requires its creation operation ID. Shared affects all locales/versions; unversioned affects all versions of the selected locale. Latest version only. No mutation.",
   preview_scope_version: "Preview creating version 2 only on a completed isolated scope fixture, in one of its recorded locales. No mutation.",
+  preview_scope_rule: "Preview the two fallback checkboxes only on a completed fixture's FixtureEnabled or FixtureDisabled definition. May create its first local metadata version. Shared setting affects all uses of this test field; local setting depends on environment configuration. No generic template editing or environment changes. No mutation.",
   execute_plan: "Execute a previously previewed plan once. Requires session mutation enablement and explicit confirmation in VS Code. Rechecks field state, records outcomes and never retries writes. No publishing or deletion.",
   list_operations: "List the most recent 100 local MCP operation records for exposed connections, including unknown outcomes. No automatic recovery or replay.",
 };
