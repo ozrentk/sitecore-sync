@@ -59,6 +59,9 @@ export const mcpAccessTests: readonly IntegrationTest[] = [{
       strictEqual(explicitVersion.version, 1);
       await rejects(call("preview_scope_version", { connectionId: connection.id,
         fixtureId: "00000000-0000-4000-8000-000000000001", language: "en" }), /completed isolated/u);
+      await rejects(call("preview_scope_rule", { connectionId: connection.id,
+        fixtureId: "00000000-0000-4000-8000-000000000001", fieldId: itemId, language: "en",
+        sharedEnabled: false, languageEnabled: true }), /completed isolated/u);
       await manager.stop(); await rejects(call("list_connections", {}));
       await manager.start(); connections = await call("list_connections", {}) as { mutationsEnabled: boolean }[];
       strictEqual(connections[0]!.mutationsEnabled, false);

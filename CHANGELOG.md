@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.32.0
+
+- Add confirmed MCP control of the two fallback rule checkboxes on isolated fixture field definitions, including first metadata-language version creation when needed.
+- Preserve fixture ownership, stale-preview checks, bounded journaling and unknown-outcome handling for per-language rule experiments.
+
 ## 0.31.0
 
 - Add confirmed isolated fallback scope fixtures with their own template, five text fields, localized Standard Values and content item.

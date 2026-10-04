@@ -231,3 +231,47 @@ test("MCP validates scope arguments and verifies an explicitly requested read ve
   const f = fixture();
   await rejects(f.call("read_item", { connectionId: testConnection.id, item: itemId, language: "en", version: 2 }), /requested version/u);
 });
+
+function ruleRuntime() {
+  const f = scopeRuntime();
+  const id = f.fields[0]!.fieldId;
+  const fields: AuthoringItemField[] = [
+    ["Type", "Single-Line Text", "SHARED", "ab162cc0dc804abf8871998ee5d7ba32"],
+    ["Shared", "", "SHARED", "be351a73fcb0421393fac302d8ab4f51"],
+    ["Unversioned", "", "SHARED", "39847666389d409b95bdf2016f11eed5"],
+    ["Enable Shared Language Fallback", "1", "SHARED", "24cb32f0e3644f37b4000f2899097b5b"],
+    ["Enable Language Fallback", "", "VERSIONED", "fa6225380c134130a00145984241aa00"],
+  ].map(([name, value, scope, fieldId]) => ({ ...f.fields[0]!, name: name!, value: value!, scope: scope as AuthoringItemField["scope"],
+    fieldId: fieldId!, type: name === "Type" ? "Grouped Droplist" : "Checkbox" }));
+  f.mutate({ itemId: id, path: `${f.record.scopeFixture!.templatePath}/Fixture fields/FixtureEnabled`, fields,
+    template: { templateId: "455a3e98a6274b408035e683a0331ac7", name: "Template field" } });
+  return { ...f, input: { connectionId: testConnection.id, fixtureId: scopeFixtureId, fieldId: id,
+    language: "en", sharedEnabled: false, languageEnabled: true } };
+}
+
+test("scope rule service preserves opt-in, confirmation, ownership, journaling and replay boundaries", async () => {
+  const f = ruleRuntime();
+  const plan = await f.call("preview_scope_rule", f.input) as { planId: string };
+  await rejects(f.call("execute_plan", { planId: plan.planId }), /Enable MCP/u);
+  f.service.enableMutations(testConnection.id);
+  const result = await f.call("execute_plan", { planId: plan.planId }) as McpOperation;
+  strictEqual(result.kind, "update-scope-rule"); strictEqual(result.status, "completed"); strictEqual(f.writes(), 1);
+  strictEqual(result.targets[0]!.itemId, f.input.fieldId);
+  await rejects(f.call("execute_plan", { planId: plan.planId }), /already used/u);
+  f.seedJournal([{ ...f.record, status: "stopped" }]);
+  await rejects(f.call("preview_scope_rule", f.input), /completed isolated/u);
+  const cancelled = ruleRuntime(); cancelled.service.enableMutations(testConnection.id); cancelled.decline();
+  const declined = await cancelled.call("preview_scope_rule", cancelled.input) as { planId: string };
+  await rejects(cancelled.call("execute_plan", { planId: declined.planId }), /cancelled/u);
+  strictEqual(cancelled.writes(), 0);
+});
+
+test("scope rule failures retain unknown outcomes and strict boolean arguments", async () => {
+  const f = ruleRuntime(); f.service.enableMutations(testConnection.id);
+  strictEqual(toolSchemas.preview_scope_rule.safeParse({ ...f.input, sharedEnabled: "false" }).success, false);
+  strictEqual(toolSchemas.preview_scope_rule.safeParse({ ...f.input, arbitraryField: "Type" }).success, false);
+  const plan = await f.call("preview_scope_rule", f.input) as { planId: string };
+  f.fail();
+  await rejects(f.call("execute_plan", { planId: plan.planId }), /Inspect list_operations/u);
+  strictEqual(f.records().at(-1)!.status, "outcome-unknown"); strictEqual(f.writes(), 1);
+});
