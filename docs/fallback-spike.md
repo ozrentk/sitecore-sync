@@ -204,3 +204,27 @@ The isolated definition's English metadata read confirmed a shared checkbox name
 The earlier proposed "local disable overrides shared enable" expectation needs correction. [Sitecore's configuration documentation](https://doc.sitecore.com/xp/en/developers/102/sitecore-experience-manager/fine-tune-your-language-fallback-configuration.html) describes the versioned setting as an additional enablement input when `LanguageFieldFallback.AllowVaryFallbackSettingsPerLanguage` is enabled; a false local value defers to the shared setting. When that switch is disabled, only the shared setting is considered. This is documented context, not evidence of the effective switch on this deployment.
 
 The next live matrix should compare shared on/local off, shared off/local on, both off and both on, reading original-locale cross-checks for NZ and AU separately. Keep distinct English source markers and reset local content for rule precedence tests, then repeat local marker/explicit-empty/reset controls. Verify metadata readback and record actual behavior without inferring the environment switch from one negative result. Only fixture definitions may change; environment configuration stays untouched.
+
+### Live per-language rule matrix (2026-10-05)
+
+The rule tool was exercised on the isolated fixture's initially disabled versioned field, with a populated English source and empty NZ/AU content. Each mutation was confirmed in VS Code. A preceding attempt timed out before its pre-write journal checkpoint; exact NZ metadata still had version 0 and no operation record existed. The following run used fresh previews, not automatic mutation retries.
+
+Definition readbacks confirmed the requested checkbox values after every rule change. The first change created NZ metadata version 1. Initial original-locale effective reads were:
+
+| Shared setting | NZ setting | NZ result | AU result (no local metadata version yet) |
+| --- | --- | --- | --- |
+| Off, baseline | Absent | Empty, fallback false | Empty, fallback false |
+| On | Off | English source, fallback true | English source, fallback true |
+| Off | On | English source, fallback true | English source, fallback true |
+| Off | Off | Empty, fallback false | Empty, fallback false |
+| On | On | Empty, fallback false | English source, fallback true |
+
+A read-only repeat of the last row, with AU read first, reproduced that unexpected NZ/AU split. An explicit AU metadata version was then created with its local checkbox off and the shared checkbox off, leaving NZ's local checkbox on. Both locales returned empty/fallback false. Repeating this combination in the opposite read order gave the same result. Thus the observed mixed-setting behavior did not establish reliable locale-specific precedence; absence of AU metadata alone is not a proven explanation.
+
+With shared/NZ settings restored to on, the NZ content marker/empty/reset sequence returned the local marker (fallback false), literal empty (fallback false), then the English source after reset (fallback true). During these three stages, the untouched AU content's effective result alternated empty/source/empty despite no further rule writes. Exact English source reads stayed populated. These inconsistent effective responses prevent treating this matrix as a passing precedence test or proof of the environment switch. Cache invalidation, server routing or other runtime behavior are possible explanations, not verified diagnoses. No cache clear, server restart or environment-setting change was attempted.
+
+Finally, both checkboxes were restored to off and read back as empty in English, NZ and AU metadata. Final effective reads in NZ and AU were empty/fallback false. The test content field remains reset in NZ version 2 with its English source intact. The newly created NZ/AU field-definition versions remain for follow-up; nothing was deleted or published and no real content/template was edited.
+
+The run completed ten confirmed operations containing twelve writes, 24 diagnostic reports with all 96 item probes complete, and 24 exact metadata reads. A local verification script checked completed operation statuses, probe completeness, the unchanged English source, local marker/empty results and restored checkbox values, and preserved the differing effective results without asserting a successful precedence rule. Raw reports and the combined evidence remain outside Git. This is a documentation-only follow-up; no build or unit-suite rerun was needed.
+
+Per-language rule precedence and effective environment configuration remain unresolved. Before using those settings for a resolver, investigate repeatability of effective reads and configuration/cache behavior on the server. Preserve exact-locale comparison semantics and label effective observations with unknown provenance/configuration where needed; do not infer a deterministic rule from these inconsistent responses.
