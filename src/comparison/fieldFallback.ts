@@ -1,7 +1,9 @@
 import type { AuthoringItemDetails } from "../sitecore/authoringClient";
+import type { ItemFallbackObservation } from "./itemFallback";
 
 export type FieldFallbackMode = "exact" | "fallback";
 export interface ComparisonItemDetails extends AuthoringItemDetails {
+  readonly itemFallback?: ItemFallbackObservation;
   readonly comparisonEvidence?: {
     readonly exact: AuthoringItemDetails;
     readonly exactObservedAt: string;

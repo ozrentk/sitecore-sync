@@ -57,6 +57,7 @@ body {
 .summary { border-bottom: 1px solid var(--vscode-panel-border); }
 .summary-cell { display: grid; gap: 3px; min-width: 0; padding: 8px 12px; }
 .summary-cell span { overflow: hidden; color: var(--vscode-descriptionForeground); text-overflow: ellipsis; white-space: nowrap; }
+.summary-cell .item-fallback-note { display: block; }
 .item-id { display: flex; gap: 6px; align-items: center; min-width: 0; color: var(--vscode-descriptionForeground); font-size: 11px; }
 .item-id button {
   min-width: 0;

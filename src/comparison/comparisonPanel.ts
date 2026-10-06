@@ -1,4 +1,5 @@
 import { ContentSession, type ContentEndpoint } from "./contentSession";
+import { observeItemFallback, type ItemFallbackObservation } from "./itemFallback";
 import { comparisonFieldEvidence, type ComparisonItemDetails, type FieldFallbackMode } from "./fieldFallback";
 import { modePreferencesKey, navigationEndpoint, prepareCompare, readModePreferences } from "./modeSwitching";
 import { PublicPageService, type PublicPagePreviewContext } from "../publicPages/publicPageService";
@@ -257,7 +258,7 @@ export class ComparisonPanelManager implements vscode.Disposable {
       async (side, itemId) => {
         if (this.selectedFieldDiffItem?.[`${side}ItemId`] === itemId) { await this.openPublicPage(side, itemId); }
       },
-      async mode => { if (!this.browseMode && !this.pendingLanguageView) await this.setFieldFallbackMode(mode); },
+      async mode => { if (!this.pendingLanguageView) await this.setFieldFallbackMode(mode); },
       () => this.fallbackMode,
     );
     this.disposables.push(
@@ -987,8 +988,8 @@ export class ComparisonPanelManager implements vscode.Disposable {
   private async handleMessage(message: WebviewMessage): Promise<void> {
     if (!message || typeof message !== "object") return;
     if (message.type === "setFieldFallbackMode") {
-      if (this.browseMode || (message.fallbackMode !== "exact" && message.fallbackMode !== "fallback")) return;
-      if (message.viewContext !== this.contentSession.revisionId) return;
+      if (message.fallbackMode !== "exact" && message.fallbackMode !== "fallback") return;
+      if (this.pendingLanguageView || message.viewContext !== this.contentSession.revisionId) return;
       await this.setFieldFallbackMode(message.fallbackMode);
       return;
     }
@@ -2743,7 +2744,19 @@ export class ComparisonPanelManager implements vscode.Disposable {
       const exact = await this.authoringClient.loadItemDetails(connection, clientSecret, itemId, language, controller.signal);
       const exactObservedAt = new Date().toISOString();
       const effective = await this.authoringClient.loadItemDetails(connection, clientSecret, itemId, language, controller.signal, true);
-      return comparisonFieldEvidence(exact, effective, exactObservedAt, new Date().toISOString());
+      const evidence = comparisonFieldEvidence(exact, effective, exactObservedAt, new Date().toISOString());
+      let itemFallback: ItemFallbackObservation | undefined;
+      if (exact.version === 0) {
+        const metadataSignal = AbortSignal.any([controller.signal, AbortSignal.timeout(5_000)]);
+        try {
+          itemFallback = await observeItemFallback(exact, (locator, locale) =>
+            this.authoringClient.loadItem(connection, clientSecret, locator, locale, undefined, metadataSignal), metadataSignal);
+        } catch {
+          controller.signal.throwIfAborted();
+          itemFallback = { status: "unavailable", chain: [exact.language] };
+        }
+      }
+      return { ...evidence, ...(itemFallback ? { itemFallback } : {}) };
     })()
       .then((details) => {
         if (this.pendingItemDetails.get(cacheKey) === request) {
@@ -2773,7 +2786,7 @@ export class ComparisonPanelManager implements vscode.Disposable {
   }
 
   private getComparisonItemDetails(connectionId: string, language: string, itemId: string): Promise<ComparisonItemDetails> {
-    return this.getItemDetails(connectionId, language, itemId, !this.browseMode && this.fallbackMode === "fallback");
+    return this.getItemDetails(connectionId, language, itemId, this.fallbackMode === "fallback");
   }
 
   private async setFieldFallbackMode(mode: FieldFallbackMode): Promise<void> {
@@ -3162,7 +3175,7 @@ export class ComparisonPanelManager implements vscode.Disposable {
       }
       const snapshot = {
         ...selected,
-        fallbackMode: this.browseMode ? "exact" as const : this.fallbackMode,
+        fallbackMode: this.fallbackMode,
         leftConnectionName: selection.leftConnectionId
           ? this.connectionStore.get(selection.leftConnectionId)?.name
           : undefined,
@@ -3900,7 +3913,7 @@ export class ComparisonPanelManager implements vscode.Disposable {
 
     await this.panel.webview.postMessage({
       type: "stateChanged",
-      fallbackMode: this.browseMode ? "exact" : this.fallbackMode,
+      fallbackMode: this.fallbackMode,
       fallbackRevision: this.fallbackRevision,
       resetContent,
       viewContext: this.contentSession?.revisionId,

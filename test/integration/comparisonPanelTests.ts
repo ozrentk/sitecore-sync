@@ -73,6 +73,41 @@ export const comparisonPanelTests: readonly IntegrationTest[] = [{
     session.dispose();
   },
 }, {
+  name: "Browse effective reads retain exact version zero and tolerate unavailable item-fallback metadata",
+  async execute(): Promise<void> {
+    const session = new ContentSession();
+    session.openConnection({ connectionId: "one", language: "fr", rootPath: "/sitecore" });
+    const flags: boolean[] = [];
+    const exact = { ...itemDetails("item"), version: 0 };
+    const manager = Object.create(ComparisonPanelManager.prototype) as {
+      getComparisonItemDetails(connectionId: string, language: string, itemId: string): Promise<import("../../src/comparison/fieldFallback").ComparisonItemDetails>;
+      fallbackMode: string; fallbackRevision: number;
+    };
+    Object.assign(manager, { contentSession: session, fallbackMode: "fallback", fallbackRevision: 0,
+      itemDetailsCache: new Map(), pendingItemDetails: new Map(), requestControllers: new Set(),
+      connectionStore: { get: () => connection("one", "One"), getClientSecret: async () => "test-secret" },
+      authoringClient: {
+        loadItemDetails: async (_c: unknown, _s: unknown, _i: unknown, _l: unknown, _signal: unknown, fallback = false) => {
+          flags.push(fallback); return exact;
+        },
+        loadItem: async () => { throw Error("Metadata unavailable"); },
+      },
+    });
+    try {
+      const details = await manager.getComparisonItemDetails("one", "fr", "item");
+      deepStrictEqual(flags, [false, true]);
+      strictEqual(details.version, 0);
+      strictEqual(details.language, "fr");
+      strictEqual(details.comparisonEvidence?.exact, exact);
+      strictEqual(details.itemFallback?.status, "unavailable");
+      await manager.getComparisonItemDetails("one", "fr", "item");
+      deepStrictEqual(flags, [false, true]);
+      manager.fallbackMode = "exact"; manager.fallbackRevision++;
+      strictEqual(await manager.getComparisonItemDetails("one", "fr", "item"), exact);
+      deepStrictEqual(flags, [false, true, false]);
+    } finally { session.dispose(); }
+  },
+}, {
   name: "opening the only configured connection enters Browse and loads only its source",
   async execute(): Promise<void> {
     const one = connection("one", "One");
@@ -232,14 +267,14 @@ export const comparisonPanelTests: readonly IntegrationTest[] = [{
       await receive({ type: "copyFieldValue", fieldId: "field", direction: "leftToRight", contextId });
       await receive({ type: "openPublicPage", side: "right", itemId: "item", contextId });
       await receive({ type: "openPublicPage", side: "left", itemId: "item", contextId: -1 });
-      deepStrictEqual(calls, []);
+      deepStrictEqual(calls, ["fallback"]);
       await receive({ type: "openPublicPage", side: "left", itemId: "item", contextId });
       await receive({ type: "copyItemId", side: "left", itemId: "item", contextId });
-      deepStrictEqual(calls, ["page", "copy"]);
+      deepStrictEqual(calls, ["fallback", "page", "copy"]);
       await provider.clear("compare");
       strictEqual(view.title, "Field Diff");
       await receive({ type: "openTextDiff", fieldId: "field", contextId });
-      strictEqual(calls.length, 2);
+      strictEqual(calls.length, 3);
       await receive({ type: "openTextDiff", fieldId: "field", contextId: messages.at(-1)?.contextId });
       strictEqual(calls.at(-1), "diff");
       await receive({ type: "setFieldFallbackMode", fallbackMode: "fallback", contextId });

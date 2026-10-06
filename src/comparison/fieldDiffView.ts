@@ -78,7 +78,7 @@ export class FieldDiffViewProvider implements vscode.WebviewViewProvider, vscode
         if (!message || typeof message !== "object") return;
         if (message.type !== "ready" && message.contextId !== this.contextId) return;
         if (message.type === "setFieldFallbackMode") {
-          if (this.mode === "browse" || (message.fallbackMode !== "exact" && message.fallbackMode !== "fallback")) return;
+          if (message.fallbackMode !== "exact" && message.fallbackMode !== "fallback") return;
           try { await this.onSetFallbackMode?.(message.fallbackMode); }
           finally { await this.post({ type: "fallbackModeChanged" }); }
           return;
@@ -145,7 +145,7 @@ export class FieldDiffViewProvider implements vscode.WebviewViewProvider, vscode
   private async post(message: Record<string, unknown>): Promise<void> {
     if (this.view) {
       await this.view.webview.postMessage({ ...message, mode: this.mode, contextId: this.contextId,
-        fallbackMode: this.mode === "browse" ? "exact" : this.getFallbackMode() });
+        fallbackMode: this.getFallbackMode() });
     }
   }
 
@@ -164,7 +164,7 @@ export class FieldDiffViewProvider implements vscode.WebviewViewProvider, vscode
 <body>
   <header class="toolbar" aria-label="Field visibility">
     <strong id="details-title" class="toolbar-title">Field visibility</strong>
-    <button id="field-fallback-mode" type="button" aria-pressed="false" title="Include language fallback in field comparisons. Off uses Exact locale.">Fallback</button>
+    <button id="field-fallback-mode" type="button" aria-pressed="false" title="Include server-returned language fallback values. Off uses Exact locale.">Fallback</button>
     <div class="visibility-control">
       <span id="content-visibility-label">Content fields</span>
       <div class="visibility-options" role="group" aria-labelledby="content-visibility-label" data-category="content">

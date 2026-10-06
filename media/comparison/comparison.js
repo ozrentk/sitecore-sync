@@ -1996,7 +1996,9 @@ function render() {
     state.subtreeLoadOperations.size === 0 && state.refreshOperations.size === 0;
   document.body.classList.toggle("browse", browse);
   rightSelect.closest(".selector").hidden = browse;
-  swapButton.closest(".toolbar-actions").hidden = browse;
+  swapButton.closest(".toolbar-actions").hidden = false;
+  swapButton.hidden = browse;
+  languageLock.hidden = browse;
   leftSelect.setAttribute("aria-label", browse ? "XM Cloud connection" : "Left XM Cloud connection");
   leftLanguageSelect.setAttribute("aria-label", browse ? "Content language" : "Left content language");
   document.getElementById("item-navigation").title = browse ? "Search the entire browsed connection." : "Search the left connection first, then the right if no match exists.";

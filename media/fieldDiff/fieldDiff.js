@@ -147,6 +147,16 @@ function createSummary(snapshot) {
     const meta = document.createElement("span");
     const error = snapshot[`${side}Error`];
     meta.textContent = metaLine(details, error);
+    if (details?.comparisonEvidence && details.version === 0) {
+      const observation = details.itemFallback;
+      const note = document.createElement("span");
+      note.className = "item-fallback-note";
+      note.textContent = observation?.candidate
+        ? `Configured fallback candidate: ${observation.chain.join(" → ")} (v${observation.candidate.version})`
+        : "No local version; fallback source unverified.";
+      note.title = "Values are returned by Authoring for the requested locale. The configured candidate is not confirmed item or field provenance.";
+      meta.append(note);
+    }
     if (error) {
       meta.classList.add("error");
     }
@@ -303,7 +313,7 @@ function emptyFieldsMessage(snapshot, totalFields) {
   const details = snapshot.leftDetails;
   if (!details) return "Item details are unavailable.";
   const versions = (details.availableVersions ?? []).map(version => `${version.language} (v${version.version})`).join(", ");
-  return `Authoring returned no fields for ${details.language} (version ${details.version}). Language fallback is not applied.${versions ? ` Available versions: ${versions}.` : ""}`;
+  return `Authoring returned no fields for ${details.language} (version ${details.version}). ${snapshot.fallbackMode === "fallback" ? "Fallback was requested; Authoring returned no values." : "Language fallback is not applied."}${versions ? ` Available versions: ${versions}.` : ""}`;
 }
 
 function showAllBrowseFields() {
@@ -317,7 +327,7 @@ function persistVisibility() {
 }
 
 function render() {
-  fieldFallbackMode.hidden = state.mode === "browse";
+  fieldFallbackMode.hidden = false;
   fieldFallbackMode.setAttribute("aria-pressed", String(state.fallbackMode === "fallback"));
   fieldFallbackMode.disabled = state.contextId === undefined || Boolean(state.loadingSelection);
   document.getElementById("details-title").textContent = state.mode === "browse" ? "Item Details · read-only" : "Field visibility";
