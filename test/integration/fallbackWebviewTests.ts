@@ -40,6 +40,10 @@ export const fallbackWebviewTests: readonly IntegrationTest[] = [{
           if (languageLock.getAttribute("aria-pressed") !== "true" || fieldFallbackMode.getAttribute("aria-pressed") !== "false") throw Error("Toggles not updated");
           receive({ ...base, mode: "browse", fallbackMode: "fallback", fallbackRevision: 3 });
           if (fieldFallbackMode.closest(".toolbar-actions").hidden || !languageLock.hidden || !swapButton.hidden) throw Error("Browse toolbar state");
+          const languageRect = leftLanguageSelect.getBoundingClientRect();
+          const fallbackRect = fieldFallbackMode.getBoundingClientRect();
+          if (fallbackRect.left < languageRect.right || fallbackRect.left - languageRect.right > 16
+            || Math.abs((fallbackRect.top + fallbackRect.bottom - languageRect.top - languageRect.bottom) / 2) > 2) throw Error("Browse fallback must sit immediately right of language selector");
         ` : `
           const field = { fieldId: "a", name: "Title", label: "Title", value: "Effective text", type: "Text", typeKey: "text",
             scope: "VERSIONED", textual: true, containsFallbackValue: true, isStandardTemplate: false };
