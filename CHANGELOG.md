@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.34.1
+
+- Position Browse's Fallback toggle immediately to the right of the language selector.
+
 ## 0.34.0
 
 - Enable synchronized Fallback toggles in Browse and Item Details as well as Compare.

@@ -632,7 +632,8 @@ select:focus {
 
 /* Browse keeps the existing tree nodes/navigation but has no comparison column or gutter. */
 [hidden] { display: none !important; }
-body.browse .toolbar { grid-template-columns: minmax(0, 1fr); }
+body.browse .toolbar { grid-template-columns: minmax(0, 1fr) auto; }
+body.browse .toolbar-actions .toolbar-buttons:first-child { display: none; }
 body.browse .selector { grid-template-columns: minmax(0, 1fr) minmax(120px, 220px); }
 body.browse .comparison { min-width: 0; }
 body.browse .comparison-row { grid-template-columns: 30px minmax(0, 1fr); }
