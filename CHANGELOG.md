@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.34.2
+
+- Show an expected-source hint for fallback fields when their own item has a suitable configured candidate, consistently in Browse, Item Details and Compare.
+- Explain candidate provenance and its chain in the tooltip; retain unknown sources when no suitable candidate exists. Resolution and write decisions remain unchanged.
+
 ## 0.34.1
 
 - Position Browse's Fallback toggle immediately to the right of the language selector.

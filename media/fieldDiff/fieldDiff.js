@@ -47,6 +47,22 @@ function normalizeId(value) {
   return value.replace(/[{}-]/g, "").toLowerCase();
 }
 
+// Presentation only: a configured item candidate is not verified per-field provenance.
+function fallbackSourceHint(details) {
+  const observation = details?.itemFallback;
+  const candidate = observation?.candidate;
+  const chain = observation?.chain;
+  const validLocale = value => typeof value === "string" && /^[a-z]{2,8}(?:-[a-z0-9]{1,8})*$/iu.test(value);
+  if (details?.version !== 0 || !validLocale(details.language) || observation?.status !== "candidate" || !validLocale(candidate?.language)
+    || !Number.isInteger(candidate.version) || candidate.version < 1 || !Array.isArray(chain) || chain.length < 2
+    || !chain.every(validLocale) || chain[0].toLowerCase() !== details.language?.toLowerCase()
+    || chain.at(-1).toLowerCase() !== candidate.language.toLowerCase()) {
+    return { label: "source language unknown", tooltip: "The source language of this field has not been verified." };
+  }
+  return { label: `expected source: ${candidate.language}`,
+    tooltip: `Configured candidate, not verified per-field provenance.\nFallback chain: ${chain.join(" → ")}` };
+}
+
 function fieldSource(field) {
   if (!field) return "missing";
   if (field.containsFallbackValue) return "fallback";
@@ -211,7 +227,7 @@ function scopeMarker(field) {
   return marker;
 }
 
-function createFieldCell(field, pair) {
+function createFieldCell(field, pair, details) {
   const cell = document.createElement("div");
   cell.className = "field-cell";
   if (!field) {
@@ -238,8 +254,10 @@ function createFieldCell(field, pair) {
   const metadata = document.createElement("div");
   metadata.className = "metadata";
   metadata.textContent = `${field.type} · ${field.scope.toLowerCase()} · ${fieldSource(field)}`;
-  if (field.containsFallbackValue) metadata.textContent += " · source language unknown";
+  const sourceHint = field.containsFallbackValue ? fallbackSourceHint(details) : undefined;
+  if (sourceHint) metadata.textContent += ` · ${sourceHint.label}`;
   metadata.title = `Field ID: ${field.fieldId}${field.sectionName ? `\nSection: ${field.sectionName}` : ""}`;
+  if (sourceHint) metadata.title += `\n${sourceHint.tooltip}`;
   const value = document.createElement("pre");
   value.textContent = field.value || "(empty)";
   cell.append(heading, metadata, value);
@@ -257,7 +275,7 @@ function createFieldRow(pair) {
   const row = document.createElement("section");
   row.className = `field-row paired-grid${pair.flags.length ? " different" : ""}`;
   if (state.mode === "browse") {
-    row.append(createFieldCell(pair.left, pair));
+    row.append(createFieldCell(pair.left, pair, state.snapshot?.leftDetails));
     return row;
   }
   const differences = document.createElement("div");
@@ -302,7 +320,7 @@ function createFieldRow(pair) {
       differences.append(badge);
     }
   }
-  row.append(createFieldCell(pair.left, pair), differences, createFieldCell(pair.right, pair));
+  row.append(createFieldCell(pair.left, pair, state.snapshot?.leftDetails), differences, createFieldCell(pair.right, pair, state.snapshot?.rightDetails));
   return row;
 }
 
