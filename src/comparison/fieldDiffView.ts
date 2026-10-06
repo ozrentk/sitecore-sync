@@ -27,6 +27,7 @@ export interface FieldDiffSnapshot extends FieldDiffSelection {
 }
 
 interface FieldDiffMessage {
+  readonly fallbackMode?: unknown;
   readonly contextId?: unknown;
   readonly type?: unknown;
   readonly fieldId?: unknown;
@@ -54,6 +55,8 @@ export class FieldDiffViewProvider implements vscode.WebviewViewProvider, vscode
       itemId: string,
     ) => Promise<boolean>,
     private readonly onOpenPublicPage?: (side: "left" | "right", itemId: string) => Promise<void>,
+    private readonly onSetFallbackMode?: (mode: FieldFallbackMode) => Promise<void>,
+    private readonly getFallbackMode: () => FieldFallbackMode = () => "exact",
   ) {}
 
   resolveWebviewView(view: vscode.WebviewView): void {
@@ -74,6 +77,12 @@ export class FieldDiffViewProvider implements vscode.WebviewViewProvider, vscode
       view.webview.onDidReceiveMessage(async (message: FieldDiffMessage) => {
         if (!message || typeof message !== "object") return;
         if (message.type !== "ready" && message.contextId !== this.contextId) return;
+        if (message.type === "setFieldFallbackMode") {
+          if (this.mode === "browse" || (message.fallbackMode !== "exact" && message.fallbackMode !== "fallback")) return;
+          try { await this.onSetFallbackMode?.(message.fallbackMode); }
+          finally { await this.post({ type: "fallbackModeChanged" }); }
+          return;
+        }
         if (this.mode === "browse" && (message.type === "openTextDiff" || message.type === "copyFieldValue" || message.side === "right")) return;
         if (message.type === "openPublicPage" && (message.side === "left" || message.side === "right") && typeof message.itemId === "string") {
           await this.onOpenPublicPage?.(message.side, message.itemId);
@@ -135,7 +144,8 @@ export class FieldDiffViewProvider implements vscode.WebviewViewProvider, vscode
 
   private async post(message: Record<string, unknown>): Promise<void> {
     if (this.view) {
-      await this.view.webview.postMessage({ ...message, mode: this.mode, contextId: this.contextId });
+      await this.view.webview.postMessage({ ...message, mode: this.mode, contextId: this.contextId,
+        fallbackMode: this.mode === "browse" ? "exact" : this.getFallbackMode() });
     }
   }
 
@@ -154,6 +164,7 @@ export class FieldDiffViewProvider implements vscode.WebviewViewProvider, vscode
 <body>
   <header class="toolbar" aria-label="Field visibility">
     <strong id="details-title" class="toolbar-title">Field visibility</strong>
+    <button id="field-fallback-mode" type="button" aria-pressed="false" title="Include language fallback in field comparisons. Off uses Exact locale.">Fallback</button>
     <div class="visibility-control">
       <span id="content-visibility-label">Content fields</span>
       <div class="visibility-options" role="group" aria-labelledby="content-visibility-label" data-category="content">

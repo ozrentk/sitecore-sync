@@ -220,12 +220,14 @@ export const comparisonPanelTests: readonly IntegrationTest[] = [{
         postMessage: async (message: Record<string, unknown>) => { messages.push(message); return true; } } };
     const provider = new FieldDiffViewProvider(vscode.Uri.file(process.cwd()), () => undefined,
       async () => { calls.push("diff"); }, async () => { calls.push("transfer"); },
-      async () => { calls.push("copy"); return true; }, async () => { calls.push("page"); });
+      async () => { calls.push("copy"); return true; }, async () => { calls.push("page"); },
+      async mode => { calls.push(mode); });
     try {
       provider.resolveWebviewView(view as unknown as vscode.WebviewView);
       await provider.showLoading({ mode: "browse", leftItemId: "item" });
       strictEqual(view.title, "Item Details");
       const contextId = messages.at(-1)?.contextId;
+      await receive({ type: "setFieldFallbackMode", fallbackMode: "fallback", contextId });
       await receive({ type: "openTextDiff", fieldId: "field", contextId });
       await receive({ type: "copyFieldValue", fieldId: "field", direction: "leftToRight", contextId });
       await receive({ type: "openPublicPage", side: "right", itemId: "item", contextId });
@@ -240,6 +242,11 @@ export const comparisonPanelTests: readonly IntegrationTest[] = [{
       strictEqual(calls.length, 2);
       await receive({ type: "openTextDiff", fieldId: "field", contextId: messages.at(-1)?.contextId });
       strictEqual(calls.at(-1), "diff");
+      await receive({ type: "setFieldFallbackMode", fallbackMode: "fallback", contextId });
+      await receive({ type: "setFieldFallbackMode", fallbackMode: "invalid", contextId: messages.at(-1)?.contextId });
+      strictEqual(calls.at(-1), "diff");
+      await receive({ type: "setFieldFallbackMode", fallbackMode: "fallback", contextId: messages.at(-1)?.contextId });
+      strictEqual(calls.at(-1), "fallback");
     } finally { provider.dispose(); }
   },
 }, {
