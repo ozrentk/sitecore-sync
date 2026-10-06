@@ -385,6 +385,27 @@ export const comparisonPanelTests: readonly IntegrationTest[] = [{
     }
   },
 }, {
+  name: "missing page presentation does not show a public-page notification",
+  async execute(): Promise<void> {
+    const manager = Object.create(ComparisonPanelManager.prototype) as ComparisonPanelHarness;
+    Object.assign(manager, {
+      requestControllers: new Set<AbortController>(),
+      getSelection: () => ({ leftConnectionId: "left", leftLanguage: "en" }),
+      isCurrentSelection: () => true,
+    });
+    const configured = mock.getter(PublicPageService.prototype, "configured", () => true);
+    const resolve = mock.method(PublicPageService.prototype, "resolve", async () => undefined);
+    const notice = mock.method(vscode.window, "showInformationMessage", async () => undefined);
+    const open = mock.method(vscode.env, "openExternal", async () => true);
+    try {
+      await manager.openPublicPage("left", "non-page");
+      strictEqual(notice.mock.callCount(), 0);
+      strictEqual(open.mock.callCount(), 0);
+    } finally {
+      configured.mock.restore(); resolve.mock.restore(); notice.mock.restore(); open.mock.restore();
+    }
+  },
+}, {
   name: "public pages open directly and cancelled or stale resolutions do not launch",
   async execute(): Promise<void> {
     const manager = Object.create(ComparisonPanelManager.prototype) as ComparisonPanelHarness;
