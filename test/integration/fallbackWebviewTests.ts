@@ -69,6 +69,9 @@ export const fallbackWebviewTests: readonly IntegrationTest[] = [{
           window.dispatchEvent(new MessageEvent("message", { data: { type: "snapshot", mode: "browse", contextId: 4, snapshot: { fallbackMode: "fallback", leftDetails: browseDetails } } }));
           if (!document.body.textContent.includes("Configured fallback candidate: en-NZ → en-AU → en (v1)")) throw Error("Candidate missing");
           if (!document.body.textContent.includes("latest version 0") || document.querySelector(".copy-value")) throw Error("Browse identity or transfer state");
+          const fallbackMetadata = document.querySelector(".metadata");
+          if (!fallbackMetadata.textContent.includes("fallback · expected source: en") || fallbackMetadata.textContent.includes("not verified")
+            || !fallbackMetadata.title.includes("not verified per-field provenance") || !fallbackMetadata.title.includes("en-NZ → en-AU → en")) throw Error("Expected source hint or tooltip missing");
         `;
         const scriptPath = join(directory, `${kind}.js`);
         await writeFile(scriptPath, `try { ${script}\n api.postMessage({ type: "smokeResult", ok: true }); } catch (error) { api.postMessage({ type: "smokeResult", error: String(error) }); }`);

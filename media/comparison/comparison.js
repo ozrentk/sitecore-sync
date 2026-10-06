@@ -251,6 +251,22 @@ function normalizedFieldValue(value) {
     : value;
 }
 
+// Presentation only: a configured item candidate is not verified per-field provenance.
+function fallbackSourceHint(details) {
+  const observation = details?.itemFallback;
+  const candidate = observation?.candidate;
+  const chain = observation?.chain;
+  const validLocale = value => typeof value === "string" && /^[a-z]{2,8}(?:-[a-z0-9]{1,8})*$/iu.test(value);
+  if (details?.version !== 0 || !validLocale(details.language) || observation?.status !== "candidate" || !validLocale(candidate?.language)
+    || !Number.isInteger(candidate.version) || candidate.version < 1 || !Array.isArray(chain) || chain.length < 2
+    || !chain.every(validLocale) || chain[0].toLowerCase() !== details.language?.toLowerCase()
+    || chain.at(-1).toLowerCase() !== candidate.language.toLowerCase()) {
+    return { label: "source language unknown", tooltip: "The source language of this field has not been verified." };
+  }
+  return { label: `expected source: ${candidate.language}`,
+    tooltip: `Configured candidate, not verified per-field provenance.\nFallback chain: ${chain.join(" → ")}` };
+}
+
 function fieldSource(field) {
   if (!field) {
     return "missing";
@@ -1621,7 +1637,7 @@ function createTemplateRow(pair, depth) {
   return row;
 }
 
-function fieldTooltip(field) {
+function fieldTooltip(field, details) {
   if (!field) {
     return "Field is missing.";
   }
@@ -1629,13 +1645,14 @@ function fieldTooltip(field) {
     `Field ID: ${field.fieldId}`,
     `Type: ${field.type}`,
     `Scope: ${field.scope.toLowerCase()}`,
-    `Source: ${fieldSource(field)}${field.containsFallbackValue ? " · source language unknown" : ""}`,
+    `Source: ${fieldSource(field)}${field.containsFallbackValue ? ` · ${fallbackSourceHint(details).label}` : ""}`,
+    field.containsFallbackValue ? fallbackSourceHint(details).tooltip : undefined,
     field.sectionName ? `Section: ${field.sectionName}` : undefined,
     `Value: ${field.value || "(empty)"}`,
   ].filter(Boolean).join("\n");
 }
 
-function createFieldCell(field, side, depth, fieldPair) {
+function createFieldCell(field, side, depth, fieldPair, details) {
   const cell = document.createElement("button");
   cell.type = "button";
   cell.className = `comparison-cell detail-cell field-cell ${side}`;
@@ -1677,10 +1694,12 @@ function createFieldCell(field, side, depth, fieldPair) {
   if (field.containsFallbackValue) {
     const source = document.createElement("span");
     source.className = "field-provenance";
-    source.textContent = "Fallback · source unknown";
+    const hint = fallbackSourceHint(details);
+    source.textContent = `fallback · ${hint.label}`;
+    source.title = hint.tooltip;
     name.append(source);
   }
-  cell.title = fieldTooltip(field);
+  cell.title = fieldTooltip(field, details);
   if (fieldPair.flags.includes("fieldTypeMismatch")) {
     const type = document.createElement("span");
     type.className = "field-type";
@@ -1717,8 +1736,8 @@ function createFieldRow(fieldPair, itemPair, depth) {
     badge.title = flag.replace(/^field/, "Field ").replace(/Mismatch$/, " differs");
     control.append(badge);
   }
-  const leftCell = createFieldCell(fieldPair.left, "left", depth, fieldPair);
-  const rightCell = createFieldCell(fieldPair.right, "right", depth, fieldPair);
+  const leftCell = createFieldCell(fieldPair.left, "left", depth, fieldPair, itemPair.left?.details);
+  const rightCell = createFieldCell(fieldPair.right, "right", depth, fieldPair, itemPair.right?.details);
   const canDiff = fieldPair.flags.length &&
     (fieldPair.left?.textual || fieldPair.right?.textual) &&
     itemPair.left && itemPair.right;
