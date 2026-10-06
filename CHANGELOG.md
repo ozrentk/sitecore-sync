@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.33.1
+
+- Removed the missing-page-presentation warning from Item Details and Field Diff. Items without a detected page quietly omit the public-page link.
+
 ## 0.33.0
 
 - Add explicit Exact locale / With fallback comparison modes, preserving tree expansion and selection when switching.
