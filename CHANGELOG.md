@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.34.0
+
+- Enable synchronized Fallback toggles in Browse and Item Details as well as Compare.
+- Display Authoring's effective fields for missing translations while retaining the requested locale and version 0.
+- Show bounded, validated configured item-fallback candidates separately from unknown effective provenance; never substitute candidate content.
+- Distinguish empty fallback responses from exact-locale absence. Preserve read-only fallback comparisons and stale-request guards.
+
 ## 0.33.2
 
 - Replace the fallback dropdown with synchronized Fallback toggles in the tree comparison and Field Diff toolbars; use a Lock Languages toggle in the tree toolbar.

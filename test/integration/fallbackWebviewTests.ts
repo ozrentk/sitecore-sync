@@ -38,6 +38,8 @@ export const fallbackWebviewTests: readonly IntegrationTest[] = [{
           if (!document.querySelector(".comparison-row")) throw Error("Tree not rendered");
           receive({ ...base, selection: { ...selection, languagesLocked: true }, fallbackMode: "exact", fallbackRevision: 2 });
           if (languageLock.getAttribute("aria-pressed") !== "true" || fieldFallbackMode.getAttribute("aria-pressed") !== "false") throw Error("Toggles not updated");
+          receive({ ...base, mode: "browse", fallbackMode: "fallback", fallbackRevision: 3 });
+          if (fieldFallbackMode.closest(".toolbar-actions").hidden || !languageLock.hidden || !swapButton.hidden) throw Error("Browse toolbar state");
         ` : `
           const field = { fieldId: "a", name: "Title", label: "Title", value: "Effective text", type: "Text", typeKey: "text",
             scope: "VERSIONED", textual: true, containsFallbackValue: true, isStandardTemplate: false };
@@ -58,7 +60,11 @@ export const fallbackWebviewTests: readonly IntegrationTest[] = [{
           window.dispatchEvent(new MessageEvent("message", { data: { type: "loading", mode: "compare", fallbackMode: "fallback", contextId: 3, selection: {} } }));
           if (fieldFallbackMode.getAttribute("aria-pressed") !== "true" || !fieldFallbackMode.disabled) throw Error("Loading state");
           window.dispatchEvent(new MessageEvent("message", { data: { type: "clear", mode: "browse", fallbackMode: "exact", contextId: 4 } }));
-          if (!fieldFallbackMode.hidden) throw Error("Browse selector visible");
+          if (fieldFallbackMode.hidden || fieldFallbackMode.disabled) throw Error("Browse selector unavailable");
+          const browseDetails = { ...details, itemFallback: { status: "candidate", chain: ["en-NZ", "en-AU", "en"], candidate: { language: "en", version: 1 } } };
+          window.dispatchEvent(new MessageEvent("message", { data: { type: "snapshot", mode: "browse", contextId: 4, snapshot: { fallbackMode: "fallback", leftDetails: browseDetails } } }));
+          if (!document.body.textContent.includes("Configured fallback candidate: en-NZ → en-AU → en (v1)")) throw Error("Candidate missing");
+          if (!document.body.textContent.includes("latest version 0") || document.querySelector(".copy-value")) throw Error("Browse identity or transfer state");
         `;
         const scriptPath = join(directory, `${kind}.js`);
         await writeFile(scriptPath, `try { ${script}\n api.postMessage({ type: "smokeResult", ok: true }); } catch (error) { api.postMessage({ type: "smokeResult", error: String(error) }); }`);

@@ -74,3 +74,16 @@ test("fallback comparison hides transfers and redundant evidence UI while markin
   v.run('state.snapshot.fallbackMode = "exact";');
   strictEqual(v.run('createFieldRow(pair).children[1].children[0].className'), "value-transfer");
 });
+
+test("version-zero fallback preserves requested identity and labels configured sources as candidates", async () => {
+  const v = await view();
+  v.run(`state.mode = "browse"; const details = { itemId: "item", path: "/sitecore/Home", language: "en-NZ", version: 0,
+    template: { name: "Page" }, comparisonEvidence: { exact: { fields: [] } },
+    itemFallback: { status: "candidate", chain: ["en-NZ", "en-AU", "en"], candidate: { language: "en", version: 1 } } };
+    const summary = createSummary({ fallbackMode: "fallback", leftDetails: details });`);
+  strictEqual(v.run('summary.children[0].children[0].textContent'), "Home · Connection · en-NZ");
+  strictEqual(v.run('summary.children[0].children[1].textContent'), "/sitecore/Home · Page · latest version 0");
+  strictEqual(v.run('summary.children[0].children[1].children[0].textContent'), "Configured fallback candidate: en-NZ → en-AU → en (v1)");
+  strictEqual(v.run('emptyFieldsMessage({ fallbackMode: "fallback", leftDetails: details }, 0)'),
+    "Authoring returned no fields for en-NZ (version 0). Fallback was requested; Authoring returned no values.");
+});
