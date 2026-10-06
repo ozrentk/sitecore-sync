@@ -7,7 +7,7 @@ async function view() {
   const messages: unknown[] = [];
   const context = createContext({
     acquireVsCodeApi: () => ({ getState: () => ({ visibility: { content: "differences" } }), setState() {}, postMessage: (message: unknown) => messages.push(message) }),
-    document: { body: { classList: { toggle() {} } }, getElementById: () => ({}), querySelectorAll: () => [],
+    document: { body: { classList: { toggle() {} } }, getElementById: () => ({ addEventListener() {}, setAttribute() {} }), querySelectorAll: () => [],
       createElement: (tag: string) => ({ tag, dataset: {}, children: [] as unknown[], textContent: "", className: "", classList: { add() {} },
         append(...children: unknown[]) { this.children.push(...children); }, setAttribute() {}, addEventListener() {} }) },
     window: { addEventListener() {} },
@@ -59,7 +59,7 @@ test("empty Browse fields distinguish hidden values, API absence and failures", 
   strictEqual(v.run('state.visibility.content'), "differences");
 });
 
-test("fallback comparison hides field transfers, exposes exact evidence and marks unknown sources", async () => {
+test("fallback comparison hides transfers and redundant evidence UI while marking unknown sources", async () => {
   const v = await view();
   v.run(`state.snapshot = { fallbackMode: "fallback" };
     const pair = createPair({ ...field, containsFallbackValue: true }, { ...field, value: "different" });
@@ -70,8 +70,7 @@ test("fallback comparison hides field transfers, exposes exact evidence and mark
     } });`);
   strictEqual(v.run('row.children[1].children.every(child => child.className === "badge difference")'), true);
   strictEqual(v.run('row.children[0].children[1].textContent.includes("source language unknown")'), true);
-  strictEqual(v.run('summary.children[0].children[4].children[0].textContent'), "Exact locale values");
-  strictEqual(v.run('summary.children[0].children[4].children[1].textContent.includes("<script>untrusted</script>")'), true);
+  strictEqual(v.run('summary.children[0].children.length'), 3);
   v.run('state.snapshot.fallbackMode = "exact";');
   strictEqual(v.run('createFieldRow(pair).children[1].children[0].className'), "value-transfer");
 });

@@ -35,10 +35,10 @@ test("comparison webview assets preserve language-lock and item-icon contracts",
     ok(declaredIds.includes(matchResult[1]), `Missing DOM element #${matchResult[1]}`);
   }
 
-  match(html, /<input id="language-lock" type="checkbox">/);
-  match(html, /<span>Lock languages<\/span>/);
-  match(script, /type: "setLanguageLock", locked: languageLock\.checked/);
-  match(script, /languageLock\.checked = state\.selection\.languagesLocked === true/);
+  match(html, /<button id="language-lock"[^>]+aria-pressed="false"[^>]*>Lock Languages<\/button>/);
+  match(html, /<button id="field-fallback-mode"[^>]+aria-pressed="false"[^>]*>Fallback<\/button>/);
+  match(script, /type: "setLanguageLock", locked: state\.selection\.languagesLocked !== true/);
+  match(script, /languageLock\.setAttribute\("aria-pressed", String\(state\.selection\.languagesLocked === true\)\)/);
   match(script, /message\?\.type === "itemIconsLoaded"/);
   match(script, /message\?\.type === "itemIconsReset"/);
   match(script, /message\?\.type === "favoriteNavigationStarted"/);

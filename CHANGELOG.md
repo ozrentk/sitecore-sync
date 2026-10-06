@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.33.2
+
+- Replace the fallback dropdown with synchronized Fallback toggles in the tree comparison and Field Diff toolbars; use a Lock Languages toggle in the tree toolbar.
+- Remove duplicate fallback-mode labels, the Exact locale values disclosure and the field-transfer reminder while retaining transfer guards.
+
 ## 0.33.1
 
 - Removed the missing-page-presentation warning from Item Details and Field Diff. Items without a detected page quietly omit the public-page link.

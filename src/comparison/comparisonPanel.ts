@@ -257,6 +257,8 @@ export class ComparisonPanelManager implements vscode.Disposable {
       async (side, itemId) => {
         if (this.selectedFieldDiffItem?.[`${side}ItemId`] === itemId) { await this.openPublicPage(side, itemId); }
       },
+      async mode => { if (!this.browseMode && !this.pendingLanguageView) await this.setFieldFallbackMode(mode); },
+      () => this.fallbackMode,
     );
     this.disposables.push(
       this.fieldDiffViewProvider,

@@ -1,4 +1,8 @@
 :root { color-scheme: light dark; }
+#field-fallback-mode { font: inherit; color: var(--vscode-foreground); background: transparent; border: 1px solid var(--vscode-button-border, var(--vscode-panel-border)); padding: 3px 7px; cursor: pointer; }
+#field-fallback-mode[aria-pressed="true"] { color: var(--vscode-button-foreground); background: var(--vscode-button-background); }
+#field-fallback-mode:disabled { color: var(--vscode-disabledForeground); cursor: default; }
+#field-fallback-mode:focus-visible { outline: 1px solid var(--vscode-focusBorder); }
 [hidden] { display: none !important; }
 body:not(.browse) .browse-only { display: none; }
 body.browse .paired-grid { grid-template-columns: minmax(0, 1fr); min-width: 0; }

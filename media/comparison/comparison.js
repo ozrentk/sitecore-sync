@@ -64,9 +64,9 @@ const rightLanguageSelect = document.getElementById("right-language");
 const swapButton = document.getElementById("swap");
 const languageLock = document.getElementById("language-lock");
 const fieldFallbackMode = document.getElementById("field-fallback-mode");
-fieldFallbackMode.addEventListener("change", () => {
+fieldFallbackMode.addEventListener("click", () => {
   fieldFallbackMode.disabled = true;
-  vscode.postMessage({ type: "setFieldFallbackMode", fallbackMode: fieldFallbackMode.value });
+  vscode.postMessage({ type: "setFieldFallbackMode", fallbackMode: state.fallbackMode === "fallback" ? "exact" : "fallback" });
 });
 const workspace = document.getElementById("workspace");
 const languageSwitchStatus = document.getElementById("language-switch-status");
@@ -2006,9 +2006,9 @@ function render() {
   renderLanguageOptions("left", leftLanguageSelect, state.selection.leftLanguage);
   renderLanguageOptions("right", rightLanguageSelect, state.selection.rightLanguage);
   swapButton.disabled = state.connections.length < 1;
-  languageLock.checked = state.selection.languagesLocked === true;
+  languageLock.setAttribute("aria-pressed", String(state.selection.languagesLocked === true));
   languageLock.disabled = !state.selection.leftConnectionId || !state.selection.rightConnectionId;
-  fieldFallbackMode.value = state.fallbackMode;
+  fieldFallbackMode.setAttribute("aria-pressed", String(state.fallbackMode === "fallback"));
   fieldFallbackMode.disabled = Boolean(state.languageSwitch);
 
   updateLanguageSwitchStatus();
@@ -2603,8 +2603,8 @@ swapButton.addEventListener("click", () => {
   vscode.postMessage({ type: "swapConnections" });
 });
 
-languageLock.addEventListener("change", () => {
-  vscode.postMessage({ type: "setLanguageLock", locked: languageLock.checked });
+languageLock.addEventListener("click", () => {
+  vscode.postMessage({ type: "setLanguageLock", locked: state.selection.languagesLocked !== true });
 });
 
 window.addEventListener("message", (event) => {

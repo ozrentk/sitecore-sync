@@ -9,7 +9,7 @@ import type { IntegrationTest } from "./testSupport";
 
 /** Exercise the shipped scripts inside actual VS Code webviews, with synthetic content only. */
 export const fallbackWebviewTests: readonly IntegrationTest[] = [{
-  name: "real comparison webviews switch field policy and show safe read-only fallback evidence",
+  name: "real comparison and Field Diff webviews show synchronized fallback toggles without redundant labels",
   async execute(): Promise<void> {
     const extension = vscode.extensions.getExtension("OzrenTK.sitecore-xm-cloud-sync")!;
     const directory = await mkdtemp(join(tmpdir(), "xm-fallback-webview-"));
@@ -24,17 +24,20 @@ export const fallbackWebviewTests: readonly IntegrationTest[] = [{
           const base = { type: "stateChanged", mode: "compare", viewContext: 1, selection,
             connections: [{ id: "left", name: "Left" }, { id: "right", name: "Right" }] };
           receive({ ...base, fallbackMode: "exact", fallbackRevision: 0 });
-          if (fieldFallbackMode.value !== "exact") throw Error("Initial mode");
+          if (fieldFallbackMode.getAttribute("aria-pressed") !== "false") throw Error("Initial fallback state");
+          if (languageLock.getAttribute("aria-pressed") !== "false") throw Error("Initial lock state");
+          languageLock.click();
+          fieldFallbackMode.click();
           for (const side of ["left", "right"]) applyLoadedLevel({ side, connectionId: side, language: selection[side + "Language"],
             level: { item: { itemId: "aa", path: "/sitecore", name: "Root", hasChildren: false }, children: [] } });
           const root = state.trees.left.root;
           state.selectedRowKey = "root:aa:aa"; state.expandedRows.add("root:aa:aa");
-          fieldFallbackMode.value = "fallback";
-          fieldFallbackMode.dispatchEvent(new Event("change"));
           receive({ ...base, fallbackMode: "fallback", fallbackRevision: 1 });
-          if (fieldFallbackMode.value !== "fallback" || fieldFallbackMode.disabled) throw Error("Mode selector");
+          if (fieldFallbackMode.getAttribute("aria-pressed") !== "true" || fieldFallbackMode.disabled) throw Error("Fallback not synchronized");
           if (state.trees.left.root !== root || state.selectedRowKey !== "root:aa:aa" || !state.expandedRows.has("root:aa:aa")) throw Error("Navigation reset");
           if (!document.querySelector(".comparison-row")) throw Error("Tree not rendered");
+          receive({ ...base, selection: { ...selection, languagesLocked: true }, fallbackMode: "exact", fallbackRevision: 2 });
+          if (languageLock.getAttribute("aria-pressed") !== "true" || fieldFallbackMode.getAttribute("aria-pressed") !== "false") throw Error("Toggles not updated");
         ` : `
           const field = { fieldId: "a", name: "Title", label: "Title", value: "Effective text", type: "Text", typeKey: "text",
             scope: "VERSIONED", textual: true, containsFallbackValue: true, isStandardTemplate: false };
@@ -45,10 +48,17 @@ export const fallbackWebviewTests: readonly IntegrationTest[] = [{
           window.dispatchEvent(new MessageEvent("message", { data: { type: "snapshot", mode: "compare", contextId: 1, snapshot } }));
           if (document.querySelector(".copy-value")) throw Error("Fallback transfer visible");
           if (!document.body.textContent.includes("source language unknown")) throw Error("Unknown source missing");
-          document.querySelector("summary").click();
-          if (!document.querySelector("details").open || !document.body.textContent.includes("<script>literal content</script>")) throw Error("Exact evidence missing");
+          if (fieldFallbackMode.getAttribute("aria-pressed") !== "true" || fieldFallbackMode.hidden || fieldFallbackMode.disabled) throw Error("Toggle state");
+          if (document.querySelector("details") || document.body.textContent.includes("Field transfer requires") || document.body.textContent.includes("Exact locale values")) throw Error("Clutter remains");
+          fieldFallbackMode.click();
+          if (!fieldFallbackMode.disabled) throw Error("Selector must wait for host");
           window.dispatchEvent(new MessageEvent("message", { data: { type: "snapshot", mode: "compare", contextId: 2, snapshot: { ...snapshot, fallbackMode: "exact" } } }));
           if (document.querySelectorAll(".copy-value").length !== 2) throw Error("Exact transfers missing");
+          if (fieldFallbackMode.getAttribute("aria-pressed") !== "false" || fieldFallbackMode.disabled) throw Error("Toggle not restored");
+          window.dispatchEvent(new MessageEvent("message", { data: { type: "loading", mode: "compare", fallbackMode: "fallback", contextId: 3, selection: {} } }));
+          if (fieldFallbackMode.getAttribute("aria-pressed") !== "true" || !fieldFallbackMode.disabled) throw Error("Loading state");
+          window.dispatchEvent(new MessageEvent("message", { data: { type: "clear", mode: "browse", fallbackMode: "exact", contextId: 4 } }));
+          if (!fieldFallbackMode.hidden) throw Error("Browse selector visible");
         `;
         const scriptPath = join(directory, `${kind}.js`);
         await writeFile(scriptPath, `try { ${script}\n api.postMessage({ type: "smokeResult", ok: true }); } catch (error) { api.postMessage({ type: "smokeResult", error: String(error) }); }`);
@@ -58,12 +68,17 @@ export const fallbackWebviewTests: readonly IntegrationTest[] = [{
         };
         let timer: ReturnType<typeof setTimeout> | undefined;
         let listener: vscode.Disposable | undefined;
+        let policyMessage = false;
+        let lockMessage = false;
         try {
           const result = new Promise<void>((resolve, reject) => {
             timer = setTimeout(() => reject(new Error(`${kind} webview smoke timed out`)), 20_000);
-            listener = panel.webview.onDidReceiveMessage((message: { type?: string; ok?: boolean; error?: string }) => {
+            listener = panel.webview.onDidReceiveMessage((message: { type?: string; ok?: boolean; error?: string; fallbackMode?: string; contextId?: number; viewContext?: number; locked?: boolean }) => {
+              if (message.type === "setFieldFallbackMode") policyMessage = kind === "fieldDiff"
+                ? message.fallbackMode === "exact" && message.contextId === 1 : message.fallbackMode === "fallback" && message.viewContext === 1;
+              if (message.type === "setLanguageLock") lockMessage = message.locked === true;
               if (message.type !== "smokeResult") return;
-              try { strictEqual(message.ok, true, message.error); resolve(); } catch (error) { reject(error); }
+              try { strictEqual(message.ok, true, message.error); strictEqual(policyMessage, true); if (kind === "comparison") strictEqual(lockMessage, true); resolve(); } catch (error) { reject(error); }
             });
           });
           const html = kind === "comparison" ? await helper.loadHtml(panel.webview, media) : helper.html(panel.webview, media);

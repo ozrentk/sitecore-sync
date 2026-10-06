@@ -8,6 +8,7 @@ function visibilityMode(value, allowed, fallback) {
 }
 
 const state = {
+  fallbackMode: "exact",
   mode: "compare",
   contextId: undefined,
   browseVisibility: {
@@ -36,6 +37,11 @@ const state = {
 
 const content = document.getElementById("content");
 const visibilityGroups = document.querySelectorAll(".visibility-options");
+const fieldFallbackMode = document.getElementById("field-fallback-mode");
+fieldFallbackMode.addEventListener("click", () => {
+  fieldFallbackMode.disabled = true;
+  vscode.postMessage({ type: "setFieldFallbackMode", fallbackMode: state.fallbackMode === "fallback" ? "exact" : "fallback" });
+});
 
 function normalizeId(value) {
   return value.replace(/[{}-]/g, "").toLowerCase();
@@ -163,23 +169,6 @@ function createSummary(snapshot) {
       itemId.append(label, copy);
     }
     cell.append(title, meta, itemId);
-    if (snapshot.fallbackMode === "fallback") {
-      const note = document.createElement("div");
-      note.textContent = "With fallback · Field transfer requires Exact locale";
-      note.title = "Sitecore effective field values for the requested locale. The source language and chain are not verified; equal text does not prove the same source. These reads are not a transactional snapshot.";
-      cell.append(note);
-      const evidence = details?.comparisonEvidence;
-      if (evidence) {
-        const exact = document.createElement("details");
-        const label = document.createElement("summary");
-        label.textContent = "Exact locale values";
-        const values = document.createElement("pre");
-        values.textContent = evidence.exact.fields.map(field => `${field.name} · ${fieldSource(field)}\n${field.value || "(empty)"}`).join("\n\n") || "No exact-locale fields returned.";
-        exact.title = `Exact read: ${evidence.exactObservedAt}\nEffective read: ${evidence.effectiveObservedAt}`;
-        exact.append(label, values);
-        cell.append(exact);
-      }
-    }
     const publicUrl = snapshot[`${side}PublicPageUrl`];
     const publicError = snapshot[`${side}PublicPageError`];
     if (publicUrl && details) {
@@ -328,6 +317,9 @@ function persistVisibility() {
 }
 
 function render() {
+  fieldFallbackMode.hidden = state.mode === "browse";
+  fieldFallbackMode.setAttribute("aria-pressed", String(state.fallbackMode === "fallback"));
+  fieldFallbackMode.disabled = state.contextId === undefined || Boolean(state.loadingSelection);
   document.getElementById("details-title").textContent = state.mode === "browse" ? "Item Details · read-only" : "Field visibility";
   document.body.classList.toggle("browse", state.mode === "browse");
   updateVisibilityControls();
@@ -382,6 +374,7 @@ window.addEventListener("message", (event) => {
   const message = event.data;
   if (message?.mode) state.mode = message.mode;
   if (message?.contextId !== undefined) state.contextId = message.contextId;
+  if (message?.fallbackMode === "exact" || message?.fallbackMode === "fallback") state.fallbackMode = message.fallbackMode;
   if (message?.type === "loading") {
     state.snapshot = undefined;
     state.copyingFieldIds.clear();
@@ -389,6 +382,7 @@ window.addEventListener("message", (event) => {
     state.error = undefined;
   } else if (message?.type === "snapshot") {
     state.snapshot = message.snapshot;
+    state.fallbackMode = message.snapshot.fallbackMode ?? state.fallbackMode;
     state.loadingSelection = undefined;
     state.error = undefined;
   } else if (message?.type === "error") {

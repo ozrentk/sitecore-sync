@@ -50,20 +50,21 @@ select {
   gap: 5px;
 }
 
-.language-lock {
-  display: flex;
-  gap: 5px;
-  align-items: center;
+.comparison-toggle {
+  font: inherit;
+  padding: 3px 7px;
   color: var(--vscode-foreground);
+  background: transparent;
+  border: 1px solid var(--vscode-button-border, var(--vscode-panel-border));
   white-space: nowrap;
   cursor: pointer;
 }
-
-.language-lock input {
-  accent-color: var(--vscode-focusBorder);
+.comparison-toggle[aria-pressed="true"] {
+  color: var(--vscode-button-foreground);
+  background: var(--vscode-button-background);
 }
-
-.language-lock:has(input:disabled) {
+.comparison-toggle:focus-visible { outline: 1px solid var(--vscode-focusBorder); outline-offset: 2px; }
+.comparison-toggle:disabled {
   color: var(--vscode-disabledForeground);
   cursor: default;
 }
