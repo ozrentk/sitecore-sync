@@ -32,13 +32,13 @@ export const fallbackDiagnosticTests: readonly IntegrationTest[] = [{
       strictEqual(actual.id, connection.id); strictEqual(secret, "fixture-secret");
       selectionCalls.push(selection);
       if (cancel) { throw new DOMException("Cancelled", "AbortError"); }
-      return JSON.stringify({ formatVersion: 2, schema: { status: "complete" }, observations: [], configuration: { environmentSettings: { status: "unknown" } } });
+      return JSON.stringify({ formatVersion: 3, schema: { status: "complete" }, observations: [], configuration: { environmentSettings: { status: "unknown" } } });
     });
     try {
       await runFallbackDiagnostic(store, client);
       strictEqual(vscode.window.activeTextEditor?.document.isUntitled, true);
       strictEqual(vscode.window.activeTextEditor?.document.languageId, "json");
-      strictEqual(JSON.parse(vscode.window.activeTextEditor!.document.getText()).formatVersion, 2);
+      strictEqual(JSON.parse(vscode.window.activeTextEditor!.document.getText()).formatVersion, 3);
       deepStrictEqual(selectionCalls, [undefined]);
       probeScope = true;
       await runFallbackDiagnostic(store, client);

@@ -17,6 +17,7 @@ import {
   SitecoreHttpClient,
   type SitecoreHttpLogger,
   type SitecoreHttpRuntime,
+  type SitecoreHttpAttempt,
 } from "./sitecoreHttpClient";
 import {
   readItemIconDataUri,
@@ -1165,8 +1166,8 @@ export class AuthoringContentClient {
     const probes = selection ? buildFallbackProbes(selection.itemId, selection.languages) : [];
     signal.throwIfAborted();
     const accessToken = await this.getAccessToken(connection, clientSecret, signal);
-    const report = await collectFallbackDiagnostic(probes, (operation, query, variables) =>
-      this.postGraphQl(connection.serverUrl, accessToken, "Authoring fallback diagnostic", operation, query, variables, signal),
+    const report = await collectFallbackDiagnostic(probes, (operation, query, variables, onAttempt) =>
+      this.postGraphQl(connection.serverUrl, accessToken, "Authoring fallback diagnostic", operation, query, variables, signal, true, onAttempt),
     signal, progress, selection !== undefined);
     return serializeFallbackDiagnostic(report, [clientSecret, accessToken]);
   }
@@ -1457,6 +1458,7 @@ export class AuthoringContentClient {
     variables: Readonly<Record<string, unknown>>,
     signal: AbortSignal,
     retryable = true,
+    onAttempt?: (attempt: SitecoreHttpAttempt) => void,
   ): Promise<T> {
     const endpoint = new URL("/sitecore/api/authoring/graphql/v1/", serverUrl);
     const response = await this.http.request(
@@ -1469,7 +1471,7 @@ export class AuthoringContentClient {
         },
         body: JSON.stringify({ operationName, query, variables }),
       },
-      { name: requestName, signal, retryable },
+      { name: requestName, signal, retryable, onAttempt },
     );
     const payload = await readJson<T>(response, "Authoring GraphQL endpoint");
     if (!response.ok) {

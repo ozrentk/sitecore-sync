@@ -8,11 +8,17 @@ const id = "00000000-0000-0000-0000-000000000001";
 test("fallback spike reads every candidate exactly and cross-checks only the original locale", () => {
   const probes = buildFallbackProbes(id, ["en-NZ", "en-AU", "en"]);
   deepStrictEqual(probes.map(probe => probe.variables.where.language), ["en-NZ", "en-AU", "en", "en-NZ"]);
+  match(probes[3]!.label, /field-fallback read \(item.fields only\)/u);
   for (const [index, probe] of probes.entries()) {
     const operations: string[] = [];
     const flags: boolean[] = [];
     visit(parse(probe.query), {
       OperationDefinition(node) { operations.push(node.operation); },
+      Field(node) {
+        for (const argument of node.arguments ?? []) {
+          if (argument.name.value === "withLanguageFallback") { strictEqual(node.name.value, "fields"); }
+        }
+      },
       Argument(node) {
         if (node.name.value === "withLanguageFallback" && node.value.kind === Kind.BOOLEAN) {
           flags.push(node.value.value);

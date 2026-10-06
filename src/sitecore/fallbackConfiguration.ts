@@ -6,12 +6,14 @@ function configurationRecord(value: unknown): Record<string, unknown> | undefine
   return value !== null && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : undefined;
 }
 function fields(evidence: ProbeEvidence): Record<string, unknown>[] {
+  if (evidence.status !== "complete") { return []; }
   return evidence.pages.flatMap(page => {
     const nodes = configurationRecord(configurationRecord(configurationRecord(page.data)?.item)?.fields)?.nodes;
     return Array.isArray(nodes) ? nodes.flatMap(node => configurationRecord(node) ? [configurationRecord(node)!] : []) : [];
   });
 }
 function item(evidence: ProbeEvidence): Record<string, unknown> | undefined {
+  if (evidence.status !== "complete") { return undefined; }
   return configurationRecord(configurationRecord(evidence.pages[0]?.data)?.item);
 }
 function guid(value: unknown): string | undefined {
@@ -23,9 +25,16 @@ function relevant(field: Record<string, unknown>): boolean {
     || ["__base template", "__standard values", "shared", "unversioned"].includes(field.name.toLowerCase()));
 }
 function compact(evidence: ProbeEvidence): unknown {
-  const metadata = item(evidence);
+  const metadata = configurationRecord(configurationRecord(evidence.pages[0]?.data)?.item);
+  const summarizePages = (pages: ProbeEvidence["pages"]) => pages.map(page => ({
+    observedAt: page.observedAt, requestId: page.requestId, outerItem: page.outerItem,
+    settings: fields({ label: evidence.label, language: evidence.language, status: "complete", pages: [page] }).filter(relevant),
+  }));
   return {
     label: evidence.label, language: evidence.language, status: evidence.status, outcome: evidence.outcome,
+    issue: evidence.issue, restarts: evidence.restarts, requestIds: evidence.requestIds,
+    pages: summarizePages(evidence.pages),
+    discardedAttempts: evidence.discardedAttempts?.map(attempt => ({ reason: attempt.reason, pages: summarizePages(attempt.pages) })),
     observedAt: evidence.pages.map(page => page.observedAt),
     item: metadata ? { itemId: metadata.itemId, name: metadata.name, path: metadata.path,
       version: metadata.version, language: metadata.language, template: metadata.template, versions: metadata.versions } : null,
