@@ -1,4 +1,13 @@
 import gql from "graphql-tag";
+import { Kind, visit, type DocumentNode } from "graphql";
+
+/** Only item.fields opts into fallback; the outer lookup keeps its requested locale. */
+export function withFieldFallback(query: DocumentNode): DocumentNode {
+  return visit(query, { Argument(node) {
+    return node.name.value === "withLanguageFallback"
+      ? { ...node, value: { kind: Kind.BOOLEAN, value: true } } : undefined;
+  } });
+}
 
 export const testConnectionQuery = gql`
   query XmCloudSyncTestConnection {
@@ -92,8 +101,6 @@ export const itemDetailsQuery = gql`
         first: $pageSize
         after: $after
         ownFields: false
-        # TODO: Decide whether field comparison should resolve language fallback.
-        # See the fallback investigation in PRODUCT_SPEC.md.
         withLanguageFallback: false
       ) {
         nodes {
@@ -139,7 +146,6 @@ export const nonStandardFieldIdsQuery = gql`
         after: $after
         ownFields: false
         excludeStandardFields: true
-        # TODO: Keep this aligned with XmCloudSyncItemDetails while fallback is investigated.
         withLanguageFallback: false
       ) {
         nodes {

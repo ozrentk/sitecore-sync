@@ -1,4 +1,5 @@
 import { ContentSession, type ContentEndpoint } from "./contentSession";
+import { comparisonFieldEvidence, type ComparisonItemDetails, type FieldFallbackMode } from "./fieldFallback";
 import { modePreferencesKey, navigationEndpoint, prepareCompare, readModePreferences } from "./modeSwitching";
 import { PublicPageService, type PublicPagePreviewContext } from "../publicPages/publicPageService";
 import * as vscode from "vscode";
@@ -6,7 +7,6 @@ import type { ConnectionStore } from "../connections/connectionStore";
 import {
   AuthoringContentClient,
   AuthoringItemNotFoundError,
-  type AuthoringItemDetails,
   type AuthoringItemIconReference,
   type AuthoringItemLocator,
   type AuthoringLanguage,
@@ -67,6 +67,8 @@ interface ComparisonSelection {
 }
 
 interface WebviewMessage {
+  readonly fallbackMode?: unknown;
+  readonly fallbackRevision?: unknown;
   readonly mode?: unknown;
   readonly navigation?: unknown;
   readonly viewMode?: unknown;
@@ -180,6 +182,8 @@ class FieldDiffContentProvider implements vscode.TextDocumentContentProvider {
 }
 
 export class ComparisonPanelManager implements vscode.Disposable {
+  private fallbackMode: FieldFallbackMode = "exact";
+  private fallbackRevision = 0;
   private readonly contentSession = new ContentSession();
   private modeIntent = 0;
   private modeSwitchPicker: vscode.CancellationTokenSource | undefined;
@@ -194,8 +198,8 @@ export class ComparisonPanelManager implements vscode.Disposable {
   private readonly pendingTreeLevels = new Map<string, Promise<AuthoringTreeLevel>>();
   private readonly languageCache = new Map<string, readonly AuthoringLanguage[]>();
   private readonly pendingLanguages = new Map<string, Promise<readonly AuthoringLanguage[]>>();
-  private readonly itemDetailsCache = new Map<string, AuthoringItemDetails>();
-  private readonly pendingItemDetails = new Map<string, Promise<AuthoringItemDetails>>();
+  private readonly itemDetailsCache = new Map<string, ComparisonItemDetails>();
+  private readonly pendingItemDetails = new Map<string, Promise<ComparisonItemDetails>>();
   private readonly itemIconReferenceCache = new Map<string, string | undefined>();
   private readonly pendingItemIconReferences = new Map<string, Promise<string | undefined>>();
   private readonly itemIconCache = new Map<string, CachedItemIcon | undefined>();
@@ -471,6 +475,8 @@ export class ComparisonPanelManager implements vscode.Disposable {
     }
 
     this.log.info("Opening the comparison tab.");
+    this.fallbackMode = "exact";
+    this.fallbackRevision += 1;
 
     const comparisonMediaUri = vscode.Uri.joinPath(this.extensionUri, "media", "comparison");
     const panel = vscode.window.createWebviewPanel(
@@ -490,6 +496,9 @@ export class ComparisonPanelManager implements vscode.Disposable {
     this.panelDisposables = [
       panel.onDidDispose(() => {
         this.cancelRequests();
+        this.fallbackMode = "exact";
+        this.fallbackRevision += 1;
+        void this.clearFieldDiffSelection();
         this.disposePanelSubscriptions();
         this.panel = undefined;
         this.comparisonStateEmitter.fire();
@@ -975,6 +984,14 @@ export class ComparisonPanelManager implements vscode.Disposable {
 
   private async handleMessage(message: WebviewMessage): Promise<void> {
     if (!message || typeof message !== "object") return;
+    if (message.type === "setFieldFallbackMode") {
+      if (this.browseMode || (message.fallbackMode !== "exact" && message.fallbackMode !== "fallback")) return;
+      if (message.viewContext !== this.contentSession.revisionId) return;
+      await this.setFieldFallbackMode(message.fallbackMode);
+      return;
+    }
+    if (["loadItemDetails", "openFieldDiff"].includes(String(message.type)) &&
+        message.fallbackRevision !== undefined && message.fallbackRevision !== this.fallbackRevision) return;
     if (message.viewMode !== undefined && message.viewMode !== (this.browseMode ? "browse" : "compare")) return;
     // Queued selector changes remain valid within a mode; item actions belong to one displayed session.
     if (!this.isSelectionMessage(message) && message.viewContext !== undefined && message.viewContext !== this.contentSession?.revisionId) return;
@@ -2139,6 +2156,8 @@ export class ComparisonPanelManager implements vscode.Disposable {
     const cacheKey = this.itemDetailsCacheKey(connectionId, language, itemId);
     this.itemDetailsCache.delete(cacheKey);
     this.pendingItemDetails.delete(cacheKey);
+    this.itemDetailsCache.delete(`${cacheKey}:fallback`);
+    this.pendingItemDetails.delete(`${cacheKey}:fallback`);
   }
 
   private selectedFieldDiffItemMatchesPlans(
@@ -2644,25 +2663,28 @@ export class ComparisonPanelManager implements vscode.Disposable {
     connectionId: string,
     itemId: string,
   ): Promise<void> {
-    const isCurrentSession = this.contentSession?.capture() ?? (() => true);
+    const isCurrentSession = this.captureFieldContext();
+    const fallbackRevision = this.fallbackRevision;
     const language = this.sideLanguage(side);
     if (!this.panel || !this.isCurrentSelection(side, connectionId, language)) {
       return;
     }
     await this.panel.webview.postMessage({
       type: "itemDetailsLoading",
+      fallbackRevision,
       side,
       connectionId,
       language,
       itemId,
     });
     try {
-      const details = await this.getItemDetails(connectionId, language, itemId);
+      const details = await this.getComparisonItemDetails(connectionId, language, itemId);
       if (!isCurrentSession() || !this.panel || !this.isCurrentSelection(side, connectionId, language)) {
         return;
       }
       await this.panel.webview.postMessage({
         type: "itemDetailsLoaded",
+        fallbackRevision,
         side,
         connectionId,
         language,
@@ -2673,6 +2695,7 @@ export class ComparisonPanelManager implements vscode.Disposable {
       if (isCurrentSession() && this.panel && this.isCurrentSelection(side, connectionId, language)) {
         await this.panel.webview.postMessage({
           type: "itemDetailsLoadFailed",
+          fallbackRevision,
           side,
           connectionId,
           language,
@@ -2687,9 +2710,10 @@ export class ComparisonPanelManager implements vscode.Disposable {
     connectionId: string,
     language: string,
     itemId: string,
-  ): Promise<AuthoringItemDetails> {
-    const current = this.contentSession?.capture() ?? (() => true);
-    const cacheKey = this.itemDetailsCacheKey(connectionId, language, itemId);
+    fieldFallback = false,
+  ): Promise<ComparisonItemDetails> {
+    const current = this.captureFieldContext();
+    const cacheKey = this.itemDetailsCacheKey(connectionId, language, itemId) + (fieldFallback ? ":fallback" : "");
     const cached = this.itemDetailsCache.get(cacheKey);
     if (cached) {
       return cached;
@@ -2710,9 +2734,15 @@ export class ComparisonPanelManager implements vscode.Disposable {
       30_000,
     );
     this.requestControllers.add(controller);
-    let request: Promise<AuthoringItemDetails>;
-    request = this.authoringClient
-      .loadItemDetails(connection, clientSecret, itemId, language, controller.signal)
+    let request: Promise<ComparisonItemDetails>;
+    request = (async () => {
+      if (!fieldFallback) return this.authoringClient.loadItemDetails(connection, clientSecret, itemId, language, controller.signal);
+      // Separate reads preserve both observations, without inferring a source from equal text.
+      const exact = await this.authoringClient.loadItemDetails(connection, clientSecret, itemId, language, controller.signal);
+      const exactObservedAt = new Date().toISOString();
+      const effective = await this.authoringClient.loadItemDetails(connection, clientSecret, itemId, language, controller.signal, true);
+      return comparisonFieldEvidence(exact, effective, exactObservedAt, new Date().toISOString());
+    })()
       .then((details) => {
         if (this.pendingItemDetails.get(cacheKey) === request) {
           this.itemDetailsCache.set(cacheKey, details);
@@ -2732,6 +2762,28 @@ export class ComparisonPanelManager implements vscode.Disposable {
 
   private itemDetailsCacheKey(connectionId: string, language: string, itemId: string): string {
     return `${connectionId}:${language.toLowerCase()}:${normalizeItemId(itemId)}`;
+  }
+
+  private captureFieldContext(): () => boolean {
+    const current = this.contentSession?.capture() ?? (() => true);
+    const revision = this.fallbackRevision;
+    return () => current() && revision === this.fallbackRevision;
+  }
+
+  private getComparisonItemDetails(connectionId: string, language: string, itemId: string): Promise<ComparisonItemDetails> {
+    return this.getItemDetails(connectionId, language, itemId, !this.browseMode && this.fallbackMode === "fallback");
+  }
+
+  private async setFieldFallbackMode(mode: FieldFallbackMode): Promise<void> {
+    if (mode === this.fallbackMode) return;
+    this.fallbackMode = mode;
+    this.fallbackRevision += 1;
+    this.itemDetailsCache.clear();
+    this.pendingItemDetails.clear();
+    // Invalidate messages already queued by the bottom view, including an Exact→fallback→Exact round trip.
+    await this.fieldDiffViewProvider.clear(this.browseMode ? "browse" : "compare");
+    await this.postState();
+    await this.refreshFieldDiffView();
   }
 
   private async openFieldDiff(
@@ -2765,7 +2817,7 @@ export class ComparisonPanelManager implements vscode.Disposable {
     fieldId: string,
     direction: "leftToRight" | "rightToLeft",
   ): Promise<void> {
-    if (this.browseMode || this.pendingLanguageView) {
+    if (this.browseMode || this.pendingLanguageView || this.fallbackMode === "fallback") {
       return;
     }
     const normalizedFieldId = normalizeItemId(fieldId);
@@ -2773,6 +2825,7 @@ export class ComparisonPanelManager implements vscode.Disposable {
       return;
     }
     this.copyingFieldIds.add(normalizedFieldId);
+    const current = this.captureFieldContext();
     try {
       const selected = this.selectedFieldDiffItem;
       const selection = this.getSelection();
@@ -2800,6 +2853,7 @@ export class ComparisonPanelManager implements vscode.Disposable {
           selected.rightItemId,
         ),
       ]);
+      if (!current()) return;
       const leftField = leftDetails.fields.find(
         (field) => normalizeItemId(field.fieldId) === normalizedFieldId,
       );
@@ -2873,6 +2927,7 @@ export class ComparisonPanelManager implements vscode.Disposable {
       }
       const currentSelection = this.getSelection();
       if (
+        !current() ||
         selected !== this.selectedFieldDiffItem ||
         currentSelection.leftConnectionId !== selection.leftConnectionId ||
         currentSelection.rightConnectionId !== selection.rightConnectionId ||
@@ -2983,14 +3038,14 @@ export class ComparisonPanelManager implements vscode.Disposable {
     fieldId: string,
   ): Promise<void> {
     if (this.browseMode) return;
-    const current = this.contentSession?.capture() ?? (() => true);
+    const current = this.captureFieldContext();
     const selection = this.getSelection();
     const [leftDetails, rightDetails] = await Promise.all([
       leftItemId && selection.leftConnectionId
-        ? this.getItemDetails(selection.leftConnectionId, selection.leftLanguage, leftItemId)
+        ? this.getComparisonItemDetails(selection.leftConnectionId, selection.leftLanguage, leftItemId)
         : undefined,
       rightItemId && selection.rightConnectionId
-        ? this.getItemDetails(selection.rightConnectionId, selection.rightLanguage, rightItemId)
+        ? this.getComparisonItemDetails(selection.rightConnectionId, selection.rightLanguage, rightItemId)
         : undefined,
     ]);
     if (!current()) return;
@@ -3059,7 +3114,7 @@ export class ComparisonPanelManager implements vscode.Disposable {
   }
 
   private async refreshFieldDiffView(): Promise<void> {
-    const current = this.contentSession?.capture() ?? (() => true);
+    const current = this.captureFieldContext();
     this.publicPageController?.abort();
     if (!this.fieldDiffViewProvider.visible) {
       return;
@@ -3074,14 +3129,14 @@ export class ComparisonPanelManager implements vscode.Disposable {
     try {
       const [leftResult, rightResult] = await Promise.allSettled([
         selected.leftItemId && selection.leftConnectionId
-          ? this.getItemDetails(
+          ? this.getComparisonItemDetails(
               selection.leftConnectionId,
               selection.leftLanguage,
               selected.leftItemId,
             )
           : undefined,
         selected.rightItemId && selection.rightConnectionId
-          ? this.getItemDetails(
+          ? this.getComparisonItemDetails(
               selection.rightConnectionId,
               selection.rightLanguage,
               selected.rightItemId,
@@ -3101,6 +3156,7 @@ export class ComparisonPanelManager implements vscode.Disposable {
       }
       const snapshot = {
         ...selected,
+        fallbackMode: this.browseMode ? "exact" as const : this.fallbackMode,
         leftConnectionName: selection.leftConnectionId
           ? this.connectionStore.get(selection.leftConnectionId)?.name
           : undefined,
@@ -3126,7 +3182,7 @@ export class ComparisonPanelManager implements vscode.Disposable {
         const details = side === "left" ? leftDetails : rightDetails;
         const connectionId = selection[`${side}ConnectionId`];
         if (!service.configured || !details || !connectionId) { return undefined; }
-        return service.resolve(connectionId, details.itemId, selection[`${side}Language`], controller.signal, details);
+        return service.resolve(connectionId, details.itemId, selection[`${side}Language`], controller.signal, details.comparisonEvidence?.exact ?? details);
       }));
       clearTimeout(timeout);
       this.requestControllers.delete(controller);
@@ -3838,6 +3894,8 @@ export class ComparisonPanelManager implements vscode.Disposable {
 
     await this.panel.webview.postMessage({
       type: "stateChanged",
+      fallbackMode: this.browseMode ? "exact" : this.fallbackMode,
+      fallbackRevision: this.fallbackRevision,
       resetContent,
       viewContext: this.contentSession?.revisionId,
       mode: this.browseMode ? "browse" : "compare",

@@ -163,6 +163,23 @@ function createSummary(snapshot) {
       itemId.append(label, copy);
     }
     cell.append(title, meta, itemId);
+    if (snapshot.fallbackMode === "fallback") {
+      const note = document.createElement("div");
+      note.textContent = "With fallback · Field transfer requires Exact locale";
+      note.title = "Sitecore effective field values for the requested locale. The source language and chain are not verified; equal text does not prove the same source. These reads are not a transactional snapshot.";
+      cell.append(note);
+      const evidence = details?.comparisonEvidence;
+      if (evidence) {
+        const exact = document.createElement("details");
+        const label = document.createElement("summary");
+        label.textContent = "Exact locale values";
+        const values = document.createElement("pre");
+        values.textContent = evidence.exact.fields.map(field => `${field.name} · ${fieldSource(field)}\n${field.value || "(empty)"}`).join("\n\n") || "No exact-locale fields returned.";
+        exact.title = `Exact read: ${evidence.exactObservedAt}\nEffective read: ${evidence.effectiveObservedAt}`;
+        exact.append(label, values);
+        cell.append(exact);
+      }
+    }
     const publicUrl = snapshot[`${side}PublicPageUrl`];
     const publicError = snapshot[`${side}PublicPageError`];
     if (publicUrl && details) {
@@ -222,6 +239,7 @@ function createFieldCell(field, pair) {
   const metadata = document.createElement("div");
   metadata.className = "metadata";
   metadata.textContent = `${field.type} · ${field.scope.toLowerCase()} · ${fieldSource(field)}`;
+  if (field.containsFallbackValue) metadata.textContent += " · source language unknown";
   metadata.title = `Field ID: ${field.fieldId}${field.sectionName ? `\nSection: ${field.sectionName}` : ""}`;
   const value = document.createElement("pre");
   value.textContent = field.value || "(empty)";
@@ -249,7 +267,7 @@ function createFieldRow(pair) {
     const badge = document.createElement("span");
     badge.className = "badge difference";
     badge.textContent = flag;
-    if (flag === "Value" && pair.left && pair.right) {
+    if (flag === "Value" && pair.left && pair.right && state.snapshot?.fallbackMode !== "fallback") {
       const transfer = document.createElement("div");
       transfer.className = "value-transfer";
       const leftToRight = document.createElement("button");

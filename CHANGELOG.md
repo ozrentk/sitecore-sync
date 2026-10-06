@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.33.0
+
+- Add explicit Exact locale / With fallback comparison modes, preserving tree expansion and selection when switching.
+- Compare Sitecore-provided effective fields independently on each side, retain inspectable exact values, and label unverified fallback sources unknown.
+- Restrict field transfers to Exact locale and reject stale transfers and detail results across mode changes. Browse, publishing and tree transfers keep their existing semantics.
+
 ## 0.32.1
 
 - Validate fallback diagnostic outer item identity and requested locale without rejecting legitimate fallback field values.

@@ -1,6 +1,6 @@
 # Language fallback technical spike — B04
 
-Status as of 2026-10-03: offline investigation and authenticated diagnostic tooling completed in 0.26.0; live environment schema/configuration and runtime verification pending. B04 comparison integration is not implemented. B03 publishing and B26 editor integration remain separate work.
+Status as of 2026-10-06: B04's first comparison delivery uses Sitecore-provided effective fields and explicitly unknown fallback sources. The calculated resolver and verified source chains remain deferred; configuration and runtime-rule verification are incomplete. B03 publishing and B26 editor integration remain separate work. The earlier implementation gate below records the original, broader resolver plan; the bounded-delivery section records the approved narrower scope.
 
 ## Agreed implementation contract
 
@@ -236,3 +236,9 @@ Mock requests reproduced two collector validation gaps: wrong outer languages an
 Format 3 validates the outer identity/locale on exact and field-fallback reads. A numbered-version change restarts the affected probe once from page one, requesting latest again with version omitted. Discarded attempts remain separate diagnostic evidence; repeated drift reports incomplete/item-changed. Page, byte and request limits cover both attempts. Stable versions are still not transactional snapshots and cannot detect every same-version edit.
 
 The cross-check is now labeled a field-fallback read: the argument belongs to `item.fields`, not the outer item query. Outer returned identity/language/version is displayed separately and is not evidence of whole-item substitution or field-source provenance. Reports retain deduplicated fixed queries, actual request variables, per-request times and safe per-HTTP-attempt timing/status/retry evidence, including failed requests. They exclude headers, cookies, credentials and raw error messages. Backend identification/affinity remains deferred under B30, with no routing changes. These corrections use mock regression coverage; no new live observations or Sitecore writes were performed for this update.
+
+### Bounded comparison delivery (2026-10-06, 0.33.0)
+
+A read-only format-3 verification collected four reports with 16 complete item probes and 156 traced requests. NZ/AU exact and effective reads repeated consistently, without retries or discarded attempts. Schema remained unavailable, environment settings unknown and template traversal partial. No content changed. This verifies the current fixture state, not the earlier inconsistent rule-mutation cases.
+
+The user approved implementing comparison behavior first: use Sitecore effective fields with explicit unknown source language, retaining exact evidence. This narrows the original resolver gate for the first delivery only. A calculated source resolver, verified chains, historical fallback, whole-item substitution, B03 publishing and B26 editor integration remain deferred. New tabs default to Exact locale; With fallback survives navigation and refreshes fields without rebuilding the tree. Field-transfer mode and stale-request guards apply in the extension host as well as the UI.

@@ -7,6 +7,7 @@ import {
   addItemVersionMutation,
   deleteItemMutation,
   itemDetailsQuery,
+  withFieldFallback,
   languagesQuery,
   nonStandardFieldIdsQuery,
   testConnectionQuery,
@@ -1178,6 +1179,7 @@ export class AuthoringContentClient {
     itemId: string,
     language: string,
     signal: AbortSignal,
+    fieldFallback = false,
   ): Promise<AuthoringItemDetails> {
     return this.loadItem(
       connection,
@@ -1186,6 +1188,7 @@ export class AuthoringContentClient {
       language,
       undefined,
       signal,
+      fieldFallback,
     );
   }
 
@@ -1196,6 +1199,7 @@ export class AuthoringContentClient {
     language: string,
     version: number | undefined,
     signal: AbortSignal,
+    fieldFallback = false,
   ): Promise<AuthoringItemDetails> {
     const accessToken = await this.getAccessToken(connection, clientSecret, signal);
     const where = {
@@ -1205,8 +1209,8 @@ export class AuthoringContentClient {
       ...(version === undefined ? {} : { version }),
     };
     const [rawDetails, nonStandardFieldIds] = await Promise.all([
-      this.loadItemDetailsPages(connection.serverUrl, accessToken, where, signal),
-      this.loadNonStandardFieldIds(connection.serverUrl, accessToken, where, signal),
+      this.loadItemDetailsPages(connection.serverUrl, accessToken, where, signal, fieldFallback),
+      this.loadNonStandardFieldIds(connection.serverUrl, accessToken, where, signal, fieldFallback),
     ]);
     return parseItemDetails(rawDetails, nonStandardFieldIds);
   }
@@ -1384,6 +1388,7 @@ export class AuthoringContentClient {
     accessToken: string,
     where: Readonly<Record<string, unknown>>,
     signal: AbortSignal,
+    fieldFallback = false,
   ): Promise<RawItemDetails> {
     const fields: RawItemField[] = [];
     const seenCursors = new Set<string>();
@@ -1395,13 +1400,22 @@ export class AuthoringContentClient {
         accessToken,
         "Sitecore Authoring item-details query",
         "XmCloudSyncItemDetails",
-        print(itemDetailsQuery),
+        print(fieldFallback ? withFieldFallback(itemDetailsQuery) : itemDetailsQuery),
         { where, pageSize: 100, after: after ?? null },
         signal,
       );
       if (!payload.data?.item) {
         throw new Error("The requested Authoring item was not found.");
       }
+      if (fieldFallback && (
+        typeof payload.data.item.itemId !== "string" ||
+        (typeof where.itemId === "string" && normalizeGuid(payload.data.item.itemId) !== normalizeGuid(where.itemId)) ||
+        (typeof where.path === "string" && String(payload.data.item.path).toLowerCase() !== where.path.toLowerCase()) ||
+        typeof payload.data.item.language?.name !== "string" ||
+        payload.data.item.language.name.toLowerCase() !== String(where.language).toLowerCase() ||
+        !Number.isInteger(payload.data.item.version) || Number(payload.data.item.version) < 0 ||
+        (item && item.version !== payload.data.item.version)
+      )) throw new Error("Fallback field read returned a different item, locale or version. Refresh and retry.");
       item ??= payload.data.item;
       fields.push(...(payload.data.item.fields?.nodes ?? []));
       after = nextCursor(payload.data.item.fields?.pageInfo, "item fields");
@@ -1415,6 +1429,7 @@ export class AuthoringContentClient {
     accessToken: string,
     where: Readonly<Record<string, unknown>>,
     signal: AbortSignal,
+    fieldFallback = false,
   ): Promise<ReadonlySet<string>> {
     const fieldIds = new Set<string>();
     const seenCursors = new Set<string>();
@@ -1425,7 +1440,7 @@ export class AuthoringContentClient {
         accessToken,
         "Sitecore Authoring non-Standard fields query",
         "XmCloudSyncNonStandardFieldIds",
-        print(nonStandardFieldIdsQuery),
+        print(fieldFallback ? withFieldFallback(nonStandardFieldIdsQuery) : nonStandardFieldIdsQuery),
         { where, pageSize: 100, after: after ?? null },
         signal,
       );

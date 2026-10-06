@@ -6,7 +6,7 @@ const vscode = { postMessage(message) {
     if (message.type === "selectFieldDiffItem") message = { ...message, type: "selectBrowseItem" };
     if (message.type === "showDetailedFieldDiff") message = { ...message, type: "showBrowseItem" };
   }
-  api.postMessage(state.viewContext === undefined ? message : { ...message, viewContext: state.viewContext, viewMode: state.mode });
+  api.postMessage(state.viewContext === undefined ? message : { ...message, viewContext: state.viewContext, viewMode: state.mode, fallbackRevision: state.fallbackRevision });
 } };
 
 function emptyTreeState(connectionId, language) {
@@ -20,6 +20,8 @@ function emptyTreeState(connectionId, language) {
 }
 
 const state = {
+  fallbackMode: "exact",
+  fallbackRevision: 0,
   mode: "compare",
   connections: [],
   selection: {},
@@ -61,6 +63,11 @@ const leftLanguageSelect = document.getElementById("left-language");
 const rightLanguageSelect = document.getElementById("right-language");
 const swapButton = document.getElementById("swap");
 const languageLock = document.getElementById("language-lock");
+const fieldFallbackMode = document.getElementById("field-fallback-mode");
+fieldFallbackMode.addEventListener("change", () => {
+  fieldFallbackMode.disabled = true;
+  vscode.postMessage({ type: "setFieldFallbackMode", fallbackMode: fieldFallbackMode.value });
+});
 const workspace = document.getElementById("workspace");
 const languageSwitchStatus = document.getElementById("language-switch-status");
 const languageSwitchText = document.getElementById("language-switch-text");
@@ -1622,7 +1629,7 @@ function fieldTooltip(field) {
     `Field ID: ${field.fieldId}`,
     `Type: ${field.type}`,
     `Scope: ${field.scope.toLowerCase()}`,
-    `Source: ${fieldSource(field)}`,
+    `Source: ${fieldSource(field)}${field.containsFallbackValue ? " · source language unknown" : ""}`,
     field.sectionName ? `Section: ${field.sectionName}` : undefined,
     `Value: ${field.value || "(empty)"}`,
   ].filter(Boolean).join("\n");
@@ -1667,6 +1674,12 @@ function createFieldCell(field, side, depth, fieldPair) {
   const value = document.createElement("span");
   value.className = "field-value";
   value.textContent = field.value || "(empty)";
+  if (field.containsFallbackValue) {
+    const source = document.createElement("span");
+    source.className = "field-provenance";
+    source.textContent = "Fallback · source unknown";
+    name.append(source);
+  }
   cell.title = fieldTooltip(field);
   if (fieldPair.flags.includes("fieldTypeMismatch")) {
     const type = document.createElement("span");
@@ -1995,6 +2008,8 @@ function render() {
   swapButton.disabled = state.connections.length < 1;
   languageLock.checked = state.selection.languagesLocked === true;
   languageLock.disabled = !state.selection.leftConnectionId || !state.selection.rightConnectionId;
+  fieldFallbackMode.value = state.fallbackMode;
+  fieldFallbackMode.disabled = Boolean(state.languageSwitch);
 
   updateLanguageSwitchStatus();
   if (state.connections.length < 1) {
@@ -2498,6 +2513,7 @@ function applyLanguagesMessage(message, status) {
 }
 
 function applyItemDetailsMessage(message, status) {
+  if (message.fallbackRevision !== undefined && message.fallbackRevision !== state.fallbackRevision) return;
   const tree = state.trees[message.side];
   if (
     !tree ||
@@ -2662,6 +2678,13 @@ window.addEventListener("message", (event) => {
     });
     return;
   } else if (message?.type === "stateChanged") {
+    if (state.fallbackMode !== (message.fallbackMode || "exact") ||
+        (message.fallbackRevision !== undefined && state.fallbackRevision !== message.fallbackRevision)) {
+      clearNodeDetails(state.trees.left.root);
+      clearNodeDetails(state.trees.right.root);
+    }
+    state.fallbackMode = message.fallbackMode || "exact";
+    state.fallbackRevision = message.fallbackRevision ?? 0;
     if (JSON.stringify(state.selection) !== JSON.stringify(message.selection)) { clearItemLookupUi(); }
     const mode = message.mode || "compare";
     const previousMode = state.mode;

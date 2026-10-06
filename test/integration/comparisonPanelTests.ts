@@ -38,6 +38,41 @@ interface ComparisonPanelHarness {
 }
 
 export const comparisonPanelTests: readonly IntegrationTest[] = [{
+  name: "fallback comparison preserves navigation and fences in-flight field transfers across mode round trips",
+  async execute(): Promise<void> {
+    const session = new ContentSession();
+    session.openCompare({ connectionId: "one", language: "fr", rootPath: "/sitecore", selectedItemId: "left" },
+      { connectionId: "two", language: "fr", rootPath: "/sitecore", selectedItemId: "right" });
+    const initial = session.state;
+    let reads = 0, enqueues = 0, invalidations = 0;
+    let finish!: (value: AuthoringItemDetails) => void;
+    const pending = new Promise<AuthoringItemDetails>(resolve => { finish = resolve; });
+    const manager = Object.create(ComparisonPanelManager.prototype) as {
+      setFieldFallbackMode(mode: string): Promise<void>;
+      copySelectedFieldValue(id: string, direction: string): Promise<void>;
+      handleMessage(message: unknown): Promise<void>;
+    };
+    Object.assign(manager, { contentSession: session, fallbackMode: "exact", fallbackRevision: 0,
+      copyingFieldIds: new Set(), itemDetailsCache: new Map(), pendingItemDetails: new Map(),
+      selectedFieldDiffItem: { leftItemId: "left", rightItemId: "right" },
+      getSelection: () => ({ leftConnectionId: "one", rightConnectionId: "two", leftLanguage: "fr", rightLanguage: "fr" }),
+      getItemDetails: async () => { reads++; return pending; },
+      fieldDiffViewProvider: { clear: async () => { invalidations++; } },
+      postState: async () => undefined, refreshFieldDiffView: async () => undefined,
+      transferQueue: { enqueue: async () => { enqueues++; } },
+    });
+    const transfer = manager.copySelectedFieldValue("field", "leftToRight");
+    await manager.setFieldFallbackMode("fallback");
+    await manager.copySelectedFieldValue("another-field", "leftToRight");
+    strictEqual(reads, 2);
+    await manager.setFieldFallbackMode("exact");
+    finish(itemDetails("left")); await transfer;
+    strictEqual(enqueues, 0);
+    strictEqual(invalidations, 2);
+    strictEqual(session.state, initial);
+    session.dispose();
+  },
+}, {
   name: "opening the only configured connection enters Browse and loads only its source",
   async execute(): Promise<void> {
     const one = connection("one", "One");

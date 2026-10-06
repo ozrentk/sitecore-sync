@@ -1,5 +1,5 @@
 import * as vscode from "vscode";
-import type { AuthoringItemDetails } from "../sitecore/authoringClient";
+import type { ComparisonItemDetails, FieldFallbackMode } from "./fieldFallback";
 
 export const fieldDiffViewId = "xmCloudSync.fieldDiff";
 
@@ -12,14 +12,15 @@ export interface FieldDiffSelection {
 }
 
 export interface FieldDiffSnapshot extends FieldDiffSelection {
+  readonly fallbackMode?: FieldFallbackMode;
   readonly leftPublicPageUrl?: string;
   readonly rightPublicPageUrl?: string;
   readonly leftPublicPageError?: string;
   readonly rightPublicPageError?: string;
   readonly leftConnectionName?: string;
   readonly rightConnectionName?: string;
-  readonly leftDetails?: AuthoringItemDetails;
-  readonly rightDetails?: AuthoringItemDetails;
+  readonly leftDetails?: ComparisonItemDetails;
+  readonly rightDetails?: ComparisonItemDetails;
   readonly leftError?: string;
   readonly rightError?: string;
   readonly textNormalization: "none" | "lineEndings";

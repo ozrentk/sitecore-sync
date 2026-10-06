@@ -58,3 +58,20 @@ test("empty Browse fields distinguish hidden values, API absence and failures", 
   strictEqual(v.run('state.browseVisibility.system'), "all");
   strictEqual(v.run('state.visibility.content'), "differences");
 });
+
+test("fallback comparison hides field transfers, exposes exact evidence and marks unknown sources", async () => {
+  const v = await view();
+  v.run(`state.snapshot = { fallbackMode: "fallback" };
+    const pair = createPair({ ...field, containsFallbackValue: true }, { ...field, value: "different" });
+    const row = createFieldRow(pair);
+    const summary = createSummary({ fallbackMode: "fallback", leftDetails: {
+      itemId: "item", path: "/sitecore/Home", language: "en-NZ", version: 0, template: { name: "Page" },
+      comparisonEvidence: { exact: { fields: [field] }, exactObservedAt: "a", effectiveObservedAt: "b" }
+    } });`);
+  strictEqual(v.run('row.children[1].children.every(child => child.className === "badge difference")'), true);
+  strictEqual(v.run('row.children[0].children[1].textContent.includes("source language unknown")'), true);
+  strictEqual(v.run('summary.children[0].children[4].children[0].textContent'), "Exact locale values");
+  strictEqual(v.run('summary.children[0].children[4].children[1].textContent.includes("<script>untrusted</script>")'), true);
+  v.run('state.snapshot.fallbackMode = "exact";');
+  strictEqual(v.run('createFieldRow(pair).children[1].children[0].className'), "value-transfer");
+});
