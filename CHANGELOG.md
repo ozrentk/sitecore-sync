@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.32.1
+
+- Validate fallback diagnostic outer item identity and requested locale without rejecting legitimate fallback field values.
+- Restart a paginated probe once from page one on numbered-version drift; separate discarded evidence and report repeated drift as incomplete/item-changed within shared collection budgets.
+- Label the original-locale cross-check as an item.fields-only field-fallback read and expose outer returned metadata separately.
+- Include fixed queries, actual variables/cursors, omitted/latest version selection, and safe HTTP attempt timing/status/retry evidence in diagnostic format 3. Preserve existing routing and authentication behavior.
+
 ## 0.32.0
 
 - Add confirmed MCP control of the two fallback rule checkboxes on isolated fixture field definitions, including first metadata-language version creation when needed.

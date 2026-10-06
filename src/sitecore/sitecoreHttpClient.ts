@@ -13,6 +13,18 @@ export interface SitecoreRequestOptions {
   readonly name: string;
   readonly signal: AbortSignal;
   readonly retryable: boolean;
+  readonly onAttempt?: (attempt: SitecoreHttpAttempt) => void;
+}
+
+/** Allowlisted transport evidence only: never include URLs, headers, bodies or error messages. */
+export interface SitecoreHttpAttempt {
+  readonly attempt: number;
+  readonly startedAt: string;
+  readonly elapsedMilliseconds: number;
+  readonly outcome: "response" | "network-failure" | "cancelled";
+  readonly status?: number;
+  readonly retryScheduled: boolean;
+  readonly retryDelayMilliseconds?: number;
 }
 
 export interface SitecoreHttpRuntime {
@@ -49,6 +61,17 @@ export class SitecoreHttpClient {
       await this.waitForOrigin(url.origin, options.name, options.signal);
       throwIfAborted(options.signal);
 
+      const startedAt = this.runtime.now();
+      let reported = false;
+      const report = (details: Omit<SitecoreHttpAttempt, "attempt" | "startedAt" | "elapsedMilliseconds">): void => {
+        if (reported) { return; }
+        reported = true;
+        // Observation must never change request/retry behavior.
+        try {
+          options.onAttempt?.({ attempt: attempt + 1, startedAt: new Date(startedAt).toISOString(),
+            elapsedMilliseconds: Math.max(0, this.runtime.now() - startedAt), ...details });
+        } catch { /* Ignore diagnostic observer failures. */ }
+      };
       try {
         this.log.trace(
           `${options.name}: HTTP attempt ${attempt + 1}/${maximumRetryCount + 1}.`,
@@ -71,6 +94,7 @@ export class SitecoreHttpClient {
               `${options.name}: stopped retrying after ${maximumRetryCount + 1} attempts (HTTP ${response.status}).`,
             );
           }
+          report({ outcome: "response", status: response.status, retryScheduled: false });
           return response;
         }
 
@@ -80,6 +104,7 @@ export class SitecoreHttpClient {
           this.runtime.now(),
           this.runtime.random(),
         );
+        report({ outcome: "response", status: response.status, retryScheduled: true, retryDelayMilliseconds: delay });
         void response.body?.cancel().catch(() => undefined);
         this.blockOrigin(url.origin, delay);
         this.log.warn(
@@ -88,6 +113,7 @@ export class SitecoreHttpClient {
         await this.runtime.wait(delay, options.signal);
       } catch (error: unknown) {
         if (options.signal.aborted) {
+          report({ outcome: "cancelled", retryScheduled: false });
           throw abortReason(options.signal);
         }
         if (!retryable || attempt === maximumRetryCount) {
@@ -96,10 +122,12 @@ export class SitecoreHttpClient {
               `${options.name}: stopped retrying after ${maximumRetryCount + 1} attempts because of a network failure.`,
             );
           }
+          report({ outcome: "network-failure", retryScheduled: false });
           throw error;
         }
 
         const delay = exponentialDelayMilliseconds(attempt, this.runtime.random());
+        report({ outcome: "network-failure", retryScheduled: true, retryDelayMilliseconds: delay });
         this.blockOrigin(url.origin, delay);
         this.log.warn(
           `${options.name}: network failure; retrying attempt ${attempt + 2}/${maximumRetryCount + 1} in ${formatDelay(delay)}.`,

@@ -75,3 +75,20 @@ test("configuration follows locale-name references and terminates case-insensiti
   strictEqual(result.links.every(link => link.interpretation === "reference-observed"), true);
   strictEqual(result.coverage.languageTraversalTruncated, false);
 });
+
+test("configuration excludes invalid and discarded pages from discovery but retains separate diagnostic evidence", async () => {
+  const stale = evidence(id(1), [{ name: "Stale", templateField: { templateFieldId: id(9) } }], "en", id(8));
+  const valid = evidence(id(1), [{ name: "Current", templateField: { templateFieldId: id(4) } }]);
+  const invalid: ProbeEvidence = { ...stale, status: "invalid-response", issue: "outer-language-mismatch" };
+  const restarted: ProbeEvidence = { ...valid, discardedAttempts: [{ reason: "item-changed", pages: stale.pages }],
+    restarts: [{ reason: "item-version-drift", afterRequestId: 3 }], requestIds: [2, 3, 4] };
+  const requested: string[] = [];
+  const result = await collectFallbackConfiguration([invalid, restarted], ["en"], async (_label, locator) => {
+    requested.push("itemId" in locator ? locator.itemId : locator.path);
+    return { ...evidence(id(2), [setting("Fallback Language", id(7))]), status: "invalid-response", issue: "outer-item-mismatch" };
+  }, new AbortController().signal) as Configuration & { itemSettings: { discardedAttempts?: unknown[]; requestIds?: number[] }[] };
+  deepStrictEqual(requested, ["/sitecore/system/Languages/en", id(4)]);
+  strictEqual(result.links.length, 0);
+  strictEqual(result.itemSettings[1]!.discardedAttempts?.length, 1);
+  deepStrictEqual(result.itemSettings[1]!.requestIds, [2, 3, 4]);
+});
