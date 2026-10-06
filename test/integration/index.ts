@@ -12,6 +12,7 @@ import { operationSequenceStoreTests } from "./operationSequenceStoreTests";
 import { publishingFormTests } from "./publishingFormTests";
 import { publishingManagerTests } from "./publishingManagerTests";
 import { transferProcessorTests } from "./transferProcessorTests";
+import { fallbackWebviewTests } from "./fallbackWebviewTests";
 import { transferQueueStoreTests } from "./transferQueueStoreTests";
 
 const extensionId = "OzrenTK.sitecore-xm-cloud-sync";
@@ -31,6 +32,7 @@ interface IntegrationTest {
 }
 
 const integrationTests: readonly IntegrationTest[] = [
+  ...fallbackWebviewTests,
   {
     name: "exposes the unified dashboard on connection context menus",
     async execute(): Promise<void> {

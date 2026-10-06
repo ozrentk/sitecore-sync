@@ -5,6 +5,7 @@ import { test } from "node:test";
 import { createContext, Script } from "node:vm";
 
 async function webview() {
+  let receive: ((event: { data: unknown }) => void) | undefined;
   const messages: Array<Record<string, unknown>> = [];
   const replacements: unknown[] = [];
   const context = createContext({
@@ -15,7 +16,7 @@ async function webview() {
       addEventListener: () => undefined,
       querySelectorAll: () => [],
     },
-    window: { addEventListener: () => undefined },
+    window: { addEventListener: (type: string, listener: (event: { data: unknown }) => void) => { if (type === "message") receive = listener; } },
     requestAnimationFrame: (callback: () => void) => callback(),
   });
   new Script(await readFile(resolve("media/comparison/comparison.js"), "utf8")).runInContext(context);
@@ -69,8 +70,24 @@ async function webview() {
       }
     }
   };
-  return { run, messages, drain, replacements };
+  return { run, messages, drain, replacements, receive: (data: unknown) => receive?.({ data }) };
 }
+
+test("field fallback mode changes preserve expanded nodes and selection while rejecting obsolete detail results", async () => {
+  const view = await webview();
+  view.run(`const rootBeforeFallback = state.trees.left.root;
+    state.trees.left.root.details = { fields: [] }; state.trees.left.root.detailsLoaded = true;`);
+  view.receive({ type: "stateChanged", mode: "compare", fallbackMode: "fallback", fallbackRevision: 1,
+    connections: [{ id: "left" }, { id: "right" }],
+    selection: { leftConnectionId: "left", rightConnectionId: "right", leftLanguage: "en", rightLanguage: "en" } });
+  strictEqual(view.run('state.trees.left.root === rootBeforeFallback'), true);
+  strictEqual(view.run('state.selectedRowKey'), "id:ee");
+  strictEqual(view.run('state.expandedRows.has("id:bb")'), true);
+  strictEqual(view.run('state.fallbackMode'), "fallback");
+  view.run(`applyItemDetailsMessage({ side: "left", connectionId: "left", language: "en", itemId: "aa",
+    fallbackRevision: 0, details: { fields: ["obsolete"] } }, "loaded");`);
+  strictEqual(view.run('state.trees.left.root.details'), undefined);
+});
 
 test("language changes prepare selection and branches before committing and preserve the unchanged side", async () => {
   const view = await webview();

@@ -12,6 +12,51 @@ import {
 
 const signal = new AbortController().signal;
 
+test("comparison fallback is opt-in for both field queries and preserves requested locale and version zero", async () => {
+  for (const fallback of [false, true]) {
+    const runtime = new QueuedHttpRuntime([tokenResponse(), jsonResponse({ data: { item: {
+      itemId: "item-id", name: "Home", path: "/sitecore/Home", language: { name: "en-NZ" }, version: 0,
+      template: { templateId: "template", name: "Page" }, fields: null,
+    } } }), jsonResponse({ data: { item: { fields: null } } })]);
+    const item = await new AuthoringContentClient(noOpLogger, runtime)
+      .loadItemDetails(testConnection, "secret", "item-id", "en-NZ", signal, fallback);
+    strictEqual(item.version, 0);
+    for (const index of [1, 2]) {
+      const request = requestBody(runtime, index);
+      match(String(request.query), new RegExp(`withLanguageFallback: ${fallback}`));
+      deepStrictEqual((request.variables as { where: unknown }).where, { database: "master", itemId: "item-id", language: "en-NZ" });
+    }
+  }
+});
+
+test("fallback field reads reject outer locale and identity mismatches", async () => {
+  for (const wrong of [{ itemId: "wrong", language: { name: "en-NZ" } }, { itemId: "item-id", language: { name: "en" } }]) {
+    const runtime = new QueuedHttpRuntime([tokenResponse(), jsonResponse({ data: { item: {
+      ...wrong, version: 1, fields: { nodes: [], pageInfo: { hasNextPage: false } },
+    } } }), jsonResponse({ data: { item: { fields: null } } })]);
+    await rejects(new AuthoringContentClient(noOpLogger, runtime)
+      .loadItemDetails(testConnection, "secret", "item-id", "en-NZ", signal, true), /different item, locale or version/u);
+  }
+});
+
+test("fallback pagination preserves its policy and rejects numbered-version drift", async () => {
+  for (const nextVersion of [1, 2]) {
+    const page = (version: number, more: boolean) => jsonResponse({ data: { item: {
+      itemId: "item-id", name: "Home", path: "/sitecore/Home", language: { name: "en-NZ" }, version,
+      template: { templateId: "template", name: "Page" },
+      fields: { nodes: [], pageInfo: { hasNextPage: more, endCursor: more ? "next" : null } },
+    } } });
+    const runtime = new QueuedHttpRuntime([tokenResponse(), page(1, true),
+      jsonResponse({ data: { item: { fields: null } } }), page(nextVersion, false)]);
+    const read = new AuthoringContentClient(noOpLogger, runtime)
+      .loadItemDetails(testConnection, "secret", "item-id", "en-NZ", signal, true);
+    if (nextVersion === 2) await rejects(read, /different item, locale or version/u);
+    else strictEqual((await read).version, 1);
+    match(String(requestBody(runtime, 3).query), /withLanguageFallback: true/u);
+    strictEqual((requestBody(runtime, 3).variables as { after: string }).after, "next");
+  }
+});
+
 function treeItem(itemId: string, name: string, path: string) {
   return { itemId, name, displayName: `${name} display`, path, hasChildren: true };
 }
