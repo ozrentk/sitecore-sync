@@ -147,6 +147,26 @@ function metaLine(details, error) {
   return `${details.path} · ${details.template.name} · latest version ${details.version}`;
 }
 
+function identityCopyButton(side, details, kind) {
+  const copy = document.createElement("button");
+  const value = kind === "id" ? details.itemId : details.path;
+  const label = kind === "id" ? "ID" : "path";
+  copy.type = "button";
+  copy.className = "identity-copy";
+  copy.dataset[kind === "id" ? "copyItemId" : "copyItemPath"] = side;
+  copy.dataset.itemId = details.itemId;
+  copy.dataset.copyValue = value;
+  copy.textContent = value;
+  copy.title = state.mode === "browse" ? `Copy item ${label}` : `Copy ${side} item ${label}`;
+  copy.setAttribute("aria-label", `${copy.title} ${value}`);
+  copy.setAttribute("aria-live", "polite");
+  copy.addEventListener("click", () => {
+    copy.disabled = true;
+    vscode.postMessage({ type: kind === "id" ? "copyItemId" : "copyItemPath", side, itemId: details.itemId });
+  });
+  return copy;
+}
+
 function createSummary(snapshot) {
   const summary = document.createElement("section");
   summary.className = "summary paired-grid";
@@ -162,7 +182,11 @@ function createSummary(snapshot) {
     );
     const meta = document.createElement("span");
     const error = snapshot[`${side}Error`];
-    meta.textContent = metaLine(details, error);
+    if (details && !error) {
+      const context = document.createElement("span");
+      context.textContent = ` · ${details.template.name} · latest version ${details.version}`;
+      meta.append(identityCopyButton(side, details, "path"), context);
+    } else meta.textContent = metaLine(details, error);
     if (details?.comparisonEvidence && details.version === 0) {
       const observation = details.itemFallback;
       const note = document.createElement("span");
@@ -181,17 +205,7 @@ function createSummary(snapshot) {
     if (details) {
       const label = document.createElement("span");
       label.textContent = "ID";
-      const copy = document.createElement("button");
-      copy.type = "button";
-      copy.dataset.copyItemId = side;
-      copy.dataset.itemId = details.itemId;
-      copy.textContent = details.itemId;
-      copy.title = state.mode === "browse" ? "Copy item ID" : `Copy ${side} item ID`;
-      copy.setAttribute("aria-label", state.mode === "browse" ? `Copy item ID ${details.itemId}` : `Copy ${side} item ID ${details.itemId}`);
-      copy.addEventListener("click", () => {
-        copy.disabled = true;
-        vscode.postMessage({ type: "copyItemId", side, itemId: details.itemId });
-      });
+      const copy = identityCopyButton(side, details, "id");
       itemId.append(label, copy);
     }
     cell.append(title, meta, itemId);
@@ -400,6 +414,7 @@ for (const group of visibilityGroups) {
 }
 window.addEventListener("message", (event) => {
   const message = event.data;
+  if (["itemIdCopyFinished", "itemPathCopyFinished"].includes(message?.type) && message.contextId !== state.contextId) return;
   if (message?.mode) state.mode = message.mode;
   if (message?.contextId !== undefined) state.contextId = message.contextId;
   if (message?.fallbackMode === "exact" || message?.fallbackMode === "fallback") state.fallbackMode = message.fallbackMode;
@@ -424,22 +439,22 @@ window.addEventListener("message", (event) => {
   } else if (message?.type === "copyFinished" && typeof message.fieldId === "string") {
     state.copyingFieldIds.delete(normalizeId(message.fieldId));
   } else if (
-    message?.type === "itemIdCopyFinished" &&
+    (message?.type === "itemIdCopyFinished" || message?.type === "itemPathCopyFinished") &&
     (message.side === "left" || message.side === "right")
   ) {
-    const button = document.querySelector(`[data-copy-item-id="${message.side}"]`);
-    if (button instanceof HTMLButtonElement) {
+    const attribute = message.type === "itemPathCopyFinished" ? "data-copy-item-path" : "data-copy-item-id";
+    const button = document.querySelector(`[${attribute}="${message.side}"]`);
+    if (button instanceof HTMLButtonElement && button.dataset.itemId === message.itemId) {
       button.disabled = false;
-      if (message.copied === true) {
-        const itemId = button.dataset.itemId || button.textContent;
-        button.textContent = `✓ ${itemId}`;
-        button.classList.add("copied");
-        window.setTimeout(() => {
-          button.textContent = itemId;
-          button.classList.remove("copied");
-        }, 1200);
-      }
+      const value = button.dataset.copyValue;
+      button.textContent = message.copied === true ? `✓ ${value}` : "⚠ Copy failed";
+      button.classList.toggle("copied", message.copied === true);
+      window.setTimeout(() => {
+        button.textContent = value;
+        button.classList.remove("copied");
+      }, 1200);
     }
+    return;
   }
   render();
 });
