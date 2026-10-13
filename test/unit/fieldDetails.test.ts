@@ -8,8 +8,8 @@ async function view() {
   const context = createContext({
     acquireVsCodeApi: () => ({ getState: () => ({ visibility: { content: "differences" } }), setState() {}, postMessage: (message: unknown) => messages.push(message) }),
     document: { body: { classList: { toggle() {} } }, getElementById: () => ({ addEventListener() {}, setAttribute() {} }), querySelectorAll: () => [],
-      createElement: (tag: string) => ({ tag, dataset: {}, children: [] as unknown[], textContent: "", className: "", classList: { add() {} },
-        append(...children: unknown[]) { this.children.push(...children); }, setAttribute() {}, addEventListener() {} }) },
+      createElement: (tag: string) => ({ tag, dataset: {}, listeners: {} as Record<string, () => void>, children: [] as unknown[], textContent: "", className: "", classList: { add() {} },
+        append(...children: unknown[]) { this.children.push(...children); }, setAttribute() {}, addEventListener(type: string, listener: () => void) { this.listeners[type] = listener; } }) },
     window: { addEventListener() {} },
   });
   new Script(await readFile("media/fieldDiff/fieldDiff.js", "utf8")).runInContext(context);
@@ -39,7 +39,7 @@ test("Browse summary has one identity and Compare retains paired fields and diff
   v.run('state.mode = "browse"; const summary = createSummary({ leftDetails: { itemId: "item", path: "/sitecore/Home", language: "fr", version: 3, template: { name: "Page" } }, leftConnectionName: "Authoring" });');
   strictEqual(v.run('summary.children.length'), 1);
   strictEqual(v.run('summary.children[0].children[0].textContent'), "Home · Authoring · fr");
-  strictEqual(v.run('summary.children[0].children[1].textContent'), "/sitecore/Home · Page · latest version 3");
+  strictEqual(v.run('summary.children[0].children[1].children.slice(0, 2).map(child => child.textContent).join("")'), "/sitecore/Home · Page · latest version 3");
   v.run('state.mode = "compare"; const pair = createPair(field, { ...field, value: "other" });');
   deepStrictEqual(JSON.parse(v.run('JSON.stringify(pair.flags)') as string), ["Value"]);
   strictEqual(v.run('createFieldRow(pair).children.length'), 3);
@@ -82,8 +82,23 @@ test("version-zero fallback preserves requested identity and labels configured s
     itemFallback: { status: "candidate", chain: ["en-NZ", "en-AU", "en"], candidate: { language: "en", version: 1 } } };
     const summary = createSummary({ fallbackMode: "fallback", leftDetails: details });`);
   strictEqual(v.run('summary.children[0].children[0].textContent'), "Home · Connection · en-NZ");
-  strictEqual(v.run('summary.children[0].children[1].textContent'), "/sitecore/Home · Page · latest version 0");
-  strictEqual(v.run('summary.children[0].children[1].children[0].textContent'), "Configured fallback candidate: en-NZ → en-AU → en (v1)");
+  strictEqual(v.run('summary.children[0].children[1].children.slice(0, 2).map(child => child.textContent).join("")'), "/sitecore/Home · Page · latest version 0");
+  strictEqual(v.run('summary.children[0].children[1].children[2].textContent'), "Configured fallback candidate: en-NZ → en-AU → en (v1)");
   strictEqual(v.run('emptyFieldsMessage({ fallbackMode: "fallback", leftDetails: details }, 0)'),
     "Authoring returned no fields for en-NZ (version 0). Fallback was requested; Authoring returned no values.");
+});
+
+
+test("identity copy buttons send side and item identity rather than a webview-supplied path", async () => {
+  const v = await view();
+  v.run(`state.contextId = 7; state.mode = "compare";
+    const details = { itemId: "right-id", path: "/sitecore/content/A long path" };
+    const pathButton = identityCopyButton("right", details, "path"); pathButton.listeners.click();`);
+  strictEqual(v.run('pathButton.textContent'), "/sitecore/content/A long path");
+  strictEqual(v.run('pathButton.title'), "Copy right item path");
+  strictEqual(v.run('pathButton.disabled'), true);
+  deepStrictEqual(JSON.parse(JSON.stringify(v.messages.at(-1))), { type: "copyItemPath", side: "right", itemId: "right-id", contextId: 7 });
+  v.run('state.mode = "browse"; const idButton = identityCopyButton("left", details, "id"); idButton.listeners.click();');
+  strictEqual(v.run('idButton.title'), "Copy item ID");
+  deepStrictEqual(JSON.parse(JSON.stringify(v.messages.at(-1))), { type: "copyItemId", side: "left", itemId: "right-id", contextId: 7 });
 });

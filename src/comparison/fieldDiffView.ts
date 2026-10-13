@@ -41,6 +41,7 @@ export class FieldDiffViewProvider implements vscode.WebviewViewProvider, vscode
   private readonly disposables: vscode.Disposable[] = [];
   private mode: "browse" | "compare" = "compare";
   private contextId = 0;
+  private snapshot: FieldDiffSnapshot | undefined;
 
   constructor(
     private readonly extensionUri: vscode.Uri,
@@ -50,9 +51,10 @@ export class FieldDiffViewProvider implements vscode.WebviewViewProvider, vscode
       fieldId: string,
       direction: "leftToRight" | "rightToLeft",
     ) => Promise<void>,
-    private readonly onCopyItemId: (
+    private readonly onCopyItemIdentity: (
       side: "left" | "right",
       itemId: string,
+      path?: string,
     ) => Promise<boolean>,
     private readonly onOpenPublicPage?: (side: "left" | "right", itemId: string) => Promise<void>,
     private readonly onSetFallbackMode?: (mode: FieldFallbackMode) => Promise<void>,
@@ -101,12 +103,18 @@ export class FieldDiffViewProvider implements vscode.WebviewViewProvider, vscode
             await this.post({ type: "copyFinished", fieldId: message.fieldId });
           }
         } else if (
-          message.type === "copyItemId" &&
+          (message.type === "copyItemId" || message.type === "copyItemPath") &&
           (message.side === "left" || message.side === "right") &&
           typeof message.itemId === "string"
         ) {
-          const copied = await this.onCopyItemId(message.side, message.itemId);
-          await this.post({ type: "itemIdCopyFinished", side: message.side, copied });
+          const contextId = this.contextId;
+          const details = this.snapshot?.[`${message.side}Details`];
+          if (message.type === "copyItemPath" && (!details || details.itemId !== message.itemId)) return;
+          let copied = false;
+          try { copied = await this.onCopyItemIdentity(message.side, message.itemId, message.type === "copyItemPath" ? details?.path : undefined); }
+          catch { /* Report clipboard failures inline without exposing raw errors. */ }
+          if (contextId === this.contextId) await this.post({ type: message.type === "copyItemPath" ? "itemPathCopyFinished" : "itemIdCopyFinished",
+            side: message.side, itemId: message.itemId, copied });
         }
       }),
     );
@@ -117,12 +125,14 @@ export class FieldDiffViewProvider implements vscode.WebviewViewProvider, vscode
   }
 
   async showLoading(selection: FieldDiffSelection): Promise<void> {
+    this.snapshot = undefined;
     this.setMode(selection.mode ?? "compare");
     this.contextId += 1;
     await this.post({ type: "loading", selection });
   }
 
   async showSnapshot(snapshot: FieldDiffSnapshot): Promise<void> {
+    this.snapshot = snapshot;
     this.setMode(snapshot.mode ?? "compare");
     await this.post({ type: "snapshot", snapshot });
   }
@@ -132,6 +142,7 @@ export class FieldDiffViewProvider implements vscode.WebviewViewProvider, vscode
   }
 
   async clear(mode: "browse" | "compare" = "compare"): Promise<void> {
+    this.snapshot = undefined;
     this.setMode(mode);
     this.contextId += 1;
     await this.post({ type: "clear" });

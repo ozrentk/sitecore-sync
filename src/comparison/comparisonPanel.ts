@@ -183,6 +183,7 @@ class FieldDiffContentProvider implements vscode.TextDocumentContentProvider {
 }
 
 export class ComparisonPanelManager implements vscode.Disposable {
+  private readonly clipboard = vscode.env.clipboard;
   private fallbackMode: FieldFallbackMode = "exact";
   private fallbackRevision = 0;
   private readonly contentSession = new ContentSession();
@@ -254,7 +255,7 @@ export class ComparisonPanelManager implements vscode.Disposable {
       async (fieldId, direction) => {
         await this.copySelectedFieldValue(fieldId, direction);
       },
-      async (side, itemId) => await this.copySelectedItemId(side, itemId),
+      async (side, itemId, path) => await this.copySelectedItemIdentity(side, itemId, path),
       async (side, itemId) => {
         if (this.selectedFieldDiffItem?.[`${side}ItemId`] === itemId) { await this.openPublicPage(side, itemId); }
       },
@@ -3029,20 +3030,21 @@ export class ComparisonPanelManager implements vscode.Disposable {
     }
   }
 
-  private async copySelectedItemId(side: TreeSide, itemId: string): Promise<boolean> {
+  private async copySelectedItemIdentity(side: TreeSide, itemId: string, path?: string): Promise<boolean> {
+    const kind = path === undefined ? "ID" : "path";
     const selectedItemId = side === "left"
       ? this.selectedFieldDiffItem?.leftItemId
       : this.selectedFieldDiffItem?.rightItemId;
     if (!selectedItemId || normalizeItemId(selectedItemId) !== normalizeItemId(itemId)) {
-      await vscode.window.showErrorMessage(`The ${side} item ID is no longer available.`);
+      await vscode.window.showErrorMessage(`The ${side} item ${kind} is no longer available.`);
       return false;
     }
     try {
-      await vscode.env.clipboard.writeText(itemId);
-      this.log.info(`Copied ${side} Field Diff item ID to the clipboard.`);
+      await this.clipboard.writeText(path ?? itemId);
+      this.log.info(`Copied ${side} Field Diff item ${kind} to the clipboard.`);
       return true;
     } catch (error: unknown) {
-      await vscode.window.showErrorMessage(`Unable to copy item ID: ${errorMessage(error)}`);
+      await vscode.window.showErrorMessage(`Unable to copy item ${kind}: ${errorMessage(error)}`);
       return false;
     }
   }

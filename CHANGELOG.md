@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.35.0
+
+- Make displayed Item Details paths copyable like IDs in Browse and on each Compare side, with keyboard-accessible buttons and inline success/failure feedback.
+- Keep identity-copy feedback visible without re-rendering away the success mark; validate path copies against the displayed host snapshot.
+
 ## 0.34.2
 
 - Show an expected-source hint for fallback fields when their own item has a suitable configured candidate, consistently in Browse, Item Details and Compare.

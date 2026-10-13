@@ -38,6 +38,46 @@ interface ComparisonPanelHarness {
 }
 
 export const comparisonPanelTests: readonly IntegrationTest[] = [{
+  name: "Item Details copies trusted side paths and IDs, rejecting stale and Browse-right requests",
+  async execute(): Promise<void> {
+    const copied: string[] = [];
+    const manager = Object.create(ComparisonPanelManager.prototype) as {
+      copySelectedItemIdentity(side: "left" | "right", itemId: string, path?: string): Promise<boolean>;
+    };
+    Object.assign(manager, { selectedFieldDiffItem: { leftItemId: "left", rightItemId: "right" }, log: { info() {} },
+      clipboard: { writeText: async (value: string) => { copied.push(value); } } });
+    let receive!: (message: unknown) => Promise<void>;
+    const messages: Array<Record<string, unknown>> = [];
+    const disposable = { dispose() {} };
+    const view = { title: "", visible: true, onDidChangeVisibility: () => disposable,
+      webview: { cspSource: "test", options: {}, html: "", asWebviewUri: (uri: vscode.Uri) => uri,
+        onDidReceiveMessage: (listener: typeof receive) => { receive = listener; return disposable; },
+        postMessage: async (message: Record<string, unknown>) => { messages.push(message); return true; } } };
+    const provider = new FieldDiffViewProvider(vscode.Uri.file(process.cwd()), () => undefined,
+      async () => undefined, async () => undefined, (side, itemId, path) => manager.copySelectedItemIdentity(side, itemId, path));
+    const snapshot = { leftDetails: itemDetails("left"), rightDetails: itemDetails("right"), textNormalization: "none" as const };
+    try {
+      provider.resolveWebviewView(view as unknown as vscode.WebviewView);
+      await provider.showSnapshot(snapshot);
+      const contextId = messages.at(-1)?.contextId;
+      await receive({ type: "copyItemPath", side: "left", itemId: "left", path: "/untrusted", contextId });
+      await receive({ type: "copyItemPath", side: "right", itemId: "right", contextId });
+      await receive({ type: "copyItemId", side: "left", itemId: "left", contextId });
+      deepStrictEqual(copied, ["/sitecore/left", "/sitecore/right", "left"]);
+      await receive({ type: "copyItemPath", side: "left", itemId: "right", contextId });
+      await provider.showLoading({ mode: "browse", leftItemId: "left" });
+      await receive({ type: "copyItemPath", side: "left", itemId: "left", contextId });
+      await provider.showSnapshot({ ...snapshot, mode: "browse" });
+      const browseContext = messages.at(-1)?.contextId;
+      await receive({ type: "copyItemPath", side: "right", itemId: "right", contextId: browseContext });
+      strictEqual(copied.length, 3);
+      await receive({ type: "copyItemPath", side: "left", itemId: "left", contextId: browseContext });
+      strictEqual(copied.at(-1), "/sitecore/left");
+      strictEqual(messages.at(-1)?.type, "itemPathCopyFinished");
+      strictEqual(messages.at(-1)?.copied, true);
+    } finally { provider.dispose(); }
+  },
+}, {
   name: "fallback comparison preserves navigation and fences in-flight field transfers across mode round trips",
   async execute(): Promise<void> {
     const session = new ContentSession();

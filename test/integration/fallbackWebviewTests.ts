@@ -61,6 +61,18 @@ export const fallbackWebviewTests: readonly IntegrationTest[] = [{
           window.dispatchEvent(new MessageEvent("message", { data: { type: "snapshot", mode: "compare", contextId: 2, snapshot: { ...snapshot, fallbackMode: "exact" } } }));
           if (document.querySelectorAll(".copy-value").length !== 2) throw Error("Exact transfers missing");
           if (fieldFallbackMode.getAttribute("aria-pressed") !== "false" || fieldFallbackMode.disabled) throw Error("Toggle not restored");
+          const pathButton = document.querySelector('[data-copy-item-path="right"]');
+          if (!(pathButton instanceof HTMLButtonElement) || pathButton.textContent !== details.path
+            || pathButton.title !== "Copy right item path" || !pathButton.getAttribute("aria-label").includes(details.path)) throw Error("Path copy accessibility");
+          pathButton.focus(); pathButton.click();
+          if (!pathButton.disabled) throw Error("Path copy pending state");
+          window.dispatchEvent(new MessageEvent("message", { data: { type: "itemPathCopyFinished", contextId: 2, side: "right", itemId: "aa", copied: true } }));
+          if (!pathButton.isConnected || !pathButton.textContent.startsWith("✓ ") || pathButton.disabled) throw Error("Path feedback was lost");
+          window.dispatchEvent(new MessageEvent("message", { data: { type: "itemPathCopyFinished", contextId: 2, side: "right", itemId: "aa", copied: false } }));
+          if (pathButton.textContent !== "⚠ Copy failed") throw Error("Path failure feedback missing");
+          const idButton = document.querySelector('[data-copy-item-id="left"]');
+          window.dispatchEvent(new MessageEvent("message", { data: { type: "itemIdCopyFinished", contextId: 2, side: "left", itemId: "aa", copied: true } }));
+          if (!idButton.textContent.startsWith("✓ ")) throw Error("ID feedback missing");
           window.dispatchEvent(new MessageEvent("message", { data: { type: "loading", mode: "compare", fallbackMode: "fallback", contextId: 3, selection: {} } }));
           if (fieldFallbackMode.getAttribute("aria-pressed") !== "true" || !fieldFallbackMode.disabled) throw Error("Loading state");
           window.dispatchEvent(new MessageEvent("message", { data: { type: "clear", mode: "browse", fallbackMode: "exact", contextId: 4 } }));
