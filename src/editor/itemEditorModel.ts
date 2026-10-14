@@ -1,3 +1,4 @@
+import { selectionKind, selectionSourceReason } from "./singleSelection";
 import { createHash } from "node:crypto";
 import type { AuthoringItemDetails, AuthoringItemField } from "../sitecore/authoringClient";
 import { hasPagePresentation } from "../publicPages/publicPageUrl";
@@ -20,7 +21,7 @@ export interface EditorState {
   readonly drafts: Readonly<Record<string, FieldDraft>>;
   readonly attempt?: { readonly phase: "sent" | "acknowledged"; readonly changes: readonly EditorChange[] };
 }
-export type EditorFieldKind = "text" | "multiline" | "checkbox" | "integer" | "number" | "date" | "datetime";
+export type EditorFieldKind = "text" | "multiline" | "checkbox" | "integer" | "number" | "date" | "datetime" | "selection";
 export const normalizeId = (value: string): string => value.replace(/[{}-]/gu, "").toLowerCase();
 export const isGuid = (value: unknown): value is string => typeof value === "string" && /^(?:[0-9a-f]{32}|\{?[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}\}?)$/iu.test(value);
 export const isLocale = (value: unknown): value is string => typeof value === "string" && /^[a-z]{2,8}(?:-[a-z0-9]{1,8})*$/iu.test(value);
@@ -30,6 +31,7 @@ export function editorKey(target: EditorTarget): string {
 }
 
 export function fieldKind(field: AuthoringItemField): EditorFieldKind | undefined {
+  if (selectionKind(field)) return "selection";
   const types: Record<string, EditorFieldKind> = { "single-line text": "text", "multi-line text": "multiline",
     checkbox: "checkbox", integer: "integer", number: "number", date: "date", datetime: "datetime" };
   return Object.hasOwn(types, field.type.toLowerCase()) ? types[field.type.toLowerCase()] : undefined;
@@ -72,6 +74,7 @@ export function readOnlyReason(item: AuthoringItemDetails, field: AuthoringItemF
   if (!kind) return field.type.toLowerCase() === "rich text"
     ? "Rich Text is deferred until visual and HTML source editors can preserve content when switching."
     : "This field type is read-only in Stage A.";
+  if (kind === "selection") return selectionSourceReason(field.selectionSource);
   if (kind === "checkbox" && !["", "0", "1"].includes(field.value)) return "Unrecognized stored checkbox representation.";
   if ((kind === "date" || kind === "datetime") && dateInput(field.value, kind) === undefined) return "Unrecognized or timezone-ambiguous stored date. The original value is preserved.";
   if (kind === "text" && /[\r\n]/u.test(field.value)) return "Stored single-line text contains line breaks; original value is preserved.";
@@ -84,6 +87,7 @@ export function serializeDraft(field: AuthoringItemField, draft: FieldDraft): st
   if (draft.input === fieldInput(field)) return field.value;
   const value = draft.input;
   switch (fieldKind(field)) {
+    case "selection": return value; // Membership is revalidated by the host immediately before writing.
     case "text": if (/[\r\n]/u.test(value)) throw new EditorValidationError("Single-Line Text cannot contain line breaks."); return value;
     case "multiline": return field.value.includes("\r\n") ? value.replace(/\r\n/gu, "\n").replace(/\n/gu, "\r\n") : value;
     case "checkbox": if (!["", "1"].includes(value)) throw new EditorValidationError("Invalid checkbox value."); return value;
@@ -126,7 +130,7 @@ export function planChanges(state: EditorState): readonly EditorChange[] {
 
 function fingerprint(field: AuthoringItemField): string {
   return JSON.stringify([normalizeId(field.fieldId), field.name, field.type.toLowerCase(), field.scope, field.value,
-    field.containsFallbackValue, field.containsInheritedValue, field.containsStandardValue, field.isStandardTemplate]);
+    field.containsFallbackValue, field.containsInheritedValue, field.containsStandardValue, field.isStandardTemplate, field.selectionSource]);
 }
 
 export function checkConflicts(state: EditorState, fresh: AuthoringItemDetails, changes: readonly EditorChange[]): void {
@@ -150,6 +154,7 @@ export function appliedChanges(fresh: AuthoringItemDetails, changes: readonly Ed
 export interface EditorIO {
   read(): Promise<AuthoringItemDetails>;
   write(changes: readonly EditorChange[]): Promise<void>;
+  validateSelections?(item: AuthoringItemDetails, changes: readonly EditorChange[]): Promise<void>;
   persist(state: EditorState): Promise<void>;
 }
 
@@ -160,6 +165,10 @@ export async function saveEditor(state: EditorState, io: EditorIO, update: (stat
   if (!changes.length) return state;
   const fresh = await io.read();
   checkConflicts(state, fresh, changes);
+  if (changes.some(change => fresh.fields.some(field => normalizeId(field.fieldId) === change.fieldId && selectionKind(field)))) {
+    if (!io.validateSelections) throw new EditorValidationError("Selection source validation is unavailable.");
+    await io.validateSelections(fresh, changes);
+  }
   let current: EditorState = { ...state, attempt: { phase: "sent", changes } };
   await io.persist(current);
   update(current);
@@ -205,6 +214,7 @@ export function parseEditorState(text: string): EditorState {
     || typeof item.path !== "string" || !item.template || !isGuid(item.template.templateId) || typeof item.template.name !== "string"
     || !Array.isArray(item.fields) || item.fields.length > 4096 || !Array.isArray(item.availableVersions)) throw new EditorValidationError("Invalid editor item.");
   for (const field of item.fields) {
+    if (field?.selectionSource !== undefined && (typeof field.selectionSource !== "string" || field.selectionSource.length > 8192)) throw new EditorValidationError("Invalid field Source metadata.");
     if (!field || !isGuid(field.fieldId) || [field.name, field.label, field.value, field.type, field.typeKey, field.sectionName].some(v => typeof v !== "string")
       || !["SHARED", "UNVERSIONED", "VERSIONED"].includes(field.scope)
       || [field.containsFallbackValue, field.containsStandardValue, field.containsInheritedValue, field.isStandardTemplate].some(v => typeof v !== "boolean")

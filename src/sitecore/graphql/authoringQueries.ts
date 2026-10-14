@@ -210,3 +210,22 @@ export const deleteItemMutation = gql`
     }
   }
 `;
+
+// These fields reuse the established Authoring Item and children schema. Locale is
+// selected explicitly to reject a response for another editor context.
+export const selectionItemQuery = gql`
+  query XmCloudSyncSelectionItem($where: ItemQueryInput!) {
+    item(where: $where) { itemId name displayName path hasChildren language { name } }
+  }
+`;
+export const selectionTreeQuery = gql`
+  query XmCloudSyncTreeLevel($where: ItemQueryInput!, $pageSize: PaginationAmount!, $after: String) {
+    item(where: $where) {
+      itemId name displayName path hasChildren language { name }
+      children(first: $pageSize, after: $after) {
+        nodes { itemId name displayName path hasChildren language { name } }
+        pageInfo { hasNextPage endCursor }
+      }
+    }
+  }
+`;

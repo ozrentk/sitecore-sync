@@ -20,6 +20,103 @@ function fixture(): EditorState {
 }
 
 export const itemEditorTests: readonly IntegrationTest[] = [{
+  name: "single-selection webview preserves current values and exposes searchable grouped and lazy tree choices",
+  async execute(): Promise<void> {
+    const directory = await mkdtemp(join(tmpdir(), "xm-selection-webview-"));
+    const extension = vscode.extensions.getExtension("OzrenTK.sitecore-xm-cloud-sync")!;
+    const root = { itemId: "44444444444444444444444444444444", name: "Root", displayName: "Root", path: "/sitecore/content/Root", hasChildren: true };
+    const group = { ...root, itemId: "55555555555555555555555555555555", name: "Group", displayName: "Group", path: root.path + "/Group" };
+    const leaf = { ...root, itemId: "66666666666666666666666666666666", name: "Choice", displayName: "Choice label", path: group.path + "/Choice", hasChildren: false };
+    const provider = new ItemEditorProvider({ globalStorageUri: vscode.Uri.file(directory), extensionUri: extension.extensionUri } as vscode.ExtensionContext,
+      { get: () => ({ id: "test", name: "Test", serverUrl: "https://example.test" }), getClientSecret: async () => "secret" } as unknown as ConnectionStore,
+      { loadSelectionItem: async (_c: unknown, _s: string, locator: { itemId?: string }) => locator.itemId === group.itemId ? group : root,
+        loadTreeLevel: async (_c: unknown, _s: string, locator: { itemId: string }) => locator.itemId === group.itemId ? { item: group, children: [leaf] } : { item: root, children: [group] } } as unknown as AuthoringContentClient);
+    const panel = vscode.window.createWebviewPanel("selectionSmoke", "Selection smoke", vscode.ViewColumn.Active, { enableScripts: true });
+    let doc: ItemDocument | undefined; let listener: vscode.Disposable | undefined; let timer: ReturnType<typeof setTimeout> | undefined;
+    try {
+      const state = fixture();
+      const fields = ["Droplist", "Droplink", "Grouped Droplist", "Grouped Droplink", "Droptree"].map((type, index) => ({ ...state.base.fields[0], fieldId: (index + 10).toString(16).padStart(32, "0"), name: `Select${index}`, label: type, type, value: "unresolved-original", selectionSource: root.path }));
+      await vscode.workspace.fs.createDirectory(provider.directory);
+      const uri = vscode.Uri.joinPath(provider.directory, `${editorKey(state.target)}.xmitem`);
+      await vscode.workspace.fs.writeFile(uri, Buffer.from(JSON.stringify({ ...state, base: { ...state.base, fields } })));
+      doc = await provider.openCustomDocument(uri, { backupId: undefined, untitledDocumentData: undefined });
+      await provider.resolveCustomEditor(doc, panel);
+      const script = `
+        let started = false;
+        window.addEventListener("message", async event => {
+          if (event.data.type !== "state" || started) return;
+          started = true;
+          const until = async fn => { for (let i=0;i<200;i++) { if(fn()) return; await new Promise(r=>setTimeout(r,25)); } throw Error("Picker did not settle"); };
+          try {
+            const rows = [...document.querySelectorAll(".field")];
+            if (rows.length !== 5) throw Error("Missing selection controls");
+            for (const row of rows) {
+              if (row.querySelector("[data-field-id]").value !== "unresolved-original") throw Error("Current value lost on open");
+              [...row.querySelectorAll("button")].find(b=>b.textContent.includes("choices")).click();
+              await until(()=>row.querySelector("select, .selection-tree"));
+              if (row.querySelector("[data-field-id]").value !== "unresolved-original") throw Error("Loading changed current value");
+            }
+            if (!rows[2].querySelector("optgroup") || !rows[3].querySelector("optgroup")) throw Error("Missing groups");
+            const filter = rows[0].querySelector("input[type=search]"); filter.value="not found"; filter.dispatchEvent(new Event("input"));
+            if (rows[0].querySelectorAll("option").length !== 1) throw Error("Filter failed");
+            if (rows[0].querySelector("[data-field-id]").value !== "unresolved-original") throw Error("Filtering changed value");
+            filter.value=""; filter.dispatchEvent(new Event("input"));
+            const flat = rows[0].querySelector("select"); flat.selectedIndex=1; flat.dispatchEvent(new Event("change"));
+            if (rows[0].querySelector("[data-field-id]").value !== "Group") throw Error("Droplist did not store name");
+            const linked = rows[1].querySelector("select"); linked.selectedIndex=1; linked.dispatchEvent(new Event("change"));
+            if (rows[1].querySelector("[data-field-id]").value !== "{55555555-5555-5555-5555-555555555555}") throw Error("Droplink did not store ID");
+            const branch = rows[4].querySelector("details"); branch.open=true;
+            await until(()=>branch.querySelector("button")); branch.querySelector("button").click();
+            if (rows[4].querySelector("[data-field-id]").value !== "{66666666-6666-6666-6666-666666666666}") throw Error("Tree selection failed");
+            api.postMessage({type:"selectionSmoke",ok:true});
+          } catch(error) { api.postMessage({type:"selectionSmoke",error:String(error)}); }
+        });`;
+      const scriptPath = join(directory, "smoke.js"); await writeFile(scriptPath, script);
+      const result = new Promise<void>((resolve, reject) => {
+        timer = setTimeout(() => reject(new Error("Selection webview smoke timed out")), 30_000);
+        listener = panel.webview.onDidReceiveMessage(message => { if (message.type === "selectionSmoke") { try { strictEqual(message.ok, true, message.error); resolve(); } catch (error) { reject(error); } } });
+      });
+      const nonce = /nonce="([a-f0-9]+)"/u.exec(panel.webview.html)![1];
+      panel.webview.options = { enableScripts: true, localResourceRoots: [vscode.Uri.joinPath(extension.extensionUri, "media", "itemEditor"), vscode.Uri.file(directory)] };
+      panel.webview.html = panel.webview.html.replace("</body>", `<script nonce="${nonce}" src="${panel.webview.asWebviewUri(vscode.Uri.file(scriptPath))}"></script></body>`);
+      await result;
+      await (provider as unknown as { flushInputs(document: ItemDocument): Promise<void> }).flushInputs(doc);
+      strictEqual(Object.keys(doc.state.drafts).length, 3, "Unchanged grouped selections must not become drafts");
+      strictEqual(doc.state.drafts[fields[0].fieldId].input, "Group");
+    } finally { clearTimeout(timer); listener?.dispose(); panel.dispose(); doc?.dispose(); provider.dispose(); await rm(directory, { recursive: true, force: true }); }
+  },
+}, {
+  name: "selection requests reject superseded results and abort on document disposal",
+  async execute(): Promise<void> {
+    const directory = await mkdtemp(join(tmpdir(), "xm-selection-host-"));
+    const root = { itemId: "44444444444444444444444444444444", name: "Root", displayName: "Root", path: "/sitecore/content/Root", hasChildren: true };
+    let finish: ((value: typeof root) => void) | undefined; let calls = 0;
+    const signals: AbortSignal[] = []; const posted: Record<string, unknown>[] = [];
+    const provider = new ItemEditorProvider({ globalStorageUri: vscode.Uri.file(directory) } as vscode.ExtensionContext,
+      { get: () => ({ id: "test", serverUrl: "https://example.test" }), getClientSecret: async () => "secret" } as unknown as ConnectionStore,
+      { loadSelectionItem: async (_c: unknown, _s: string, _l: unknown, _lang: string, signal: AbortSignal) => { signals.push(signal); calls++; return calls === 1 ? new Promise<typeof root>(resolve => { finish = resolve; }) : root; },
+        loadTreeLevel: async () => ({ item: root, children: [] }) } as unknown as AuthoringContentClient);
+    let doc: ItemDocument | undefined;
+    try {
+      const initial = fixture(); const state = { ...initial, base: { ...initial.base, fields: [{ ...initial.base.fields[0], type: "Droplink", value: "", selectionSource: root.path }] } };
+      await vscode.workspace.fs.createDirectory(provider.directory);
+      const uri = vscode.Uri.joinPath(provider.directory, `${editorKey(state.target)}.xmitem`);
+      await vscode.workspace.fs.writeFile(uri, Buffer.from(JSON.stringify(state)));
+      doc = await provider.openCustomDocument(uri, { backupId: undefined, untitledDocumentData: undefined });
+      doc.panels.add({ webview: { postMessage: async (value: Record<string, unknown>) => { posted.push(value); return true; } } } as unknown as vscode.WebviewPanel);
+      const harness = provider as unknown as { message(doc: ItemDocument, value: unknown): Promise<void> };
+      const old = harness.message(doc, { type: "choices", revision: 0, id: fieldId, request: "old" });
+      for (let count = 0; !finish && count < 100; count++) await new Promise(resolve => setTimeout(resolve, 5));
+      strictEqual(Boolean(finish), true);
+      await harness.message(doc, { type: "choices", revision: 0, id: fieldId, request: "new" });
+      finish!(root); await old;
+      strictEqual(signals[0].aborted, true); deepStrictEqual(posted.map(p => p.request), ["new"]);
+      const count = posted.length; doc.dispose();
+      await harness.message(doc, { type: "choices", revision: 0, id: fieldId, request: "disposed" });
+      strictEqual(posted.length, count);
+    } finally { doc?.dispose(); provider.dispose(); await rm(directory, { recursive: true, force: true }); }
+  },
+}, {
   name: "native custom-editor tabs reuse the pinned document and track dirty/save state",
   async execute(): Promise<void> {
     const directory = await mkdtemp(join(tmpdir(), "xm-editor-native-"));

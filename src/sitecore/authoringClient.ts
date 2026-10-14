@@ -7,6 +7,8 @@ import {
   addItemVersionMutation,
   deleteItemMutation,
   itemDetailsQuery,
+  selectionItemQuery,
+  selectionTreeQuery,
   withFieldFallback,
   languagesQuery,
   nonStandardFieldIdsQuery,
@@ -116,6 +118,7 @@ interface RawAuthoringTreeItem {
   readonly displayName?: unknown;
   readonly path?: unknown;
   readonly hasChildren?: unknown;
+  readonly language?: { readonly name?: unknown };
 }
 
 interface TreeLevelQueryResponse {
@@ -916,6 +919,7 @@ export class AuthoringContentClient {
     locator: AuthoringItemLocator,
     language: string,
     signal: AbortSignal,
+    selectionLimit?: number,
   ): Promise<AuthoringTreeLevel> {
     const accessToken = await this.getAccessToken(connection, clientSecret, signal);
     const children: AuthoringTreeItem[] = [];
@@ -931,7 +935,12 @@ export class AuthoringContentClient {
         language,
         after,
         signal,
+        selectionLimit !== undefined,
       );
+      if (selectionLimit !== undefined && (children.length + page.children.length > selectionLimit || seenCursors.size >= 20
+        || (item && (normalizeGuid(item.itemId) !== normalizeGuid(page.item.itemId) || item.path !== page.item.path)))) {
+        throw new Error("Selection source exceeded its limit or changed during paging.");
+      }
       item ??= page.item;
       children.push(...page.children);
       after = page.nextCursor;
@@ -944,6 +953,18 @@ export class AuthoringContentClient {
     } while (after !== undefined);
 
     return { item, children };
+  }
+
+  /** Minimal exact-locale lookup for source roots and references; never crawls descendants. */
+  async loadSelectionItem(connection: XmCloudConnection, secret: string, locator: AuthoringItemLocator,
+    language: string, signal: AbortSignal): Promise<AuthoringTreeItem> {
+    const token = await this.getAccessToken(connection, secret, signal);
+    const payload = await this.postGraphQl<TreeLevelQueryResponse>(connection.serverUrl, token,
+      "Sitecore Authoring selection item query", "XmCloudSyncSelectionItem", print(selectionItemQuery),
+      { where: { database: "master", ...locator, language } }, signal);
+    if (!payload.data?.item) throw new AuthoringItemNotFoundError("Selection item is missing or inaccessible.");
+    assertSelectionIdentity(payload.data.item, locator, language);
+    return parseTreeItem(payload.data.item);
   }
 
   async loadLanguages(
@@ -1642,6 +1663,7 @@ export class AuthoringContentClient {
     language: string,
     after: string | undefined,
     signal: AbortSignal,
+    strictSelection = false,
   ): Promise<{
     readonly item: AuthoringTreeItem;
     readonly children: readonly AuthoringTreeItem[];
@@ -1658,7 +1680,7 @@ export class AuthoringContentClient {
         },
         body: JSON.stringify({
           operationName: "XmCloudSyncTreeLevel",
-          query: print(treeLevelQuery),
+          query: print(strictSelection ? selectionTreeQuery : treeLevelQuery),
           variables: {
             where: { database: "master", language, ...locator },
             pageSize: 100,
@@ -1683,6 +1705,13 @@ export class AuthoringContentClient {
     }
 
     if (!payload.data?.item) { throw new Error("Authoring returned an invalid item lookup response."); }
+    if (strictSelection) {
+      assertSelectionIdentity(payload.data.item, locator, language);
+      if (!Array.isArray(payload.data.item.children?.nodes) || typeof payload.data.item.children?.pageInfo?.hasNextPage !== "boolean") throw new Error("Incomplete selection source children.");
+      for (const child of payload.data.item.children.nodes) {
+        if (child.language?.name?.toString().toLowerCase() !== language.toLowerCase()) throw new Error("Selection child returned a different locale.");
+      }
+    }
     const item = parseTreeItem(payload.data.item);
     const children = (payload.data.item.children?.nodes ?? []).map(parseTreeItem);
     const pageInfo = payload.data.item.children?.pageInfo;
@@ -1787,6 +1816,8 @@ export interface AuthoringItemField {
   readonly containsInheritedValue: boolean;
   readonly containsStandardValue: boolean;
   readonly textual: boolean;
+  /** Editor-only metadata read from the template field item. Undefined means unavailable. */
+  readonly selectionSource?: string;
 }
 
 export interface AuthoringItemDetails {
@@ -2063,5 +2094,14 @@ async function readJson<T>(response: Response, endpointName: string): Promise<T>
     return (await response.json()) as T;
   } catch {
     throw new Error(`${endpointName} returned invalid JSON.`);
+  }
+}
+
+function assertSelectionIdentity(item: RawAuthoringTreeItem, locator: AuthoringItemLocator, language: string): void {
+  if (typeof item.itemId !== "string" || typeof item.language?.name !== "string"
+    || item.language.name.toLowerCase() !== language.toLowerCase()
+    || ("itemId" in locator ? normalizeGuid(item.itemId) !== normalizeGuid(locator.itemId)
+      : typeof item.path !== "string" || item.path.toLowerCase() !== locator.path.toLowerCase())) {
+    throw new Error("Selection lookup returned a different item or locale.");
   }
 }
