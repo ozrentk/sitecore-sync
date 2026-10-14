@@ -135,3 +135,8 @@ Use this file as the single backlog inventory. Add newly agreed work here, prese
 
 - Multilist/Treelist/TreelistEx selected lists now use same-field drag handles and accessible Alt+Up/Alt+Down movement, replacing visible reorder buttons. Compact Remove actions and tooltips keep rows uniform; Checklist remains unordered.
 - Completed moves use native undoable draft edits with exact-token and snapshot validation. Native edit events also cover existing field changes, preserving Save/conflict/recovery and bounded Source-query behavior. B3 and media work remain separate.
+
+### B24/B25 delivery update - compact item pickers (0.41.0)
+
+- B1/B2 pickers use bounded popovers with fixed search and scrolling add/choose rows, duplicate-only path details, full-path tooltips and short Source breadcrumbs. Multiple selection stays open after adding; selected-list removal and reordering remain separate.
+- Explicit tree child navigation/Back preserves hierarchy and Source scope. Keyboard/dismissal/focus, stale-response, draft/Save and undo behavior are covered by regression checks. B3 and media remain separate.

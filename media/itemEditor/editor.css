@@ -7,13 +7,30 @@ input[type=text], textarea { width:calc(100% - 70px); } textarea { min-height:90
 button:disabled { opacity:.5; cursor:default; } :focus-visible { outline:1px solid var(--vscode-focusBorder); outline-offset:2px; } pre { white-space:pre-wrap; overflow-wrap:anywhere; background:var(--vscode-textCodeBlock-background); padding:10px; max-height:250px; overflow:auto; } [hidden] { display:none !important; }
 
 select { font:inherit; color:var(--vscode-input-foreground); background:var(--vscode-input-background); border:1px solid var(--vscode-input-border, var(--vscode-panel-border)); width:100%; margin-top:6px; }
-.selection-current { overflow-wrap:anywhere; } .selection-choices input[type=search] { width:100%; } .selection-tree { padding-left:20px; } .selection-tree li { margin:5px 0; } summary { cursor:pointer; padding:5px; }
+.selection-current { overflow-wrap:anywhere; } summary { cursor:pointer; padding:5px; }
 
 .selection-field { position:relative; }
 .selection-controls { display:flex; align-items:center; gap:6px; margin-top:6px; }
 .selection-controls .selection-trigger { flex:1; min-width:0; width:100%; cursor:pointer; text-overflow:ellipsis; }
 .selection-controls button { flex:none; margin:0; }
-.selection-popup { position:relative; z-index:2; border:1px solid var(--vscode-focusBorder); background:var(--vscode-editorWidget-background, var(--vscode-editor-background)); padding:10px; margin-top:4px; max-height:340px; overflow:auto; box-shadow:0 4px 12px var(--vscode-widget-shadow); }
+.selection-popup { position:fixed; z-index:10; display:flex; flex-direction:column; box-sizing:border-box; border:1px solid var(--vscode-editorWidget-border, var(--vscode-focusBorder)); background:var(--vscode-editorWidget-background, var(--vscode-editor-background)); padding:8px; overflow:hidden; box-shadow:0 4px 12px var(--vscode-widget-shadow); }
+.picker-header { display:flex; align-items:center; gap:4px; flex:none; }
+.picker-source { flex:1; min-width:0; overflow:hidden; white-space:nowrap; text-overflow:ellipsis; color:var(--vscode-descriptionForeground); font-size:12px; }
+.picker-header button, .picker-children { flex:none; background:transparent; color:var(--vscode-foreground); margin:0; padding:2px 7px; }
+.picker-search { flex:none; width:100%; margin:5px 0; }
+.picker-status, .picker-scope { flex:none; margin:3px 0; font-size:12px; overflow-wrap:anywhere; }
+.picker-status:empty { display:none; }
+.picker-results { min-height:0; overflow:auto; overscroll-behavior:contain; padding:2px; }
+.picker-row { display:flex; min-width:0; align-items:stretch; }
+.picker-choice { display:flex; align-items:center; gap:8px; flex:1; min-width:0; width:100%; text-align:left; margin:0; padding:7px; background:transparent; color:var(--vscode-foreground); }
+.picker-choice:hover, .picker-children:hover, .picker-header button:hover { background:var(--vscode-list-hoverBackground); }
+.picker-choice[aria-disabled=true] { cursor:default; }
+.picker-choice-text { flex:1; min-width:0; }
+.picker-choice-name, .picker-choice-path { display:block; overflow:hidden; white-space:nowrap; text-overflow:ellipsis; }
+.picker-choice-path, .picker-choice-state { color:var(--vscode-descriptionForeground); font-size:12px; }
+.picker-choice-state { flex:none; }
+.picker-group { color:var(--vscode-descriptionForeground); font-size:12px; padding:6px 7px 2px; }
+.selection-popup :focus-visible { outline-offset:-1px; }
 .field-info { position:relative; display:inline-block; vertical-align:middle; margin-left:5px; }
 .field-info-button { padding:0 4px; margin:0; background:transparent; color:var(--vscode-descriptionForeground); }
 .field-info-content { display:none; position:absolute; z-index:3; top:100%; left:0; min-width:280px; width:max-content; max-width:min(600px,70vw); padding:10px; background:var(--vscode-editorHoverWidget-background, var(--vscode-editor-background)); border:1px solid var(--vscode-editorHoverWidget-border, var(--vscode-panel-border)); box-shadow:0 3px 8px var(--vscode-widget-shadow); overflow-wrap:anywhere; }
@@ -42,5 +59,3 @@ select { font:inherit; color:var(--vscode-input-foreground); background:var(--vs
 .multiple-selected.dragging { outline:1px solid var(--vscode-panel-border); }
 .reorder-hint { display:none; } .field:has(.reorder-handle:focus) .reorder-hint { display:block; }
 .visually-hidden { position:absolute; width:1px; height:1px; padding:0; margin:-1px; overflow:hidden; clip-path:inset(50%); white-space:nowrap; }
-.multiple-choice { margin:6px 0; overflow-wrap:anywhere; } .multiple-choice label { font-weight:normal; }
-.multiple-available input[type=search] { width:100%; }
