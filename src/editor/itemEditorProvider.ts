@@ -1,3 +1,5 @@
+import { loadSelectionMetadata, selectionIO } from "./selectionClient";
+import { loadSelectionPage, selectionKind, selectionValue, validateSelection } from "./singleSelection";
 import { editorFailure } from "./editorFailure";
 import * as vscode from "vscode";
 import { dirname, resolve } from "node:path";
@@ -5,7 +7,7 @@ import { randomBytes } from "node:crypto";
 import { ConnectionStore } from "../connections/connectionStore";
 import { AuthoringContentClient } from "../sitecore/authoringClient";
 import { assertItem, editorKey, fieldInput, fieldKind, isGuid, isLocale, normalizeId, parseEditorState,
-  planChanges, readOnlyReason, reconcileEditor, saveEditor, type EditorIO, type EditorState, type EditorTarget } from "./itemEditorModel";
+  EditorValidationError, planChanges, readOnlyReason, reconcileEditor, saveEditor, type EditorIO, type EditorState, type EditorTarget } from "./itemEditorModel";
 
 function localKey(uri: vscode.Uri): string {
   const path = resolve(uri.fsPath);
@@ -13,6 +15,8 @@ function localKey(uri: vscode.Uri): string {
 }
 export const itemEditorViewType = "xmCloudSync.itemEditor";
 export class ItemDocument implements vscode.CustomDocument {
+  readonly selections = new Map<string, AbortController>();
+  cancelSelections(): void { for (const request of this.selections.values()) request.abort(); this.selections.clear(); }
   readonly panels = new Set<vscode.WebviewPanel>();
   busy = false;
   error: string | undefined;
@@ -23,7 +27,7 @@ export class ItemDocument implements vscode.CustomDocument {
   private readonly disposed = new vscode.EventEmitter<void>();
   readonly onDidDispose = this.disposed.event;
   constructor(readonly uri: vscode.Uri, public state: EditorState) {}
-  dispose(): void { this.lifetime.abort(); this.disposed.fire(); this.disposed.dispose(); }
+  dispose(): void { this.cancelSelections(); this.lifetime.abort(); this.disposed.fire(); this.disposed.dispose(); }
 }
 
 /** VS Code owns dirty/close/backup handling; the document owns its immutable remote target. */
@@ -51,8 +55,9 @@ export class ItemEditorProvider implements vscode.CustomEditorProvider<ItemDocum
     if (!connection) throw new Error("Connection no longer exists.");
     const secret = await this.connections.getClientSecret(connection.id);
     if (!secret) throw new Error("Configure the connection credentials first.");
-    const base = await this.client.loadItem(connection, secret, { itemId: value.itemId }, value.language,
+    let base = await this.client.loadItem(connection, secret, { itemId: value.itemId }, value.language,
       value.version as number | undefined, AbortSignal.any([this.lifetime.signal, AbortSignal.timeout(30_000)]), false, true);
+    base = await loadSelectionMetadata(this.client, connection, secret, base, AbortSignal.any([this.lifetime.signal, AbortSignal.timeout(30_000)]));
     const target: EditorTarget = { connectionId: connection.id, serverUrl: new URL(connection.serverUrl).origin,
       itemId: value.itemId, language: value.language, version: base.version };
     assertItem(target, base);
@@ -120,6 +125,10 @@ export class ItemEditorProvider implements vscode.CustomEditorProvider<ItemDocum
     if (message.type === "frozen" && message.id === doc.flush?.id) { doc.flush?.finish(message.drafts); return; }
     if (message.type === "ready") { await this.render(doc); return; }
     if (doc.busy || message.revision !== doc.revision) return;
+    if (message.type === "choices") {
+      await this.choices(doc, message);
+      return;
+    }
     if (message.type === "change" && typeof message.id === "string" && typeof message.input === "string" && message.input.length <= 1024 * 1024 && typeof message.clear === "boolean") {
       const field = doc.state.base.fields.find(f => normalizeId(f.fieldId) === message.id);
       if (!field || readOnlyReason(doc.state.base, field) || doc.state.attempt) return;
@@ -147,6 +156,41 @@ export class ItemEditorProvider implements vscode.CustomEditorProvider<ItemDocum
     }
   }
 
+  private async choices(doc: ItemDocument, message: Record<string, unknown>): Promise<void> {
+    if (typeof message.id !== "string" || typeof message.request !== "string" || message.request.length > 100
+      || (message.parent !== undefined && !isGuid(message.parent))) return;
+    const field = doc.state.base.fields.find(f => normalizeId(f.fieldId) === message.id);
+    if (!field || !selectionKind(field) || readOnlyReason(doc.state.base, field)) return;
+    const id = message.id;
+    doc.selections.get(id)?.abort();
+    const controller = new AbortController(); doc.selections.set(id, controller);
+    const revision = doc.revision;
+    const signal = AbortSignal.any([controller.signal, doc.lifetime.signal, AbortSignal.timeout(30_000)]);
+    let response: Record<string, unknown>;
+    try {
+      const connection = this.connections.get(doc.state.target.connectionId);
+      if (!connection || new URL(connection.serverUrl).origin !== doc.state.target.serverUrl) throw new Error("Connection target changed.");
+      const secret = await this.connections.getClientSecret(connection.id);
+      if (!secret) throw new Error("Missing credentials.");
+      const io = selectionIO(this.client, connection, secret, doc.state.target.language, signal);
+      const page = await loadSelectionPage(field, io, message.parent as string | undefined);
+      let currentLabel = field.value ? "Unresolved or outside allowed Source (original value preserved)" : "No selection";
+      const current = page.choices.find(choice => selectionKind(field)!.includes("droplist") ? choice.name === field.value : normalizeId(choice.itemId) === normalizeId(field.value));
+      if (current) currentLabel = `${current.displayName || current.name} · ${current.path}${current.disabled ? " · ambiguous name" : ""}`;
+      else if (isGuid(field.value)) {
+        try { const item = await io.item({ itemId: field.value }); currentLabel = `${item.displayName || item.name} · ${item.path} (not in this choice list; original preserved)`; } catch { /* Keep raw current reference visible. */ }
+      }
+      response = { page: { ...page, choices: page.choices.map(choice => ({ ...choice, value: selectionValue(selectionKind(field)!, choice) })) }, currentLabel };
+    } catch (error) {
+      response = { error: error instanceof EditorValidationError ? error.message : "Could not load verified choices. Check source access or limits, then retry; the current value is preserved." };
+    }
+    const liveConnection = this.connections.get(doc.state.target.connectionId);
+    if (!liveConnection || new URL(liveConnection.serverUrl).origin !== doc.state.target.serverUrl) controller.abort();
+    if (doc.selections.get(id) !== controller || controller.signal.aborted || doc.lifetime.signal.aborted || doc.revision !== revision || doc.busy) return;
+    doc.selections.delete(id);
+    await Promise.all([...doc.panels].map(panel => panel.webview.postMessage({ type: "choices", id, request: message.request, revision, ...response })));
+  }
+
   private async render(doc: ItemDocument): Promise<void> {
     let status = "";
     try { status = `${planChanges(doc.state).length} changed field(s)`; } catch (error) { status = error instanceof Error ? error.message : "Invalid draft"; }
@@ -159,6 +203,7 @@ export class ItemEditorProvider implements vscode.CustomEditorProvider<ItemDocum
       fields: [...doc.state.base.fields].sort((a,b) => a.sectionSortOrder - b.sectionSortOrder || a.sortOrder - b.sortOrder).map(field => ({
         id: normalizeId(field.fieldId), label: field.label || field.name, name: field.name, section: field.sectionName || "Fields", type: field.type,
         scope: field.scope, source: field.containsFallbackValue ? "Fallback (unverified source)" : field.containsInheritedValue ? "Inherited" : field.containsStandardValue ? "Standard Value" : "Exact locale",
+        selectionKind: selectionKind(field),
         kind: fieldKind(field), reason: readOnlyReason(doc.state.base, field), input: doc.state.drafts[normalizeId(field.fieldId)]?.input ?? fieldInput(field),
         original: fieldInput(field),
         clear: doc.state.drafts[normalizeId(field.fieldId)]?.clear ?? false, raw: field.value,
@@ -207,10 +252,21 @@ export class ItemEditorProvider implements vscode.CustomEditorProvider<ItemDocum
     };
     return {
       read: async () => { doc.stage = doc.state.attempt ? "Save readback" : "Pre-save item read"; const { connection, secret } = await credentials(); const t = doc.state.target;
-        return this.client.loadItem(connection, secret, { itemId: t.itemId }, t.language, t.version, AbortSignal.any([signal, AbortSignal.timeout(30_000)]), false, true); },
+        const readSignal = AbortSignal.any([signal, AbortSignal.timeout(30_000)]);
+        const item = await this.client.loadItem(connection, secret, { itemId: t.itemId }, t.language, t.version, readSignal, false, true);
+        return loadSelectionMetadata(this.client, connection, secret, item, readSignal); },
       write: async changes => { doc.stage = "Sitecore write"; const { connection, secret } = await credentials(); const t = doc.state.target;
         await this.client.updateEditorFields(connection, secret, { itemId: t.itemId, language: t.language, version: t.version,
           fields: Object.fromEntries(changes.map(c => [c.name, c.value])) }, AbortSignal.any([signal, AbortSignal.timeout(30_000)])); },
+      validateSelections: async (item, changes) => {
+        doc.stage = "Selection source validation";
+        const { connection, secret } = await credentials();
+        const io = selectionIO(this.client, connection, secret, doc.state.target.language, AbortSignal.any([signal, AbortSignal.timeout(30_000)]));
+        for (const change of changes) {
+          const field = item.fields.find(f => normalizeId(f.fieldId) === change.fieldId)!;
+          if (selectionKind(field)) await validateSelection(field, change.value, io);
+        }
+      },
       persist: state => { doc.stage = "Local save journal"; return this.persist(doc.uri, state); },
     };
   }
@@ -240,6 +296,7 @@ export class ItemEditorProvider implements vscode.CustomEditorProvider<ItemDocum
 
   private async exclusive(doc: ItemDocument, action: () => Promise<void>): Promise<void> {
     if (doc.busy) throw new Error("Editor operation already in progress.");
+    doc.cancelSelections();
     doc.error = undefined;
     doc.stage = "Editor input synchronization";
     doc.busy = true;

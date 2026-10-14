@@ -112,3 +112,9 @@ Public-page routes use the existing Home-relative slug calculation; custom routi
 ## Maintenance
 
 Use this file as the single backlog inventory. Add newly agreed work here, preserve stable IDs, and mark entries complete with a release or commit reference. Keep detailed requirements and nearby source notes aligned without treating duplicate mentions as separate tasks. This inventory records known work; it is not an exhaustive defect audit.
+
+### B24/B25 delivery update — Stage B1 (0.37.0)
+
+- Implemented source-aware Droplist, Droplink, Grouped Droplist, Grouped Droplink and Droptree using the Stage A save/recovery model. Explicit root paths/IDs are supported; queries, filters, tokens, relative and empty Sources remain read-only. Source membership is revalidated on Save; original unresolved values survive unrelated edits.
+- Automated source/serialization/preservation/conflict/cancellation and real webview tests cover B1. Read-only Dev metadata was checked; live mutations and full native manual acceptance remain pending.
+- B24/B25 remain partially complete: B2 multi-selection, B3 General Link/Name Value List and later Rich Text/media/fallback/page stages are not delivered by B1.

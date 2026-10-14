@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.37.0
+
+- Add source-aware single-selection controls for Droplist, Droplink, Grouped Droplist, Grouped Droplink and Droptree.
+- Support explicit Source root paths/IDs with searchable grouped lists and lazy tree navigation; keep unsupported source forms read-only.
+- Preserve unresolved existing values, prevent ambiguous name selection, and revalidate source membership before saving through the existing journal/recovery flow.
+
 ## 0.36.1
 
 - Keep open item-editor resources stable while persisting save journals in a separate state file, with recovery of existing drafts.

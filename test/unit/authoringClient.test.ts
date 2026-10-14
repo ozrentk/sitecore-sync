@@ -658,3 +658,20 @@ test("editor latest read pins field classification and rejects mismatched classi
     match(String(requestBody(runtime, 2).query), /withLanguageFallback: false/);
   }
 });
+
+test("selection queries preserve locale and enforce paging limits without returning partial choices", async () => {
+  const root = { ...treeItem("root-id", "Root", "/sitecore/content/Root"), language: { name: "en-AU" } };
+  const child = { ...treeItem("child-id", "Child", root.path + "/Child"), language: { name: "en-AU" } };
+  const page = (more: boolean) => jsonResponse({ data: { item: { ...root, children: { nodes: [child], pageInfo: { hasNextPage: more, endCursor: more ? "next" : null } } } } });
+  const runtime = new QueuedHttpRuntime([tokenResponse(), page(true), page(false)]);
+  await rejects(new AuthoringContentClient(noOpLogger, runtime).loadTreeLevel(testConnection, "secret", { itemId: "root-id" }, "en-AU", signal, 1), /limit/);
+  match(String(requestBody(runtime, 1).query), /language/);
+  strictEqual((requestBody(runtime, 2).variables as { after: string }).after, "next");
+  for (const patch of [{ language: { name: "en" } }, { itemId: "wrong" }]) {
+    const bad = new QueuedHttpRuntime([tokenResponse(), jsonResponse({ data: { item: { ...root, ...patch } } })]);
+    await rejects(new AuthoringContentClient(noOpLogger, bad).loadSelectionItem(testConnection, "secret", { itemId: "root-id" }, "en-AU", signal), /different item or locale/);
+  }
+  const good = new QueuedHttpRuntime([tokenResponse(), jsonResponse({ data: { item: root } })]);
+  strictEqual((await new AuthoringContentClient(noOpLogger, good).loadSelectionItem(testConnection, "secret", { path: root.path }, "en-AU", signal)).itemId, "root-id");
+  deepStrictEqual((requestBody(good, 1).variables as { where: unknown }).where, { database: "master", path: root.path, language: "en-AU" });
+});
