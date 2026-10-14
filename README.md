@@ -42,7 +42,7 @@ VS Code custom-document dirty tabs, close/save/discard prompts and backups prote
 
 Every item-editor field, including read-only fields, has a hover/click/focus information icon containing its internal name, type, scope, value source and stored value. Reference paths appear there when resolved. Stored values describe the loaded snapshot until Save or reload; drafts remain in the controls. Long values scroll within the popover. Read-only reasons remain visible beside the field.
 
-Item-editor fields are grouped into collapsible Sitecore template sections, preserving section and field ordering. Content groups start expanded; groups containing only standard-template fields start collapsed. Click a heading or use Enter/Space to toggle it. Each editor remembers section expansion across refreshes and webview restoration. Collapsing does not discard drafts. Older snapshots without section IDs group by section name.
+Item-editor fields are grouped into collapsible Sitecore template sections, ordering sections by section sort order and then name, and fields within them by field sort order and then name. Content groups start expanded; groups containing only standard-template fields start collapsed. Click a heading or use Enter/Space to toggle it. Each editor remembers section expansion across refreshes and webview restoration. Collapsing does not discard drafts. Older snapshots without section IDs group by section name.
 
 ### Single-selection fields (B1)
 

@@ -1,3 +1,4 @@
+import { compareEditorFields } from "./fieldOrder";
 import { loadSelectionMetadata, selectionIO } from "./selectionClient";
 import { loadSelectionPage, selectionKind, selectionValue, validateSelection } from "./singleSelection";
 import { editorFailure } from "./editorFailure";
@@ -203,7 +204,7 @@ export class ItemEditorProvider implements vscode.CustomEditorProvider<ItemDocum
       connection: this.connections.get(doc.state.target.connectionId)?.name ?? "Unavailable connection", target: doc.state.target,
       item: { name: doc.state.base.displayName || doc.state.base.name, path: doc.state.base.path },
       error: doc.error,
-      fields: [...doc.state.base.fields].sort((a,b) => a.sectionSortOrder - b.sectionSortOrder || a.sortOrder - b.sortOrder).map(field => ({
+      fields: [...doc.state.base.fields].sort(compareEditorFields).map(field => ({
         id: normalizeId(field.fieldId), label: field.label || field.name, name: field.name, section: field.sectionName || "Fields", type: field.type,
         sectionId: field.sectionId ? normalizeId(field.sectionId) : undefined, isStandardTemplate: field.isStandardTemplate,
         scope: field.scope, source: field.containsFallbackValue ? "Fallback (unverified source)" : field.containsInheritedValue ? "Inherited" : field.containsStandardValue ? "Standard Value" : "Exact locale",
