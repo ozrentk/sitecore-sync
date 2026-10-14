@@ -1,3 +1,4 @@
+import { editorFailure } from "./editorFailure";
 import * as vscode from "vscode";
 import { dirname, resolve } from "node:path";
 import { randomBytes } from "node:crypto";
@@ -15,6 +16,7 @@ export class ItemDocument implements vscode.CustomDocument {
   readonly panels = new Set<vscode.WebviewPanel>();
   busy = false;
   error: string | undefined;
+  stage = "Editor operation";
   revision = 0;
   flush: { id: string; finish: (value: unknown) => void } | undefined;
   readonly lifetime = new AbortController();
@@ -70,8 +72,8 @@ export class ItemEditorProvider implements vscode.CustomEditorProvider<ItemDocum
       catch (error) { if (!(error instanceof vscode.FileSystemError && error.code === "FileNotFound")) throw error; }
       if (!state || (!Object.keys(state.drafts).length && !state.attempt)) {
         state = { formatVersion: 1, target, base, drafts: {} };
-        await this.persist(uri, state);
       }
+      await this.persist(uri, state);
       await vscode.commands.executeCommand("vscode.openWith", uri, itemEditorViewType, { preview: false });
     })();
     this.opening.set(key, operation);
@@ -103,14 +105,17 @@ export class ItemEditorProvider implements vscode.CustomEditorProvider<ItemDocum
     const nonce = randomBytes(16).toString("hex");
     panel.webview.html = `<!DOCTYPE html><html><head><meta charset="UTF-8"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src ${panel.webview.cspSource}; script-src 'nonce-${nonce}';"><link rel="stylesheet" href="${panel.webview.asWebviewUri(vscode.Uri.joinPath(media, "editor.css"))}"></head><body><header><h1 id="title"></h1><p id="identity"></p><p id="path"></p><button id="save">Save</button> <button id="revert">Revert</button> <button id="reconcile">Check save outcome</button> <button id="locale">Open existing locale/version…</button><p id="status" role="status"></p></header><main id="fields"></main><script nonce="${nonce}" src="${panel.webview.asWebviewUri(vscode.Uri.joinPath(media, "editor.js"))}"></script></body></html>`;
     const subscription = panel.webview.onDidReceiveMessage(message => {
-      void this.message(doc, message).catch(() => vscode.window.showErrorMessage("Item editor operation failed. Drafts are preserved. Check the connection and saved item before retrying."));
+      void this.message(doc, message).catch(error => {
+        if (error instanceof vscode.CancellationError) return;
+        void vscode.window.showErrorMessage(doc.error ?? editorFailure(error, doc.stage, Boolean(doc.state.attempt)));
+      });
     });
     panel.onDidDispose(() => { subscription.dispose(); doc.panels.delete(panel); });
     if (Object.keys(doc.state.drafts).length || doc.state.attempt) this.changed.fire({ document: doc });
   }
 
   private async message(doc: ItemDocument, raw: unknown): Promise<void> {
-    if (!raw || typeof raw !== "object") return;
+    if (doc.lifetime.signal.aborted || !raw || typeof raw !== "object") return;
     const message = raw as Record<string, unknown>;
     if (message.type === "frozen" && message.id === doc.flush?.id) { doc.flush?.finish(message.drafts); return; }
     if (message.type === "ready") { await this.render(doc); return; }
@@ -161,16 +166,35 @@ export class ItemEditorProvider implements vscode.CustomEditorProvider<ItemDocum
     await Promise.all([...doc.panels].map(panel => panel.webview.postMessage(payload)));
   }
 
+  private stateUri(uri: vscode.Uri): vscode.Uri {
+    return uri.path.endsWith(".xmitem") ? uri.with({ path: `${uri.path}.state` }) : uri;
+  }
   private async readState(uri: vscode.Uri): Promise<EditorState> {
-    if ((await vscode.workspace.fs.stat(uri)).size > 8 * 1024 * 1024) throw new Error("Editor snapshot exceeds its size limit.");
-    return parseEditorState(Buffer.from(await vscode.workspace.fs.readFile(uri)).toString("utf8"));
+    let source = this.stateUri(uri);
+    try { await vscode.workspace.fs.stat(source); }
+    catch (error) {
+      if (!(error instanceof vscode.FileSystemError && error.code === "FileNotFound")) throw error;
+      source = uri; // Existing 0.36.0 documents keep their original snapshot/journal.
+    }
+    if ((await vscode.workspace.fs.stat(source)).size > 8 * 1024 * 1024) throw new Error("Editor snapshot exceeds its size limit.");
+    return parseEditorState(Buffer.from(await vscode.workspace.fs.readFile(source)).toString("utf8"));
   }
   private async persist(uri: vscode.Uri, state: EditorState): Promise<void> {
     const bytes = Buffer.from(JSON.stringify(state));
     parseEditorState(bytes.toString("utf8"));
-    const temp = uri.with({ path: `${uri.path}.${randomBytes(8).toString("hex")}.tmp` });
+    const destination = this.stateUri(uri);
+    // Never atomically replace the open custom-document resource. File replacement can
+    // disturb VS Code's file-backed document lifecycle while its webview is alive.
+    const temp = destination.with({ path: `${destination.path}.${randomBytes(8).toString("hex")}.tmp` });
     await vscode.workspace.fs.writeFile(temp, bytes);
-    await vscode.workspace.fs.rename(temp, uri, { overwrite: true });
+    await vscode.workspace.fs.rename(temp, destination, { overwrite: true });
+    if (destination.toString() !== uri.toString()) {
+      try { await vscode.workspace.fs.stat(uri); }
+      catch (error) {
+        if (!(error instanceof vscode.FileSystemError && error.code === "FileNotFound")) throw error;
+        await vscode.workspace.fs.writeFile(uri, bytes);
+      }
+    }
   }
   private io(doc: ItemDocument, signal: AbortSignal): EditorIO {
     const credentials = async () => {
@@ -182,12 +206,12 @@ export class ItemEditorProvider implements vscode.CustomEditorProvider<ItemDocum
       return { connection, secret };
     };
     return {
-      read: async () => { const { connection, secret } = await credentials(); const t = doc.state.target;
+      read: async () => { doc.stage = doc.state.attempt ? "Save readback" : "Pre-save item read"; const { connection, secret } = await credentials(); const t = doc.state.target;
         return this.client.loadItem(connection, secret, { itemId: t.itemId }, t.language, t.version, AbortSignal.any([signal, AbortSignal.timeout(30_000)]), false, true); },
-      write: async changes => { const { connection, secret } = await credentials(); const t = doc.state.target;
+      write: async changes => { doc.stage = "Sitecore write"; const { connection, secret } = await credentials(); const t = doc.state.target;
         await this.client.updateEditorFields(connection, secret, { itemId: t.itemId, language: t.language, version: t.version,
           fields: Object.fromEntries(changes.map(c => [c.name, c.value])) }, AbortSignal.any([signal, AbortSignal.timeout(30_000)])); },
-      persist: state => this.persist(doc.uri, state),
+      persist: state => { doc.stage = "Local save journal"; return this.persist(doc.uri, state); },
     };
   }
   private async flushInputs(doc: ItemDocument): Promise<void> {
@@ -217,6 +241,7 @@ export class ItemEditorProvider implements vscode.CustomEditorProvider<ItemDocum
   private async exclusive(doc: ItemDocument, action: () => Promise<void>): Promise<void> {
     if (doc.busy) throw new Error("Editor operation already in progress.");
     doc.error = undefined;
+    doc.stage = "Editor input synchronization";
     doc.busy = true;
     let synchronized = false;
     try {
@@ -227,10 +252,9 @@ export class ItemEditorProvider implements vscode.CustomEditorProvider<ItemDocum
       await action();
     }
     catch (error) {
-      const message = error instanceof Error ? error.message : "";
-      doc.error = /^(Conflict in |Enter |Single-Line|Invalid checkbox|The previous save|Check the previous|Remote outcome|Readback did not|Item template|Connection target|Authoring returned a different)/u.test(message)
-        ? message : "Operation did not complete. Draft preserved; check the connection and, after a save attempt, check its outcome before retrying.";
-      throw error;
+      if (error instanceof vscode.CancellationError && !doc.state.attempt) throw error;
+      doc.error = editorFailure(error, doc.stage, Boolean(doc.state.attempt));
+      throw new Error(doc.error);
     }
     finally {
       doc.busy = false; doc.revision++;
@@ -240,6 +264,7 @@ export class ItemEditorProvider implements vscode.CustomEditorProvider<ItemDocum
   }
   async saveCustomDocument(doc: ItemDocument, token: vscode.CancellationToken): Promise<void> {
     await this.exclusive(doc, async () => {
+      doc.stage = "Save validation";
       const changes = planChanges(doc.state);
       if (doc.state.attempt) throw new Error("Check the previous save outcome before retrying.");
       if (!changes.length) { doc.state = { ...doc.state, drafts: {} }; await this.persist(doc.uri, doc.state); return; }
