@@ -20,7 +20,7 @@ function fixture(): EditorState {
 }
 
 export const itemEditorTests: readonly IntegrationTest[] = [{
-  name: "single-selection webview preserves current values and exposes searchable grouped and lazy tree choices",
+  name: "compact selection webview opens from textbox, closes on selection and preserves grouped/tree values",
   async execute(): Promise<void> {
     const directory = await mkdtemp(join(tmpdir(), "xm-selection-webview-"));
     const extension = vscode.extensions.getExtension("OzrenTK.sitecore-xm-cloud-sync")!;
@@ -50,28 +50,49 @@ export const itemEditorTests: readonly IntegrationTest[] = [{
           try {
             const rows = [...document.querySelectorAll(".field")];
             if (rows.length !== 5) throw Error("Missing selection controls");
-            await until(()=>rows[1].querySelector("[data-selection-label]").textContent.includes("/sitecore/content/Root/Group"));
+            await until(()=>rows[1].querySelector("[data-selection-label]").value === "Group");
+            if (!rows[1].querySelector(".field-info-content").textContent.includes("/sitecore/content/Root/Group")) throw Error("Path must be in information box");
+            if (rows[1].querySelector(".selection-trigger").value.includes("/sitecore/")) throw Error("Textbox must show only item name");
             if (document.querySelector("select, .selection-tree")) throw Error("Label resolution must not load choices");
-            if (rows[4].querySelector("[data-selection-label]").textContent !== "Unavailable item") throw Error("Missing unresolved reference feedback");
+            if (rows[4].querySelector("[data-selection-label]").value !== "Unavailable item") throw Error("Missing unresolved reference feedback");
+            if ([...document.querySelectorAll("button")].some(b=>/Load choices|Browse choices/.test(b.textContent))) throw Error("Legacy loading button remains");
+            if (getComputedStyle(rows[0].querySelector(".field-info-content")).display !== "none") throw Error("Metadata should be collapsed");
+            rows[0].querySelector(".field-info-button").click();
+            if (getComputedStyle(rows[0].querySelector(".field-info-content")).display === "none" || !rows[0].querySelector(".field-info-content").textContent.includes("Stored value:")) throw Error("Missing field information");
+            rows[0].querySelector(".field-info-button").click();
             for (const [index, row] of rows.entries()) {
               const expected = index === 1 ? "55555555555555555555555555555555" : "unresolved-original";
               if (row.querySelector("[data-field-id]").value !== expected) throw Error("Current value lost on open");
-              [...row.querySelectorAll("button")].find(b=>b.textContent.includes("choices")).click();
+              row.querySelector(".selection-trigger").click();
+              if (row.querySelector(".selection-trigger").nextElementSibling.textContent !== "Clear") throw Error("Clear is not right of textbox");
               await until(()=>row.querySelector("select, .selection-tree"));
               if (row.querySelector("[data-field-id]").value !== expected) throw Error("Loading changed current value");
             }
             if (!rows[2].querySelector("optgroup") || !rows[3].querySelector("optgroup")) throw Error("Missing groups");
+            rows[0].querySelector(".selection-trigger").dispatchEvent(new KeyboardEvent("keydown", {key:"ArrowDown", bubbles:true}));
+            await until(()=>rows[0].querySelector("select"));
             const filter = rows[0].querySelector("input[type=search]"); filter.value="not found"; filter.dispatchEvent(new Event("input"));
             if (rows[0].querySelectorAll("option").length !== 1) throw Error("Filter failed");
             if (rows[0].querySelector("[data-field-id]").value !== "unresolved-original") throw Error("Filtering changed value");
             filter.value=""; filter.dispatchEvent(new Event("input"));
             const flat = rows[0].querySelector("select"); flat.selectedIndex=1; flat.dispatchEvent(new Event("change"));
             if (rows[0].querySelector("[data-field-id]").value !== "Group") throw Error("Droplist did not store name");
+            if (!rows[0].querySelector(".selection-popup").hidden || rows[0].querySelector(".selection-trigger").getAttribute("aria-expanded") !== "false") throw Error("Selection must close popup");
+            rows[1].querySelector(".selection-trigger").click(); await until(()=>rows[1].querySelector("select"));
+            rows[1].querySelector("input[type=search]").dispatchEvent(new KeyboardEvent("keydown", {key:"Escape", bubbles:true}));
+            if (!rows[1].querySelector(".selection-popup").hidden) throw Error("Escape must close popup");
+            rows[1].querySelector(".selection-trigger").click(); await until(()=>rows[1].querySelector("select"));
             const linked = rows[1].querySelector("select"); linked.selectedIndex=1; linked.dispatchEvent(new Event("change"));
             if (rows[1].querySelector("[data-field-id]").value !== "{55555555-5555-5555-5555-555555555555}") throw Error("Droplink did not store ID");
+            if (!rows[1].querySelector(".selection-popup").hidden) throw Error("Droplink selection must close popup");
+            rows[4].querySelector(".selection-trigger").click(); await until(()=>rows[4].querySelector("details"));
             const branch = rows[4].querySelector("details"); branch.open=true;
             await until(()=>branch.querySelector("button")); branch.querySelector("button").click();
             if (rows[4].querySelector("[data-field-id]").value !== "{66666666-6666-6666-6666-666666666666}") throw Error("Tree selection failed");
+            if (!rows[4].querySelector(".selection-popup").hidden) throw Error("Tree selection must close popup");
+            rows[0].querySelector(".selection-trigger").click();
+            document.body.dispatchEvent(new PointerEvent("pointerdown", {bubbles:true}));
+            if (!rows[0].querySelector(".selection-popup").hidden) throw Error("Outside click must close popup");
             api.postMessage({type:"selectionSmoke",ok:true});
           } catch(error) { api.postMessage({type:"selectionSmoke",error:String(error)}); }
         });`;
