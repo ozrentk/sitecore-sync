@@ -1,0 +1,7 @@
+body { color:var(--vscode-foreground); background:var(--vscode-editor-background); font-family:var(--vscode-font-family); padding:16px 24px; max-width:1000px; margin:auto; }
+header { border-bottom:1px solid var(--vscode-panel-border); padding-bottom:16px; }
+h1 { font-size:21px; } h2 { font-size:17px; margin-top:28px; }
+#path, #identity { overflow-wrap:anywhere; } .field { margin:20px 0; } label { font-weight:600; } .meta { color:var(--vscode-descriptionForeground); margin:5px 0; font-size:12px; }
+input, textarea { font:inherit; color:var(--vscode-input-foreground); background:var(--vscode-input-background); border:1px solid var(--vscode-input-border, var(--vscode-panel-border)); padding:7px; box-sizing:border-box; }
+input[type=text], textarea { width:calc(100% - 70px); } textarea { min-height:90px; vertical-align:top; resize:vertical; } button { font:inherit; padding:5px 10px; margin:3px; border:1px solid var(--vscode-button-border, transparent); color:var(--vscode-button-foreground); background:var(--vscode-button-background); cursor:pointer; }
+button:disabled { opacity:.5; cursor:default; } :focus-visible { outline:1px solid var(--vscode-focusBorder); outline-offset:2px; } pre { white-space:pre-wrap; overflow-wrap:anywhere; background:var(--vscode-textCodeBlock-background); padding:10px; max-height:250px; overflow:auto; } [hidden] { display:none !important; }

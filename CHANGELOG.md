@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.36.0
+
+- Add Edit… from Browse and the clicked Compare side, opening a dedicated item editor pinned to connection, item, locale and numbered version.
+- Add basic text, checkbox, integer, number, date and explicitly UTC datetime controls; preserve untouched values and keep unsupported/fallback fields read-only.
+- Add Save/Revert, conflict checks, native dirty tabs/backups, persisted save tracking and readback reconciliation without automatic mutation retries or version creation.
+
 ## 0.35.0
 
 - Make displayed Item Details paths copyable like IDs in Browse and on each Compare side, with keyboard-accessible buttons and inline success/failure feedback.

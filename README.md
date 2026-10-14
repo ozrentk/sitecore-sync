@@ -28,6 +28,18 @@ After saving a successfully tested connection (or using the saved connection’s
 
 If the Authoring API returns identical site records, the extension displays the site once and reports the number of duplicate records omitted. Records are considered identical only when their name, root path, and root item ID all match exactly.
 
+## Edit ordinary items (Stage A)
+
+Right-click an ordinary content or component datasource item in **Browse**, or on its specific side in **Compare**, and choose **Edit…**. The editor opens in the main editor area; Item Details remains a read-only inspector. Tabs are pinned to the connection, item, locale and concrete numbered version. Reopening the same target reveals its draft. Tree navigation does not retarget the tab. **Open existing locale/version…** opens another tab without creating versions.
+
+Editable fields are Single-Line Text, Multi-Line Text, Checkbox, Integer, Number, Date and Datetime, grouped by template section with type, scope and value-source metadata. Text whitespace and existing newline conventions are preserved; numeric strings are validated without rounding. **Clear** stores an explicit empty value, never a reset to inheritance. Untouched fields, including inherited and Standard Values, are not written. Editing those values creates an explicit override.
+
+Datetime controls display **UTC**, with no browser-local conversion, and write Sitecore's compact `yyyyMMddTHHmmssZ` format. Date controls use date-only input and midnight storage. Untouched representations remain unchanged. Legacy Datetime values without a UTC suffix, non-midnight Date values and unrecognized formats stay read-only rather than guessing their meaning. See [Sitecore's documented field serialization](https://doc.sitecore.com/sai/en/developers/sitecoreai/introduction-to-framework-agnostic-sitecore-development/content-rendering/field-types-in-rendering-data.html).
+
+**Save** (also Ctrl+S) requires native confirmation before contacting Sitecore, including when autosave invokes it. The warning explains shared/unversioned impact and explicit overrides. The editor checks identity, numbered version, template and changed-field values/metadata again before writing, then reads back the same version. This is not an atomic compare-and-set: concurrent server edits can still occur between requests. No mutation is retried automatically. An uncertain or partial save preserves the draft and exposes **Check save outcome**; unresolved outcomes block further writes. **Revert** reloads the pinned version and discards the draft, not the remote write.
+
+VS Code custom-document dirty tabs, close/save/discard prompts and backups protect drafts. Content snapshots and save journals are stored locally in the extension's global storage, with dirty backups managed by VS Code; they contain item content, not credentials. This first editor uses a content-change document model; it does not yet offer document-wide Undo/Redo. Unsupported types remain visibly read-only: Rich Text awaits both visual and HTML source editors; links, relations, lists, media, system fields and page presentation editing are deferred. Missing exact-locale versions and fallback-derived fields are read-only; choosing another existing locale is explicit, never an inferred fallback write. Page-tree editing and publishing from the editor are separate stages.
+
 ## Open a comparison
 
 Run **XM Cloud Sync: Open Comparison** from the Command Palette or use the diff icon in the XM Cloud Sync activity view. The comparison opens as a document-style tab with left and right connection and language selectors plus swap and **Lock languages** controls. Choices are remembered per workspace.

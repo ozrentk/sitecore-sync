@@ -1,3 +1,4 @@
+import { ItemEditorProvider, itemEditorViewType } from "./editor/itemEditorProvider";
 import { McpAccessManager } from "./mcp/accessManager";
 import { FallbackFixtureCommands } from "./connections/fallbackFixtureCommands";
 import { ConnectionSettingsPanel } from "./connections/connectionSettingsPanel";
@@ -131,6 +132,15 @@ export function activate(context: vscode.ExtensionContext): void {
     itemTaskRunner,
     publishingManager,
     log,
+  );
+  const itemEditors = new ItemEditorProvider(context, connectionStore, authoringClient);
+  context.subscriptions.push(itemEditors,
+    vscode.window.registerCustomEditorProvider(itemEditorViewType, itemEditors, { supportsMultipleEditorsPerDocument: false }),
+    vscode.commands.registerCommand("xmCloudSync.editItem", async (args: unknown) => {
+      try { await itemEditors.open(args); }
+      catch { await vscode.window.showErrorMessage("Unable to open this item editor. Check the connection and select an existing content item."); }
+    }),
+    itemEditors.onDidSave(target => { void comparisonPanelManager.handleEditorSaved(target.connectionId, target.itemId).catch(() => { log.warn("Item save confirmed, but comparison refresh failed. Refresh the comparison to reload values."); }); }),
   );
   const connectionsView = vscode.window.createTreeView("xmCloudSync.connections", {
     treeDataProvider: connectionProvider,

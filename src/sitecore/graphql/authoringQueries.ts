@@ -141,6 +141,9 @@ export const nonStandardFieldIdsQuery = gql`
     $after: String
   ) {
     item(where: $where) {
+      itemId
+      version
+      language { name }
       fields(
         first: $pageSize
         after: $after
