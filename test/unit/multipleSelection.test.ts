@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import { deepStrictEqual, strictEqual, rejects, throws } from "node:assert/strict";
-import { parseMultipleSelection, validateMultipleDraft, validateMultipleSelection } from "../../src/editor/multipleSelection";
+import { parseMultipleSelection, validateMultipleDraft, validateMultipleSelection, validateReorder } from "../../src/editor/multipleSelection";
 import { loadSelectionPage, selectionValue, type SelectionIO } from "../../src/editor/singleSelection";
 import { checkConflicts, planChanges, readOnlyReason, saveEditor, serializeDraft, type EditorState } from "../../src/editor/itemEditorModel";
 import type { AuthoringItemField, AuthoringTreeItem } from "../../src/sitecore/authoringClient";
@@ -8,6 +8,12 @@ const id = (n: number) => n.toString(16).padStart(32, "0");
 const node = (n: number, path: string): AuthoringTreeItem => ({ itemId:id(n), name:`Item${n}`, displayName:`Item ${n}`, path, hasChildren:true });
 const root = node(1,"/sitecore/content/Root"), child = node(2,root.path+"/Child"), leaf = node(3,child.path+"/Leaf"), outside = node(4,"/sitecore/content/Other");
 const old = id(99);
+test("reordering accepts only exact-token permutations including unavailable IDs", () => {
+ const before = `${old}|{00000000-0000-0000-0000-000000000002}|${id(3)}`;
+ const tokens = before.split("|");
+ for (const order of [tokens, [tokens[1],tokens[2],tokens[0]], [tokens[2],tokens[0],tokens[1]], [...tokens].reverse()]) validateReorder(before, order.join("|"));
+ for (const invalid of [tokens.slice(1).join("|"), `${before}|${id(4)}`, `${tokens[0]}|${tokens[0]}|${tokens[2]}`, before.replace(tokens[1],id(2)), "invalid"]) throws(()=>validateReorder(before,invalid));
+});
 const field = (type = "Multilist", value = old): AuthoringItemField => ({fieldId:id(10),name:"Items",label:"Items",value,type,typeKey:type,scope:"VERSIONED",sortOrder:0,sectionSortOrder:0,sectionName:"Content",isStandardTemplate:false,containsFallbackValue:false,containsInheritedValue:false,containsStandardValue:false,textual:false,selectionSource:root.path});
 const io: SelectionIO = {item: async locator => { const found = [root,child,leaf,outside].find(item => "itemId" in locator ? item.itemId === locator.itemId.replace(/[{}-]/g,"").toLowerCase() : item.path === locator.path); if (!found) throw Error("Unavailable"); return found; }, children: async locator => { const item = await io.item(locator); return {item,children:item === root ? [child] : item === child ? [leaf] : []}; }};
 const state = (f = field()): EditorState => ({formatVersion:1,target:{connectionId:"test",serverUrl:"https://example.test",itemId:id(20),language:"en",version:1},drafts:{},base:{itemId:id(20),name:"Component",displayName:"Component",path:"/sitecore/content/Component",language:"en",version:1,hasChildren:false,template:{templateId:id(21),name:"Component"},availableVersions:[],fields:[f]}});
@@ -25,6 +31,18 @@ test("retained unavailable references survive add/remove/reorder without revalid
  await validateMultipleSelection(field(),"",io);
  await rejects(validateMultipleSelection(field(),`${old}|${id(4)}`,io),/outside/);
  throws(()=>validateMultipleDraft(field("Multilist",added),child.itemId));
+});
+
+test("Save persists reordered unknown references byte-for-byte through the existing pipeline", async () => {
+ const original = `${old}|${selectionValue("multilist",child)}`;
+ const reordered = original.split("|").reverse().join("|");
+ const f = field("Multilist",original); const initial = state(f);
+ const draft = {...initial,drafts:{[f.fieldId]:{input:reordered,clear:false}}};
+ let reads=0; let written="";
+ const saved=await saveEditor(draft,{read:async()=>++reads===1?initial.base:{...initial.base,fields:[{...f,value:written}]},
+  validateSelections:async(fresh,changes)=>validateMultipleSelection(fresh.fields[0],changes[0].value,io),
+  persist:async()=>{},write:async changes=>{written=changes[0].value;}},()=>{});
+ strictEqual(written,reordered); strictEqual(saved.base.fields[0].value,reordered); deepStrictEqual(saved.drafts,{});
 });
 test("checklist allows explicit removal and addition but not reorder", async () => {
  const f = field("Checklist",`${old}|${child.itemId}`);

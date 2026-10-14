@@ -30,7 +30,17 @@ select { font:inherit; color:var(--vscode-input-foreground); background:var(--vs
 .field-section > summary { font-size:17px; font-weight:600; padding:10px 0; }
 .field-section > .field { margin-left:12px; }
 
-.multiple-selected { padding-left:24px; } .multiple-selected li { margin:6px 0; overflow-wrap:anywhere; }
-.multiple-selected li > span { display:inline-block; min-width:30%; }
+.multiple-selected { list-style:none; padding:3px; margin:6px 0; max-height:320px; overflow:auto; }
+.multiple-selected li { display:flex; align-items:center; gap:6px; min-height:32px; margin:2px 0; border-top:2px solid transparent; border-bottom:2px solid transparent; background:var(--vscode-list-inactiveSelectionBackground, transparent); }
+.multiple-selected li > span { flex:1; min-width:0; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.multiple-selected button { flex:none; margin:1px; padding:3px 7px; background:transparent; color:var(--vscode-foreground); }
+.multiple-selected button:hover { background:var(--vscode-toolbar-hoverBackground); }
+.multiple-selected .reorder-handle { cursor:grab; user-select:none; touch-action:none; }
+.multiple-selected .reorder-handle:active { cursor:grabbing; }
+.multiple-selected .drop-before { border-top-color:var(--vscode-focusBorder); }
+.multiple-selected .drop-after { border-bottom-color:var(--vscode-focusBorder); }
+.multiple-selected.dragging { outline:1px solid var(--vscode-panel-border); }
+.reorder-hint { display:none; } .field:has(.reorder-handle:focus) .reorder-hint { display:block; }
+.visually-hidden { position:absolute; width:1px; height:1px; padding:0; margin:-1px; overflow:hidden; clip-path:inset(50%); white-space:nowrap; }
 .multiple-choice { margin:6px 0; overflow-wrap:anywhere; } .multiple-choice label { font-weight:normal; }
 .multiple-available input[type=search] { width:100%; }
