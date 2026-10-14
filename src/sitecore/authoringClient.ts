@@ -181,6 +181,7 @@ interface RawItemField {
     readonly versioning?: unknown;
     readonly sortOrder?: unknown;
     readonly section?: {
+      readonly itemTemplateSectionId?: unknown;
       readonly name?: unknown;
       readonly sortOrder?: unknown;
     };
@@ -1809,6 +1810,7 @@ export interface AuthoringItemField {
   readonly typeKey: string;
   readonly scope: AuthoringFieldScope;
   readonly sortOrder: number;
+  readonly sectionId?: string;
   readonly sectionName: string;
   readonly sectionSortOrder: number;
   readonly isStandardTemplate: boolean;
@@ -1888,6 +1890,7 @@ function parseItemDetails(
       typeKey: definition.typeKey,
       scope: definition.versioning,
       sortOrder: typeof definition.sortOrder === "number" ? definition.sortOrder : 0,
+      sectionId: typeof definition.section?.itemTemplateSectionId === "string" ? definition.section.itemTemplateSectionId : undefined,
       sectionName: typeof definition.section?.name === "string" ? definition.section.name : "",
       sectionSortOrder:
         typeof definition.section?.sortOrder === "number" ? definition.section.sortOrder : 0,

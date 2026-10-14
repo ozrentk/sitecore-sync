@@ -205,6 +205,7 @@ export class ItemEditorProvider implements vscode.CustomEditorProvider<ItemDocum
       error: doc.error,
       fields: [...doc.state.base.fields].sort((a,b) => a.sectionSortOrder - b.sectionSortOrder || a.sortOrder - b.sortOrder).map(field => ({
         id: normalizeId(field.fieldId), label: field.label || field.name, name: field.name, section: field.sectionName || "Fields", type: field.type,
+        sectionId: field.sectionId ? normalizeId(field.sectionId) : undefined, isStandardTemplate: field.isStandardTemplate,
         scope: field.scope, source: field.containsFallbackValue ? "Fallback (unverified source)" : field.containsInheritedValue ? "Inherited" : field.containsStandardValue ? "Standard Value" : "Exact locale",
         selectionKind: selectionKind(field),
         kind: fieldKind(field), reason: readOnlyReason(doc.state.base, field), input: doc.state.drafts[normalizeId(field.fieldId)]?.input ?? fieldInput(field),

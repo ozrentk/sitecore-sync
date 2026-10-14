@@ -303,16 +303,27 @@ export const itemEditorTests: readonly IntegrationTest[] = [{
     let doc: ItemDocument | undefined; let listener: vscode.Disposable | undefined; let timer: ReturnType<typeof setTimeout> | undefined;
     try {
       const state = fixture();
-      const fields = ["Single-Line Text", "Multi-Line Text", "Checkbox", "Integer", "Number", "Date", "Datetime", "Rich Text"].map((type, index) => ({ ...state.base.fields[0], fieldId: (index + 4).toString(16).padStart(32, "0"), name: `Field${index}`, label: type, type, value: type === "Rich Text" ? "<img src=x onerror=alert(1)>" : "" }));
+      const fields = ["Single-Line Text", "Multi-Line Text", "Checkbox", "Integer", "Number", "Date", "Datetime", "Rich Text"].map((type, index) => ({ ...state.base.fields[0], fieldId: (index + 4).toString(16).padStart(32, "0"), name: `Field${index}`, label: type, type, sectionName: index === 7 ? "Statistics" : index % 2 ? "Options" : "Content", sectionId: index === 7 ? "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" : index % 2 ? "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb" : "cccccccccccccccccccccccccccccccc", isStandardTemplate: index === 7, value: type === "Rich Text" ? "<img src=x onerror=alert(1)>" : "" }));
       const expanded = { ...state, base: { ...state.base, fields } };
       await vscode.workspace.fs.createDirectory(provider.directory);
       const uri = vscode.Uri.joinPath(provider.directory, `${editorKey(state.target)}.xmitem`);
       await vscode.workspace.fs.writeFile(uri, Buffer.from(JSON.stringify(expanded)));
       doc = await provider.openCustomDocument(uri, { backupId: undefined, untitledDocumentData: undefined });
       await provider.resolveCustomEditor(doc, panel);
-      const script = `window.addEventListener("message", event => { if (event.data.type !== "state") return; try {
+      const script = `let checked = false; window.addEventListener("message", event => { if (event.data.type !== "state" || checked) return; checked = true; try {
+        const sections = [...document.querySelectorAll(".field-section")];
+        if (sections.length !== 3) throw Error("Interleaved fields must form three unique sections");
+        const content = sections.find(s => s.querySelector("summary").textContent === "Content");
+        const standard = sections.find(s => s.querySelector("summary").textContent === "Statistics");
+        if (!content.open || standard.open || content.querySelectorAll(".field").length !== 4) throw Error("Incorrect grouping/default collapse");
+        content.open = false; content.dispatchEvent(new Event("toggle"));
+        standard.open = true; standard.dispatchEvent(new Event("toggle"));
+        window.dispatchEvent(new MessageEvent("message", {data:event.data}));
+        const refreshed = [...document.querySelectorAll(".field-section")];
+        if (refreshed.find(s => s.querySelector("summary").textContent === "Content").open || !refreshed.find(s => s.querySelector("summary").textContent === "Statistics").open) throw Error("Section state lost on render");
+        for (const section of refreshed) section.open = true;
         if (document.querySelectorAll("input").length !== 6 || document.querySelectorAll("textarea").length !== 1) throw Error("Missing controls");
-        if (document.querySelector("img") || !document.body.textContent.includes("visual and HTML")) throw Error("Unsafe or editable Rich Text");
+        if (document.querySelector("img") || !document.body.textContent.includes("Read-only:")) throw Error("Unsafe or editable Rich Text");
         if (!document.body.textContent.includes("UTC (no local-time conversion)")) throw Error("Missing explicit timezone");
         for (const row of document.querySelectorAll(".field")) {
           const info = row.querySelector(".field-info-content");

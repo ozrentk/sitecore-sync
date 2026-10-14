@@ -102,3 +102,13 @@ test("cancelled pre-save read cannot persist intent or mutate", async () => {
     write: async () => { writes++; }, persist: async () => { persisted++; } }, () => {}));
   strictEqual(writes, 0); strictEqual(persisted, 0);
 });
+
+test("editor restores section identities while accepting older snapshots", () => {
+  const original = state();
+  strictEqual(parseEditorState(JSON.stringify(original)).base.fields[0].sectionId, undefined);
+  const withSection = { ...original, base: item({ ...field(), sectionId: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" }) };
+  strictEqual(parseEditorState(JSON.stringify(withSection)).base.fields[0].sectionId, "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
+  for (const sectionId of [12, "x".repeat(257)]) {
+    throws(() => parseEditorState(JSON.stringify({ ...original, base: { ...item(), fields: [{ ...field(), sectionId }] } })));
+  }
+});

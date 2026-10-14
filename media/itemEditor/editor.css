@@ -25,3 +25,7 @@ select { font:inherit; color:var(--vscode-input-foreground); background:var(--vs
 .field-controls { display:flex; align-items:flex-start; gap:6px; margin-top:6px; }
 .field-controls input:not([type=checkbox]), .field-controls textarea { flex:1; min-width:0; }
 .field-controls button { flex:none; margin:0; }
+
+.field-section { margin-top:20px; border-top:1px solid var(--vscode-panel-border); }
+.field-section > summary { font-size:17px; font-weight:600; padding:10px 0; }
+.field-section > .field { margin-left:12px; }

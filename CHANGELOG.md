@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.37.5
+
+- Group editor fields by Sitecore section identity, preventing repeated headings when section sort orders match.
+- Add keyboard-accessible collapsible sections; standard-only groups start collapsed and expansion choices survive editor refreshes.
+
 ## 0.37.4
 
 - Extend the information popover to every editable and read-only field, with metadata and stored values. Reference paths remain in the popover.
