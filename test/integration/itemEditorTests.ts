@@ -116,7 +116,7 @@ export const itemEditorTests: readonly IntegrationTest[] = [{
             const duplicatePaths = [...rows[3].querySelectorAll(".picker-choice-path")].map(n=>n.textContent);
             if (duplicatePaths.length !== 2 || !duplicatePaths[0].startsWith("Group") || !duplicatePaths[1].startsWith("Other")) throw Error("Duplicate labels lack relative parent disambiguation");
             if (!rows[3].querySelector(".picker-choice").title.includes("/sitecore/content/Root/Group/Choice")) throw Error("Missing full choice tooltip");
-            if (rows[3].querySelector(".picker-source").textContent.includes("/sitecore/") || !rows[3].querySelector(".picker-source").title.includes("/sitecore/content/Root")) throw Error("Source breadcrumb or tooltip incorrect");
+            if (rows[3].querySelector(".picker-source").textContent !== "Root" || !rows[3].querySelector(".picker-source").title.includes("/sitecore/content/Root")) throw Error("Source breadcrumb or tooltip incorrect");
             rows[0].querySelector(".selection-trigger").dispatchEvent(new KeyboardEvent("keydown", {key:"ArrowDown", bubbles:true}));
             await until(()=>rows[0].querySelector(".picker-choice"));
             const filter = rows[0].querySelector("input[type=search]"); filter.value="not found"; filter.dispatchEvent(new Event("input"));
@@ -138,6 +138,7 @@ export const itemEditorTests: readonly IntegrationTest[] = [{
             rows[4].querySelector(".selection-trigger").click(); await until(()=>rows[4].querySelector(".picker-children"));
             rows[4].querySelector(".picker-children").click();
             await until(()=>rows[4].querySelector(".picker-choice-name")?.textContent === "Choice label");
+            if (rows[4].querySelector(".picker-source").textContent !== "Group") throw Error("Picker header must show only current level name");
             rows[4].querySelector('[aria-label="Back to parent"]').click();
             if (!rows[4].querySelector(".picker-children") || rows[4].querySelector(".picker-choice-name").textContent !== "Group") throw Error("Tree Back lost parent level");
             rows[4].querySelector(".picker-choice").focus(); rows[4].querySelector(".picker-choice").dispatchEvent(new KeyboardEvent("keydown",{key:"ArrowRight",bubbles:true}));

@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.41.1
+
+- Show only the final item name in picker headers instead of the shortened breadcrumb; preserve full-path tooltips and tree navigation.
+
 ## 0.41.0
 
 - Replace inline item choices with compact, viewport-bounded searchable popovers. Multi-selection uses Add items, persistent Added indicators and add-only result rows; single-selection closes after choosing.

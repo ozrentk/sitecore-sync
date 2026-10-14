@@ -351,7 +351,7 @@ function createChoicePicker(row, field, trigger, options) {
   const scope = document.createElement("p"); scope.className = "picker-scope meta"; scope.textContent = "Current level only. Open children to browse."; scope.hidden = !options.tree;
   popup.append(header,search,status,scope,results);
   let page; let history = []; let controls = [];
-  const shortPath = path => { const parts = path.split("/").filter(Boolean); return `${parts.length > 2 ? "… › " : ""}${parts.slice(-2).join(" › ")}`; };
+  const shortPath = path => path.split("/").filter(Boolean).pop() || "Choices";
   const position = () => {
     if (popup.hidden || !trigger.isConnected) return;
     const rect = trigger.getBoundingClientRect(); const width = document.documentElement.clientWidth; const height = window.innerHeight;
