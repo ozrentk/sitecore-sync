@@ -1,7 +1,7 @@
 import type { AuthoringItemField, AuthoringItemLocator, AuthoringTreeItem, AuthoringTreeLevel } from "../sitecore/authoringClient";
 import { EditorValidationError, isGuid, normalizeId } from "./itemEditorModel";
 
-export type SelectionKind = "droplist" | "droplink" | "grouped droplist" | "grouped droplink" | "droptree";
+export type SelectionKind = "droplist" | "droplink" | "grouped droplist" | "grouped droplink" | "droptree" | "checklist" | "multilist" | "treelist" | "treelistex";
 export interface SelectionChoice extends AuthoringTreeItem { readonly group?: string; readonly disabled?: string }
 export interface SelectionPage { readonly root: AuthoringTreeItem; readonly parent: AuthoringTreeItem; readonly choices: readonly SelectionChoice[] }
 export interface SelectionIO {
@@ -11,8 +11,12 @@ export interface SelectionIO {
 export const selectionLimit = 1000;
 export function selectionKind(field: AuthoringItemField): SelectionKind | undefined {
   const type = field.type.toLowerCase();
-  return ["droplist", "droplink", "grouped droplist", "grouped droplink", "droptree"].includes(type) ? type as SelectionKind : undefined;
+  return ["droplist", "droplink", "grouped droplist", "grouped droplink", "droptree", "checklist", "multilist", "treelist", "treelistex"].includes(type) ? type as SelectionKind : undefined;
 }
+export function isMultipleSelection(kind: SelectionKind | undefined): boolean {
+  return kind !== undefined && ["checklist", "multilist", "treelist", "treelistex"].includes(kind);
+}
+export function isTreeSelection(kind: SelectionKind): boolean { return ["droptree", "treelist", "treelistex"].includes(kind); }
 export function storesName(kind: SelectionKind): boolean { return kind === "droplist" || kind === "grouped droplist"; }
 export function selectionSourceReason(source: string | undefined): string | undefined {
   if (source === undefined) return "Field Source metadata is unavailable. Reload after checking template access.";
@@ -61,11 +65,11 @@ export function selectionValue(kind: SelectionKind, choice: AuthoringTreeItem): 
 }
 export async function loadSelectionPage(field: AuthoringItemField, io: SelectionIO, parentId?: string): Promise<SelectionPage> {
   const kind = selectionKind(field);
-  if (!kind) throw new EditorValidationError("Not a single-selection field.");
+  if (!kind) throw new EditorValidationError("Not a selection field.");
   const root = await io.item(locator(field)); assertItem(root);
   let parent = root;
   if (parentId && normalizeId(parentId) !== normalizeId(root.itemId)) {
-    if (kind !== "droptree" || !isGuid(parentId)) throw new EditorValidationError("Invalid selection branch.");
+    if (!isTreeSelection(kind) || !isGuid(parentId)) throw new EditorValidationError("Invalid selection branch.");
     parent = await io.item({ itemId: parentId }); assertItem(parent);
     if (!distance(root.path, parent.path)) throw new EditorValidationError("Selection branch is outside the configured Source.");
   }
@@ -90,7 +94,7 @@ export async function loadSelectionPage(field: AuthoringItemField, io: Selection
 export async function validateSelection(field: AuthoringItemField, value: string, io: SelectionIO): Promise<void> {
   const kind = selectionKind(field)!;
   locator(field); // Even explicit clearing requires a supported, verified source form.
-  if (kind === "droptree") {
+  if (isTreeSelection(kind)) {
     const root = await io.item(locator(field)); assertItem(root);
     if (!value) return;
     if (!isGuid(value)) throw new EditorValidationError("Select one item reference.");

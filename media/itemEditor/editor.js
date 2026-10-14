@@ -102,8 +102,10 @@ window.addEventListener("message", event => {
     if (field.reason) {
       const reason = document.createElement("p"); reason.className = "meta"; reason.textContent = `Read-only: ${field.reason}`;
       const value = document.createElement("pre"); value.textContent = field.raw;
-      if (field.selectionKind) row.append(selectionLabel(field));
+      if (field.selectionKind && !["checklist", "multilist", "treelist", "treelistex"].includes(field.selectionKind)) row.append(selectionLabel(field));
       row.append(reason, value);
+    } else if (field.kind === "multiselection") {
+      renderMultipleSelection(row, field);
     } else if (field.kind === "selection") {
       renderSelection(row, field);
     } else {
@@ -150,7 +152,8 @@ function setSelectionLabel(control, text, path = "") {
     const detail = document.getElementById(`${control.id}-path`);
     if (detail) { detail.textContent = path; detail.hidden = !path; }
   } else {
-    control.textContent = text;
+    control.textContent = text; control.title = path;
+    control.dispatchEvent(new CustomEvent("referenceResolved", {bubbles:true,detail:{text,path}}));
     const detail = document.getElementById(`${control.id}-path`);
     if (detail) { detail.textContent = path; detail.hidden = !path; }
   }
@@ -301,3 +304,135 @@ function renderSelection(row, field) {
   row.append(stored, controls, popup);
 }
 send("ready");
+
+function renderMultipleSelection(row, field) {
+  const norm = value => value.replace(/[{}-]/g, "").toLowerCase();
+  const checklist = field.selectionKind === "checklist";
+  const tree = ["treelist", "treelistex"].includes(field.selectionKind);
+  const stored = document.createElement("input"); stored.type = "hidden";
+  stored.dataset.fieldId = field.id; stored.dataset.original = field.original; stored.dataset.explicitClear = String(field.clear);
+  stored.value = field.clear ? "" : field.input;
+  let values = stored.value ? stored.value.split("|") : [];
+  const names = new Map();
+  const originalTokens = field.original ? field.original.split("|") : [];
+  const controls = document.createElement("div"); controls.className = "selection-controls";
+  const trigger = document.createElement("button"); trigger.id = field.id; trigger.disabled = blocked;
+  trigger.setAttribute("aria-expanded", "false"); trigger.textContent = "Choose items…";
+  const clear = document.createElement("button"); clear.textContent = "Clear"; clear.disabled = blocked;
+  controls.append(trigger, clear);
+  const selected = document.createElement("ol"); selected.className = "multiple-selected"; selected.setAttribute("aria-label", `${field.label} selected items`);
+  const popup = document.createElement("div"); popup.className = "selection-popup"; popup.hidden = true; popup.id = `${field.id}-choices`;
+  trigger.setAttribute("aria-controls", popup.id);
+  const status = document.createElement("p"); status.setAttribute("role", "status");
+  const available = document.createElement("div"); available.className = "multiple-available";
+  popup.append(status, available);
+  let refreshChoices = () => {};
+  row.addEventListener("referenceResolved", event => {
+    const label = event.target;
+    if (label.dataset.selectionLabel === field.id) names.set(norm(label.dataset.value), {name:event.detail.text,path:event.detail.path});
+  });
+  const edit = next => {
+    if (blocked) return;
+    const focusedChoice = document.activeElement?.dataset.choiceId;
+    values = next; stored.value = values.join("|"); stored.dataset.explicitClear = String(!values.length);
+    send("change", {id:field.id,input:stored.value,clear:!values.length});
+    document.getElementById("status").textContent = "Unsaved changes";
+    drawSelected(); refreshChoices();
+    if (focusedChoice) {
+      const replacement = [...available.querySelectorAll("[data-choice-id]")].find(control => control.dataset.choiceId === focusedChoice);
+      if (replacement && !replacement.disabled) replacement.focus(); else trigger.focus();
+    }
+  };
+  const add = choice => {
+    if (choice.disabled || values.some(value => norm(value) === norm(choice.itemId)) || values.length >= 256) return;
+    names.set(norm(choice.itemId), {name:choice.displayName || choice.name,path:choice.path});
+    const originalIndex = originalTokens.findIndex(value => norm(value) === norm(choice.itemId));
+    const token = originalIndex < 0 ? choice.value : originalTokens[originalIndex];
+    const next = [...values];
+    const before = checklist && originalIndex >= 0 ? next.findIndex(value => originalTokens.findIndex(original => norm(original) === norm(value)) > originalIndex) : -1;
+    next.splice(before < 0 ? next.length : before, 0, token);
+    edit(next);
+  };
+  const drawSelected = () => {
+    selected.replaceChildren();
+    if (!values.length) { const empty = document.createElement("li"); empty.textContent = "No selection"; selected.append(empty); }
+    values.forEach((value, index) => {
+      const entry = document.createElement("li");
+      const label = document.createElement("span"); label.dataset.selectionLabel = field.id; label.dataset.value = value;
+      const known = names.get(norm(value)); label.textContent = known?.name || `Loading selected item… (${value})`; label.title = known?.path || value;
+      const remove = document.createElement("button"); remove.textContent = "Remove"; remove.disabled = blocked;
+      remove.setAttribute("aria-label", `Remove selected item ${index + 1}`);
+      remove.addEventListener("click", () => { edit(values.filter((_, position) => position !== index)); selected.querySelectorAll("button")[Math.min(index, values.length - 1) * (checklist ? 1 : 3)]?.focus(); });
+      entry.append(label, remove);
+      if (!checklist) for (const [direction, title] of [[-1, "Move up"], [1, "Move down"]]) {
+        const move = document.createElement("button"); move.textContent = title; move.disabled = blocked || index + direction < 0 || index + direction >= values.length;
+        move.setAttribute("aria-label", `${title}: selected item ${index + 1}`);
+        move.addEventListener("click", () => { const next = [...values]; [next[index], next[index + direction]] = [next[index + direction], next[index]]; edit(next); selected.children[index + direction]?.querySelector("button")?.focus(); });
+        entry.append(move);
+      }
+      selected.append(entry);
+    });
+  };
+  clear.addEventListener("click", () => edit([]));
+  const close = (focus = true) => { popup.hidden = true; trigger.setAttribute("aria-expanded", "false"); selectionRequests.delete(field.id); if (activePicker?.row === row) activePicker = undefined; if (focus) trigger.focus(); };
+  const request = (parent, receive) => {
+    if (blocked) return;
+    const previous = selectionRequests.get(field.id); previous?.receive({error:"Loading was superseded. Collapse and expand to retry."});
+    const id = String(++selectionRequestId); selectionRequests.set(field.id, {id,receive});
+    send("choices", {id:field.id,request:id,...(parent ? {parent} : {})});
+  };
+  const choiceControl = choice => {
+    const entry = document.createElement("div"); entry.className = "multiple-choice";
+    const title = `${choice.displayName || choice.name} · ${choice.path}`;
+    names.set(norm(choice.itemId), {name:choice.displayName || choice.name,path:choice.path});
+    const chosen = values.some(value => norm(value) === norm(choice.itemId));
+    if (checklist) {
+      const label = document.createElement("label"); const box = document.createElement("input"); box.type = "checkbox"; box.checked = chosen; box.dataset.choiceId = norm(choice.itemId);
+      box.disabled = blocked || Boolean(choice.disabled) || (!chosen && values.length >= 256);
+      box.addEventListener("change", () => { if (box.checked) add(choice); else edit(values.filter(value => norm(value) !== norm(choice.itemId))); });
+      label.append(box, document.createTextNode(title)); entry.append(label);
+    } else {
+      const addButton = document.createElement("button"); addButton.textContent = chosen ? "Selected" : "Add";
+      addButton.disabled = blocked || chosen || Boolean(choice.disabled) || values.length >= 256;
+      addButton.dataset.choiceId = norm(choice.itemId);
+      addButton.addEventListener("click", () => add(choice));
+      const name = document.createElement("span"); name.textContent = title; entry.append(addButton, name);
+    }
+    return entry;
+  };
+  const showTree = (container, page) => {
+    container.replaceChildren();
+    if (!page.choices.length) { container.textContent = "No accessible children."; return; }
+    for (const choice of page.choices) {
+      const entry = choiceControl(choice); container.append(entry);
+      if (choice.hasChildren) {
+        const branch = document.createElement("details"); const summary = document.createElement("summary"); summary.textContent = `Children of ${choice.displayName || choice.name}`;
+        const nested = document.createElement("div"); nested.className = "selection-tree"; branch.append(summary, nested); entry.append(branch);
+        branch.addEventListener("toggle", () => { if (branch.open && !popup.hidden && !blocked) { nested.textContent = "Loading…"; request(choice.itemId, result => { if (result.error) nested.textContent = result.error; else { showTree(nested, result.page); drawSelected(); } }); } });
+      }
+    }
+  };
+  trigger.addEventListener("click", () => {
+    if (blocked) return;
+    if (!popup.hidden) { close(); return; }
+    activePicker?.close(false); activePicker = {row,close}; popup.hidden = false; trigger.setAttribute("aria-expanded", "true");
+    available.replaceChildren(); status.textContent = "Loading choices…";
+    request(undefined, result => {
+      if (result.error) { status.textContent = result.error; return; }
+      status.textContent = `Source: ${result.page.root.path}`;
+      if (tree) {
+        showTree(available, result.page);
+        refreshChoices = () => { for (const button of available.querySelectorAll("[data-choice-id]")) { const chosen = values.some(value => norm(value) === button.dataset.choiceId); button.disabled = blocked || chosen || values.length >= 256; button.textContent = chosen ? "Selected" : "Add"; } };
+      } else {
+        const search = document.createElement("input"); search.type = "search"; search.placeholder = "Filter by name or path"; search.setAttribute("aria-label", `Filter ${field.label} choices`);
+        const list = document.createElement("div"); available.append(search,list);
+        const draw = () => { list.replaceChildren(); for (const choice of result.page.choices.filter(choice => `${choice.name} ${choice.displayName} ${choice.path}`.toLowerCase().includes(search.value.toLowerCase()))) list.append(choiceControl(choice)); if (!list.children.length) list.textContent = "No matching choices."; };
+        refreshChoices = draw; search.addEventListener("input", draw); draw(); search.focus();
+      }
+      drawSelected();
+    });
+  });
+  row.addEventListener("keydown", event => { if (event.key === "Escape" && !popup.hidden) { event.preventDefault(); close(); } });
+  row.addEventListener("focusout", event => { if (event.relatedTarget && !row.contains(event.relatedTarget)) close(false); });
+  row.append(stored,controls,selected,popup); drawSelected();
+}
