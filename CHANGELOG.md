@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.37.2
+
+- Resolve selected Droplink, Grouped Droplink and Droptree names/paths automatically when fields appear, independently of loading their choices.
+- Preserve stored values and drafts, show unavailable-reference feedback, and discard stale label responses after edits, refresh or disposal.
+
 ## 0.37.1
 
 - Remove the redundant Clear button from checkbox fields; check or uncheck directly.

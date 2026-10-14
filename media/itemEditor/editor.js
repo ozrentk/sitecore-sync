@@ -9,6 +9,13 @@ const send = (type, extra = {}) => api.postMessage({ type, revision, ...extra })
 for (const action of ["save", "revert", "reconcile", "locale"]) document.getElementById(action).addEventListener("click", () => send(action));
 window.addEventListener("message", event => {
   const state = event.data;
+  if (state.type === "selectionLabel") {
+    if (state.revision !== revision) return;
+    for (const label of document.querySelectorAll("[data-selection-label]")) {
+      if (label.dataset.selectionLabel === state.id && label.dataset.value === state.value) label.textContent = state.label;
+    }
+    return;
+  }
   if (state.type === "choices") {
     const pending = selectionRequests.get(state.id);
     if (!pending || pending.id !== state.request || state.revision !== revision || blocked) return;
@@ -67,6 +74,7 @@ window.addEventListener("message", event => {
     if (field.reason) {
       const reason = document.createElement("p"); reason.className = "meta"; reason.textContent = `Read-only: ${field.reason}`;
       const value = document.createElement("pre"); value.textContent = field.raw;
+      if (field.selectionKind) row.append(selectionLabel(field));
       row.append(reason, value);
     } else if (field.kind === "selection") {
       renderSelection(row, field);
@@ -99,21 +107,28 @@ window.addEventListener("message", event => {
     section.append(row);
   }
 });
+function selectionLabel(field) {
+  const label = document.createElement("p"); label.className = "selection-current"; label.setAttribute("role", "status");
+  label.dataset.selectionLabel = field.id;
+  label.dataset.value = field.clear ? "" : field.input;
+  label.textContent = !label.dataset.value ? "No selection" : field.selectionKind.includes("droplist") ? label.dataset.value : "Loading selected item…";
+  return label;
+}
 function renderSelection(row, field) {
   // The canonical draft is separate from the choice list: loading/filtering never
   // changes it, including references absent from the current source.
   const stored = document.createElement("input"); stored.type = "hidden";
   stored.dataset.fieldId = field.id; stored.dataset.original = field.original;
   stored.dataset.explicitClear = String(field.clear); stored.value = field.clear ? "" : field.input;
-  const current = document.createElement("p"); current.className = "selection-current";
-  const label = document.createElement("p"); label.className = "meta";
-  label.textContent = field.input ? "Current value not yet resolved; preserved until explicitly changed." : "No selection";
+  const current = document.createElement("p"); current.className = "meta";
+  const label = selectionLabel(field);
   const status = document.createElement("p"); status.className = "meta"; status.setAttribute("role", "status");
   const content = document.createElement("div"); content.className = "selection-choices";
   const choose = (value, name, clear = false) => {
     if (blocked) return;
     stored.value = value; stored.dataset.explicitClear = String(clear);
     current.textContent = `Stored value: ${value || "(empty)"}`;
+    label.dataset.value = value;
     label.textContent = name;
     send("change", { id: field.id, input: value, clear });
     document.getElementById("status").textContent = "Unsaved changes";
@@ -200,6 +215,6 @@ function renderSelection(row, field) {
       else showList(result.page);
     });
   });
-  row.append(stored, current, label, reload, clear, status, content);
+  row.append(stored, label, current, reload, clear, status, content);
 }
 send("ready");

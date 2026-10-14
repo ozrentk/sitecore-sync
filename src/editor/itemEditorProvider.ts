@@ -15,8 +15,9 @@ function localKey(uri: vscode.Uri): string {
 }
 export const itemEditorViewType = "xmCloudSync.itemEditor";
 export class ItemDocument implements vscode.CustomDocument {
+  labelRequest: AbortController | undefined;
   readonly selections = new Map<string, AbortController>();
-  cancelSelections(): void { for (const request of this.selections.values()) request.abort(); this.selections.clear(); }
+  cancelSelections(): void { this.labelRequest?.abort(); for (const request of this.selections.values()) request.abort(); this.selections.clear(); }
   readonly panels = new Set<vscode.WebviewPanel>();
   busy = false;
   error: string | undefined;
@@ -209,6 +210,47 @@ export class ItemEditorProvider implements vscode.CustomEditorProvider<ItemDocum
         clear: doc.state.drafts[normalizeId(field.fieldId)]?.clear ?? false, raw: field.value,
       })) };
     await Promise.all([...doc.panels].map(panel => panel.webview.postMessage(payload)));
+    doc.labelRequest?.abort();
+    if (!doc.busy && !doc.lifetime.signal.aborted) {
+      const controller = new AbortController(); doc.labelRequest = controller;
+      void this.resolveLabels(doc, doc.revision, controller).catch(() => { /* Labels never affect drafts or save state. */ });
+    }
+  }
+
+  private async resolveLabels(doc: ItemDocument, revision: number, controller: AbortController): Promise<void> {
+    const fields = doc.state.base.fields.filter(field => {
+      const kind = selectionKind(field);
+      return kind && !kind.includes("droplist");
+    }).map(field => ({ id: normalizeId(field.fieldId), value: doc.state.drafts[normalizeId(field.fieldId)]?.clear
+      ? "" : doc.state.drafts[normalizeId(field.fieldId)]?.input ?? field.value })).filter(field => field.value);
+    const connection = this.connections.get(doc.state.target.connectionId);
+    const target = doc.state.target;
+    const signal = AbortSignal.any([controller.signal, doc.lifetime.signal]);
+    let secret: string | undefined;
+    if (connection && new URL(connection.serverUrl).origin === target.serverUrl) {
+      try { secret = await this.connections.getClientSecret(connection.id); } catch { /* Report unavailable labels below. */ }
+    }
+    const pending = fields.values();
+    // Bound concurrent reads; each lookup uses the captured connection and locale.
+    await Promise.all(Array.from({ length: Math.min(4, fields.length) }, async () => {
+      for (const field of pending) {
+        if (signal.aborted || doc.revision !== revision) return;
+        let label = "Unavailable item";
+        if (connection && secret && isGuid(field.value)) {
+          try {
+            const item = await this.client.loadSelectionItem(connection, secret, { itemId: field.value }, target.language,
+              AbortSignal.any([signal, AbortSignal.timeout(30_000)]));
+            label = `${item.displayName || item.name} · ${item.path}`;
+          } catch { /* Missing/inaccessible references retain their raw stored value. */ }
+        }
+        const live = this.connections.get(target.connectionId);
+        if (signal.aborted || doc.revision !== revision || doc.labelRequest !== controller) return;
+        if (!live || new URL(live.serverUrl).origin !== target.serverUrl) label = "Unavailable item";
+        const current = doc.state.drafts[field.id];
+        if ((current?.clear ? "" : current?.input ?? doc.state.base.fields.find(f => normalizeId(f.fieldId) === field.id)?.value) !== field.value) continue;
+        await Promise.all([...doc.panels].map(panel => panel.webview.postMessage({ type: "selectionLabel", revision, id: field.id, value: field.value, label })));
+      }
+    }));
   }
 
   private stateUri(uri: vscode.Uri): vscode.Uri {
