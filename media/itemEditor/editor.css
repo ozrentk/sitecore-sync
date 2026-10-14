@@ -59,3 +59,11 @@ select { font:inherit; color:var(--vscode-input-foreground); background:var(--vs
 .multiple-selected.dragging { outline:1px solid var(--vscode-panel-border); }
 .reorder-hint { display:none; } .field:has(.reorder-handle:focus) .reorder-hint { display:block; }
 .visually-hidden { position:absolute; width:1px; height:1px; padding:0; margin:-1px; overflow:hidden; clip-path:inset(50%); white-space:nowrap; }
+.name-value-list { display: grid; gap: 4px; margin: 6px 0; }
+.name-value-row { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 2fr) auto; gap: 6px; }
+.name-value-row input { min-width: 0; width: 100%; box-sizing: border-box; }
+.structured-error:empty { display: none; }
+.link-form { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px 12px; margin-top: 8px; }
+.link-property { display: flex; flex-direction: column; gap: 4px; min-width: 0; font-size: 12px; font-weight: normal; color: var(--vscode-descriptionForeground); }
+.link-property input { width: 100%; min-width: 0; font-size: var(--vscode-font-size); }
+@media (max-width: 500px) { .link-form { grid-template-columns: minmax(0, 1fr); } }

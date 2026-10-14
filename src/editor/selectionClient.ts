@@ -2,12 +2,13 @@ import type { XmCloudConnection } from "../connections/connection";
 import type { AuthoringContentClient, AuthoringItemDetails } from "../sitecore/authoringClient";
 import { normalizeId } from "./itemEditorModel";
 import { selectionKind, selectionLimit, type SelectionIO } from "./singleSelection";
+import { isGeneralLink } from "./generalLink";
 
 /** Read Source through its template-field item, using established Item/fields APIs. */
 export async function loadSelectionMetadata(client: AuthoringContentClient, connection: XmCloudConnection, secret: string,
   item: AuthoringItemDetails, signal: AbortSignal): Promise<AuthoringItemDetails> {
   const fields = [...item.fields];
-  const selected = fields.map((field, index) => ({ field, index })).filter(({ field }) => selectionKind(field) && !field.isStandardTemplate && !field.name.startsWith("__"));
+  const selected = fields.map((field, index) => ({ field, index })).filter(({ field }) => (selectionKind(field) || isGeneralLink(field)) && !field.isStandardTemplate && !field.name.startsWith("__"));
   for (let start = 0; start < Math.min(selected.length, 64); start += 4) {
     await Promise.all(selected.slice(start, start + 4).map(async ({ field, index }) => {
       let selectionSource: string | undefined;

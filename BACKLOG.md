@@ -140,3 +140,10 @@ Use this file as the single backlog inventory. Add newly agreed work here, prese
 
 - B1/B2 pickers use bounded popovers with fixed search and scrolling add/choose rows, duplicate-only path details, full-path tooltips and short Source breadcrumbs. Multiple selection stays open after adding; selected-list removal and reordering remain separate.
 - Explicit tree child navigation/Back preserves hierarchy and Source scope. Keyboard/dismissal/focus, stale-response, draft/Save and undo behavior are covered by regression checks. B3 and media remain separate.
+
+
+### B24/B25 delivery update — Stage B3 (0.42.0)
+
+- Added Name Value List rows with lossless unchanged encoding, independent retained duplicates, explicit add/remove/empty/clear and host validation. New duplicate/empty keys and malformed representations are blocked; no consumer-side duplicate semantics are claimed.
+- Added ordinary General Link internal/HTTP(S)/email/anchor forms, Source-aware bounded internal item picking and changed-target validation. XML and custom/DAM attributes survive unrelated edits and native Undo after Save/Clear. Custom metadata restricts destination/kind edits; unsupported connector/media/JavaScript/search variants remain read-only. No link execution or preview.
+- Both retain editor identity, exact-locale/fallback guards, shared/unversioned warnings, changed-only Save, conflicts, backups, native undo, non-retried writes and readback. Read-only Dev examples verified internal/external XML and Source metadata; no live writes. Rich Text/media/fallback-source/page editing and editor publishing remain separate stages.

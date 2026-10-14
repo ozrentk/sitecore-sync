@@ -4,13 +4,14 @@ import { orderEditorFields } from "./fieldOrder";
 import { loadSelectionMetadata, selectionIO } from "./selectionClient";
 import { loadSelectionPage, selectionKind, selectionValue, validateSelection } from "./singleSelection";
 import { editorFailure } from "./editorFailure";
+import { isGeneralLink, linkSelectionField, parseGeneralLink, validateLinkTarget } from "./generalLink";
 import * as vscode from "vscode";
 import { dirname, resolve } from "node:path";
 import { randomBytes } from "node:crypto";
 import { ConnectionStore } from "../connections/connectionStore";
 import { AuthoringContentClient } from "../sitecore/authoringClient";
 import { assertItem, editorKey, fieldInput, fieldKind, isGuid, isLocale, normalizeId, parseEditorState,
-  EditorValidationError, planChanges, readOnlyReason, reconcileEditor, saveEditor, type FieldDraft, type EditorIO, type EditorState, type EditorTarget } from "./itemEditorModel";
+  EditorValidationError, planChanges, readOnlyReason, reconcileEditor, saveEditor, serializeDraft, type FieldDraft, type EditorIO, type EditorState, type EditorTarget } from "./itemEditorModel";
 
 function localKey(uri: vscode.Uri): string {
   const path = resolve(uri.fsPath);
@@ -153,6 +154,11 @@ export class ItemEditorProvider implements vscode.CustomEditorProvider<ItemDocum
       if (before.input === after.input && before.clear === after.clear) return;
       const focusValue = message.type === "reorder" && typeof message.focusValue === "string" && before.input.split("|").includes(message.focusValue) ? message.focusValue : undefined;
       this.recordEdit(doc, message.id, before, after, `${message.type === "reorder" ? "Reorder" : "Edit"} ${field.name}`, focusValue);
+      if (["namevalues", "generallink"].includes(fieldKind(field) ?? "")) {
+        let error = "";
+        try { serializeDraft(field, after); } catch (failure) { error = failure instanceof SyntaxError ? "Invalid structured field draft." : (failure as Error).message; }
+        await Promise.all([...doc.panels].map(panel => panel.webview.postMessage({ type: "draftValidation", revision: doc.revision, id: message.id, input: after.input, error })));
+      }
     } else if (message.type === "undo" || message.type === "redo") {
       if (!doc.state.attempt && [...doc.panels].some(panel => panel.active)) await vscode.commands.executeCommand(message.type);
     } else if (message.type === "save") {
@@ -202,8 +208,9 @@ export class ItemEditorProvider implements vscode.CustomEditorProvider<ItemDocum
   private async choices(doc: ItemDocument, message: Record<string, unknown>): Promise<void> {
     if (typeof message.id !== "string" || typeof message.request !== "string" || message.request.length > 100
       || (message.parent !== undefined && !isGuid(message.parent))) return;
-    const field = doc.state.base.fields.find(f => normalizeId(f.fieldId) === message.id);
-    if (!field || !selectionKind(field) || readOnlyReason(doc.state.base, field)) return;
+    const original = doc.state.base.fields.find(f => normalizeId(f.fieldId) === message.id);
+    if (!original || (!selectionKind(original) && !isGeneralLink(original)) || readOnlyReason(doc.state.base, original)) return;
+    const field = isGeneralLink(original) ? linkSelectionField(original) : original;
     const id = message.id;
     doc.selections.get(id)?.abort();
     const controller = new AbortController(); doc.selections.set(id, controller);
@@ -217,6 +224,7 @@ export class ItemEditorProvider implements vscode.CustomEditorProvider<ItemDocum
       if (!secret) throw new Error("Missing credentials.");
       const io = selectionIO(this.client, connection, secret, doc.state.target.language, signal, doc.state.target.itemId);
       const page = await loadSelectionPage(field, io, message.parent as string | undefined);
+      const choices = isGeneralLink(original) ? [{ ...page.parent, hasChildren: false }, ...page.choices].filter(choice => /^\/sitecore\/content(?:\/|$)/iu.test(choice.path)) : page.choices;
       let currentLabel = field.value ? "Unresolved or outside allowed Source (original value preserved)" : "No selection";
       const current = page.choices.find(choice => selectionKind(field)!.includes("droplist") ? choice.name === field.value : normalizeId(choice.itemId) === normalizeId(field.value));
       let currentName = current ? current.displayName || current.name : undefined;
@@ -225,7 +233,7 @@ export class ItemEditorProvider implements vscode.CustomEditorProvider<ItemDocum
       else if (isGuid(field.value)) {
         try { const item = await io.item({ itemId: field.value }); currentName = item.displayName || item.name; currentPath = item.path; currentLabel = `${currentName} · ${item.path} (not in this choice list; original preserved)`; } catch { /* Keep raw current reference visible. */ }
       }
-      response = { page: { ...page, choices: page.choices.map(choice => ({ ...choice, value: selectionValue(selectionKind(field)!, choice) })) }, currentLabel, currentName, currentPath };
+      response = { page: { ...page, choices: choices.map(choice => ({ ...choice, value: selectionValue(selectionKind(field)!, choice) })) }, currentLabel, currentName, currentPath };
     } catch (error) {
       response = { error: error instanceof EditorValidationError ? error.message : "Could not load verified choices. Check source access or limits, then retry; the current value is preserved." };
     }
@@ -251,6 +259,7 @@ export class ItemEditorProvider implements vscode.CustomEditorProvider<ItemDocum
         scope: field.scope, source: field.containsFallbackValue ? "Fallback (unverified source)" : field.containsInheritedValue ? "Inherited" : field.containsStandardValue ? "Standard Value" : "Exact locale",
         selectionKind: selectionKind(field),
         selectionSource: field.selectionSource,
+        linkCustom: isGeneralLink(field) && !readOnlyReason(doc.state.base, field) ? parseGeneralLink(field.value).custom : false,
         kind: fieldKind(field), reason: readOnlyReason(doc.state.base, field), input: doc.state.drafts[normalizeId(field.fieldId)]?.input ?? fieldInput(field),
         original: fieldInput(field),
         clear: doc.state.drafts[normalizeId(field.fieldId)]?.clear ?? false, raw: field.value,
@@ -285,12 +294,17 @@ export class ItemEditorProvider implements vscode.CustomEditorProvider<ItemDocum
   private async resolveLabels(doc: ItemDocument, revision: number, controller: AbortController): Promise<void> {
     const fields = doc.state.base.fields.filter(field => {
       const kind = selectionKind(field);
-      return kind && !kind.includes("droplist");
+      return (kind && !kind.includes("droplist")) || isGeneralLink(field);
     }).flatMap(field => {
-      const snapshot = doc.state.drafts[normalizeId(field.fieldId)]?.clear ? "" : doc.state.drafts[normalizeId(field.fieldId)]?.input ?? field.value;
+      const snapshot = doc.state.drafts[normalizeId(field.fieldId)]?.clear ? "" : doc.state.drafts[normalizeId(field.fieldId)]?.input ?? (isGeneralLink(field) ? fieldInput(field) : field.value);
       const multi = isMultipleSelection(selectionKind(field));
       let values: readonly string[];
-      try { values = multi ? parseMultipleSelection(snapshot) : [snapshot]; } catch { values = []; }
+      try {
+        if (isGeneralLink(field)) {
+          const link = JSON.parse(snapshot || "{}") as { linktype?: string; id?: string };
+          values = link.linktype === "internal" && typeof link.id === "string" ? [link.id] : [];
+        } else values = multi ? parseMultipleSelection(snapshot) : [snapshot];
+      } catch { values = []; }
       return values.filter(Boolean).map(value => ({ id: normalizeId(field.fieldId), value, snapshot, multi }));
     });
     const connection = this.connections.get(doc.state.target.connectionId);
@@ -319,7 +333,8 @@ export class ItemEditorProvider implements vscode.CustomEditorProvider<ItemDocum
         if (signal.aborted || doc.revision !== revision || doc.labelRequest !== controller) return;
         if (!live || new URL(live.serverUrl).origin !== target.serverUrl) { label = "Unavailable item"; name = undefined; path = undefined; }
         const draft = doc.state.drafts[field.id];
-        const current = draft?.clear ? "" : draft?.input ?? doc.state.base.fields.find(f => normalizeId(f.fieldId) === field.id)?.value;
+        const original = doc.state.base.fields.find(f => normalizeId(f.fieldId) === field.id);
+        const current = draft?.clear ? "" : draft?.input ?? (original && isGeneralLink(original) ? fieldInput(original) : original?.value);
         if (field.multi ? !current?.split("|").includes(field.value) : current !== field.snapshot) continue;
         await Promise.all([...doc.panels].map(panel => panel.webview.postMessage({ type: "selectionLabel", revision, id: field.id, value: field.value, label, name, path })));
       }
@@ -379,7 +394,8 @@ export class ItemEditorProvider implements vscode.CustomEditorProvider<ItemDocum
         const io = selectionIO(this.client, connection, secret, doc.state.target.language, AbortSignal.any([signal, AbortSignal.timeout(30_000)]), doc.state.target.itemId);
         for (const change of changes) {
           const field = item.fields.find(f => normalizeId(f.fieldId) === change.fieldId)!;
-          if (isMultipleSelection(selectionKind(field))) await validateMultipleSelection(field, change.value, io);
+          if (isGeneralLink(field)) await validateLinkTarget(field, change.value, io);
+          else if (isMultipleSelection(selectionKind(field))) await validateMultipleSelection(field, change.value, io);
           else if (selectionKind(field)) await validateSelection(field, change.value, io);
         }
       },
