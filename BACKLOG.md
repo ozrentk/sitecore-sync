@@ -125,3 +125,8 @@ Use this file as the single backlog inventory. Add newly agreed work here, prese
 - Reused B1 bounded metadata/choices and Stage A Save/Revert/conflict/journal/readback. Save validates new IDs against fresh Sources; malformed/duplicate lists and unsupported Source expressions remain read-only.
 - Automated domain and real-webview coverage exercises preservation, add/remove/reorder, lazy branches, restrictions and unchanged drafts. Read-only Dev checks confirmed storage and query-based configurations; live writes remain untested.
 - B24/B25 remain partial for B3 General Link/Name Value List and later Rich Text/media/fallback/page stages. Parameter/query Source support is not included in B2.
+
+### B24/B25 delivery update - bounded child Sources (0.39.0)
+
+- Added immediate-child exact-template queries for flat B1/B2 lists (`query:./child::*[@@templateid='GUID']` and `query:./*[@@templateid='GUID']`). Context is the edited item/connection/locale; complete bounded children are filtered by direct template equality.
+- Existing Source conflict, fresh membership, reference preservation, cancellation and Save guarantees apply. General queries, grouped/tree query semantics and parameterized Sources remain deferred; B3 General Link/Name Value List and Image/DAM remain separate.

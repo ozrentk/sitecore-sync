@@ -30,7 +30,7 @@ export function validateMultipleDraft(field: AuthoringItemField, value: string):
 }
 /** Retained legacy/out-of-source references are not additions. Validate only new IDs against fresh Source. */
 export async function validateMultipleSelection(field: AuthoringItemField, value: string, io: SelectionIO): Promise<void> {
-  const reason = selectionSourceReason(field.selectionSource);
+  const reason = selectionSourceReason(field.selectionSource, selectionKind(field));
   if (reason) throw new EditorValidationError(reason);
   const next = validateMultipleDraft(field, value);
   const original = new Set(parseMultipleSelection(field.value).map(normalizeId));

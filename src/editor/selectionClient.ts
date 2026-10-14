@@ -33,7 +33,7 @@ export async function loadSelectionMetadata(client: AuthoringContentClient, conn
   return { ...item, fields };
 }
 export function selectionIO(client: AuthoringContentClient, connection: XmCloudConnection, secret: string,
-  language: string, signal: AbortSignal): SelectionIO {
-  return { item: locator => client.loadSelectionItem(connection, secret, locator, language, signal),
+  language: string, signal: AbortSignal, contextItemId?: string): SelectionIO {
+  return { contextItemId, item: locator => client.loadSelectionItem(connection, secret, locator, language, signal),
     children: locator => client.loadTreeLevel(connection, secret, locator, language, signal, selectionLimit) };
 }

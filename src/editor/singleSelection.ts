@@ -5,6 +5,8 @@ export type SelectionKind = "droplist" | "droplink" | "grouped droplist" | "grou
 export interface SelectionChoice extends AuthoringTreeItem { readonly group?: string; readonly disabled?: string }
 export interface SelectionPage { readonly root: AuthoringTreeItem; readonly parent: AuthoringTreeItem; readonly choices: readonly SelectionChoice[] }
 export interface SelectionIO {
+  /** Pinned edited item, never the current tree selection or a referenced item. */
+  readonly contextItemId?: string;
   item(locator: AuthoringItemLocator): Promise<AuthoringTreeItem>;
   children(locator: AuthoringItemLocator): Promise<AuthoringTreeLevel>;
 }
@@ -18,19 +20,31 @@ export function isMultipleSelection(kind: SelectionKind | undefined): boolean {
 }
 export function isTreeSelection(kind: SelectionKind): boolean { return ["droptree", "treelist", "treelistex"].includes(kind); }
 export function storesName(kind: SelectionKind): boolean { return kind === "droplist" || kind === "grouped droplist"; }
-export function selectionSourceReason(source: string | undefined): string | undefined {
+/** Deliberately complete grammar: immediate children and one direct-template equality only. */
+export function childQueryTemplate(source: string | undefined): string | undefined {
+  const match = source?.match(/^\s*query:\s*\.\s*\/\s*(?:child\s*::\s*)?\*\s*\[\s*@@templateid\s*=\s*(['"])([^'"]+)\1\s*\]\s*$/u);
+  const id = match?.[2];
+  return id && /^(?:[a-f0-9]{32}|[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}|\{[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}\})$/iu.test(id) ? normalizeId(id) : undefined;
+}
+export function selectionSourceReason(source: string | undefined, kind?: SelectionKind): string | undefined {
   if (source === undefined) return "Field Source metadata is unavailable. Reload after checking template access.";
   if (!source.trim()) return "An empty Source is not supported; unrestricted browsing is disabled.";
   if (isGuid(source) || validPath(source)) return undefined;
-  return "Unsupported Source: only an absolute Sitecore root path or item ID is supported. Queries, relative paths, tokens and filters are read-only.";
+  if (childQueryTemplate(source)) return kind && !["droplist", "droplink", "checklist", "multilist"].includes(kind)
+    ? "This child query Source is supported only for Droplist, Droplink, Checklist and Multilist. Grouped and tree query Sources remain read-only." : undefined;
+  return "Unsupported Source: use an absolute Sitecore root path, item ID, or immediate-child query with one exact template-ID filter. Other queries, relative paths, tokens and filters are read-only.";
 }
 function validPath(path: string): boolean {
   return /^\/sitecore(?:\/[^/]+)*$/iu.test(path) && path === path.trim()
     && !/[\\?*\[\]#{}$=|&:\x00-\x1f]/u.test(path) && !path.split("/").some(part => part === "." || part === "..");
 }
-function locator(field: AuthoringItemField): AuthoringItemLocator {
-  const reason = selectionSourceReason(field.selectionSource);
+function locator(field: AuthoringItemField, io: SelectionIO): AuthoringItemLocator {
+  const reason = selectionSourceReason(field.selectionSource, selectionKind(field));
   if (reason) throw new EditorValidationError(reason);
+  if (childQueryTemplate(field.selectionSource)) {
+    if (!isGuid(io.contextItemId)) throw new EditorValidationError("The edited item context is unavailable. Reopen the editor.");
+    return { itemId: io.contextItemId };
+  }
   return isGuid(field.selectionSource) ? { itemId: field.selectionSource } : { path: field.selectionSource! };
 }
 // Returned item paths are data, not Source expressions. Names can legitimately
@@ -66,7 +80,10 @@ export function selectionValue(kind: SelectionKind, choice: AuthoringTreeItem): 
 export async function loadSelectionPage(field: AuthoringItemField, io: SelectionIO, parentId?: string): Promise<SelectionPage> {
   const kind = selectionKind(field);
   if (!kind) throw new EditorValidationError("Not a selection field.");
-  const root = await io.item(locator(field)); assertItem(root);
+  const source = locator(field, io);
+  const root = await io.item(source); assertItem(root);
+  const templateId = childQueryTemplate(field.selectionSource);
+  if (templateId && (normalizeId(root.itemId) !== normalizeId(io.contextItemId!))) throw new EditorValidationError("Selection returned a different edited item.");
   let parent = root;
   if (parentId && normalizeId(parentId) !== normalizeId(root.itemId)) {
     if (!isTreeSelection(kind) || !isGuid(parentId)) throw new EditorValidationError("Invalid selection branch.");
@@ -74,6 +91,10 @@ export async function loadSelectionPage(field: AuthoringItemField, io: Selection
     if (!distance(root.path, parent.path)) throw new EditorValidationError("Selection branch is outside the configured Source.");
   }
   let choices: SelectionChoice[] = [...await children(parent, io)];
+  if (templateId) {
+    if (choices.some(choice => !isGuid(choice.templateId))) throw new EditorValidationError("Child template metadata is unavailable; choices cannot be verified.");
+    choices = choices.filter(choice => normalizeId(choice.templateId!) === templateId);
+  }
   if (kind.startsWith("grouped")) {
     const groups = choices;
     if (groups.length > 50) throw new EditorValidationError("Grouped Source exceeds 50 groups; this field is read-only.");
@@ -93,9 +114,9 @@ export async function loadSelectionPage(field: AuthoringItemField, io: Selection
 /** Re-evaluate allowed membership against the current Source immediately before save. */
 export async function validateSelection(field: AuthoringItemField, value: string, io: SelectionIO): Promise<void> {
   const kind = selectionKind(field)!;
-  locator(field); // Even explicit clearing requires a supported, verified source form.
+  locator(field, io); // Even explicit clearing requires a supported, verified source form.
   if (isTreeSelection(kind)) {
-    const root = await io.item(locator(field)); assertItem(root);
+    const root = await io.item(locator(field, io)); assertItem(root);
     if (!value) return;
     if (!isGuid(value)) throw new EditorValidationError("Select one item reference.");
     const selected = await io.item({ itemId: value }); assertItem(selected);
