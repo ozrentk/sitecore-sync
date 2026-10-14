@@ -35,7 +35,7 @@ export const itemEditorTests: readonly IntegrationTest[] = [{
     let doc: ItemDocument | undefined; let listener: vscode.Disposable | undefined; let timer: ReturnType<typeof setTimeout> | undefined;
     try {
       const state = fixture();
-      const fields = ["Droplist", "Droplink", "Grouped Droplist", "Grouped Droplink", "Droptree"].map((type, index) => ({ ...state.base.fields[0], fieldId: (index + 10).toString(16).padStart(32, "0"), name: `Select${index}`, label: type, type, value: "unresolved-original", selectionSource: root.path }));
+      const fields = ["Droplist", "Droplink", "Grouped Droplist", "Grouped Droplink", "Droptree"].map((type, index) => ({ ...state.base.fields[0], fieldId: (index + 10).toString(16).padStart(32, "0"), name: `Select${index}`, label: type, type, value: index === 1 ? group.itemId : "unresolved-original", selectionSource: root.path }));
       await vscode.workspace.fs.createDirectory(provider.directory);
       const uri = vscode.Uri.joinPath(provider.directory, `${editorKey(state.target)}.xmitem`);
       await vscode.workspace.fs.writeFile(uri, Buffer.from(JSON.stringify({ ...state, base: { ...state.base, fields } })));
@@ -50,11 +50,15 @@ export const itemEditorTests: readonly IntegrationTest[] = [{
           try {
             const rows = [...document.querySelectorAll(".field")];
             if (rows.length !== 5) throw Error("Missing selection controls");
-            for (const row of rows) {
-              if (row.querySelector("[data-field-id]").value !== "unresolved-original") throw Error("Current value lost on open");
+            await until(()=>rows[1].querySelector("[data-selection-label]").textContent.includes("/sitecore/content/Root/Group"));
+            if (document.querySelector("select, .selection-tree")) throw Error("Label resolution must not load choices");
+            if (rows[4].querySelector("[data-selection-label]").textContent !== "Unavailable item") throw Error("Missing unresolved reference feedback");
+            for (const [index, row] of rows.entries()) {
+              const expected = index === 1 ? "55555555555555555555555555555555" : "unresolved-original";
+              if (row.querySelector("[data-field-id]").value !== expected) throw Error("Current value lost on open");
               [...row.querySelectorAll("button")].find(b=>b.textContent.includes("choices")).click();
               await until(()=>row.querySelector("select, .selection-tree"));
-              if (row.querySelector("[data-field-id]").value !== "unresolved-original") throw Error("Loading changed current value");
+              if (row.querySelector("[data-field-id]").value !== expected) throw Error("Loading changed current value");
             }
             if (!rows[2].querySelector("optgroup") || !rows[3].querySelector("optgroup")) throw Error("Missing groups");
             const filter = rows[0].querySelector("input[type=search]"); filter.value="not found"; filter.dispatchEvent(new Event("input"));
@@ -84,6 +88,41 @@ export const itemEditorTests: readonly IntegrationTest[] = [{
       strictEqual(Object.keys(doc.state.drafts).length, 3, "Unchanged grouped selections must not become drafts");
       strictEqual(doc.state.drafts[fields[0].fieldId].input, "Group");
     } finally { clearTimeout(timer); listener?.dispose(); panel.dispose(); doc?.dispose(); provider.dispose(); await rm(directory, { recursive: true, force: true }); }
+  },
+}, {
+  name: "automatic reference labels preserve drafts and ignore results after selection changes or disposal",
+  async execute(): Promise<void> {
+    const directory = await mkdtemp(join(tmpdir(), "xm-label-host-"));
+    const targetId = "44444444444444444444444444444444";
+    const initial = fixture();
+    const state = { ...initial, base: { ...initial.base, fields: [{ ...initial.base.fields[0], type: "Droplink", value: targetId, selectionSource: "/sitecore/content/Choices" }] } };
+    let finish: ((item: unknown) => void) | undefined;
+    const posted: Record<string, unknown>[] = []; const reads: unknown[][] = [];
+    const provider = new ItemEditorProvider({ globalStorageUri: vscode.Uri.file(directory) } as vscode.ExtensionContext,
+      { get: () => ({ id: "test", serverUrl: "https://example.test" }), getClientSecret: async () => "secret" } as unknown as ConnectionStore,
+      { loadSelectionItem: async (...args: unknown[]) => { reads.push(args); return new Promise(resolve => { finish = resolve; }); } } as unknown as AuthoringContentClient);
+    let doc: ItemDocument | undefined;
+    try {
+      await vscode.workspace.fs.createDirectory(provider.directory);
+      const uri = vscode.Uri.joinPath(provider.directory, `${editorKey(state.target)}.xmitem`);
+      await vscode.workspace.fs.writeFile(uri, Buffer.from(JSON.stringify(state)));
+      doc = await provider.openCustomDocument(uri, { backupId: undefined, untitledDocumentData: undefined });
+      doc.panels.add({ webview: { postMessage: async (message: Record<string, unknown>) => { posted.push(message); return true; } } } as unknown as vscode.WebviewPanel);
+      const harness = provider as unknown as { resolveLabels(doc: ItemDocument, revision: number, controller: AbortController): Promise<void> };
+      const resolved = { itemId: targetId, name: "Choice", displayName: "Choice label", path: "/sitecore/content/Choices/Choice", hasChildren: false };
+      const waitRead = async () => { for (let i=0; !finish && i<100; i++) await new Promise(resolve => setTimeout(resolve, 5)); strictEqual(Boolean(finish), true); };
+      let controller = new AbortController(); doc.labelRequest = controller;
+      let request = harness.resolveLabels(doc, doc.revision, controller); await waitRead(); finish!(resolved); await request;
+      strictEqual(posted[0].label, "Choice label · /sitecore/content/Choices/Choice");
+      strictEqual(reads[0][3], "en-AU"); deepStrictEqual(doc.state.drafts, {});
+      finish = undefined; posted.length = 0; controller = new AbortController(); doc.labelRequest = controller;
+      request = harness.resolveLabels(doc, doc.revision, controller); await waitRead();
+      doc.state = { ...doc.state, drafts: { [fieldId]: { input: "", clear: true } } }; finish!(resolved); await request;
+      strictEqual(posted.length, 0, "Old label must not overwrite a changed selection");
+      doc.state = state; finish = undefined; controller = new AbortController(); doc.labelRequest = controller;
+      request = harness.resolveLabels(doc, doc.revision, controller); await waitRead(); doc.dispose(); finish!(resolved); await request;
+      strictEqual(controller.signal.aborted, true); strictEqual(posted.length, 0);
+    } finally { doc?.dispose(); provider.dispose(); await rm(directory, { recursive: true, force: true }); }
   },
 }, {
   name: "selection requests reject superseded results and abort on document disposal",
