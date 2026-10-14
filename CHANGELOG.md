@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.37.6
+
+- Fix editor section ordering: equal section sort orders now use section names before field-level ordering, so fields cannot pull their section ahead of another group.
+
 ## 0.37.5
 
 - Group editor fields by Sitecore section identity, preventing repeated headings when section sort orders match.
