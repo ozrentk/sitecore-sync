@@ -1088,6 +1088,16 @@ export class ComparisonPanelManager implements vscode.Disposable {
       return;
     }
 
+    if (message.type === "editItem") {
+      if (this.pendingLanguageView || message.viewContext !== this.contentSession.revisionId ||
+        (message.side !== "left" && message.side !== "right") || typeof message.itemId !== "string") return;
+      const selection = this.getSelection();
+      const connectionId = message.side === "left" ? selection.leftConnectionId : selection.rightConnectionId;
+      const language = message.side === "left" ? selection.leftLanguage : selection.rightLanguage;
+      if (connectionId) await vscode.commands.executeCommand("xmCloudSync.editItem", { connectionId, itemId: message.itemId, language });
+      return;
+    }
+
     if (message.type === "ready") {
       const navigation = this.pendingFavoriteNavigation;
       this.pendingFavoriteNavigation = undefined;
@@ -2150,6 +2160,19 @@ export class ComparisonPanelManager implements vscode.Disposable {
     } finally {
       await this.panel?.webview.postMessage({ type: "itemRefreshFinished", rowKey });
     }
+  }
+
+  async handleEditorSaved(connectionId: string, itemId: string): Promise<void> {
+    // Shared and unversioned edits invalidate other cached locales too.
+    const suffix = `:${normalizeItemId(itemId)}`;
+    for (const cache of [this.itemDetailsCache, this.pendingItemDetails]) {
+      for (const key of cache.keys()) {
+        if (key.startsWith(`${connectionId}:`) && (key.endsWith(suffix) || key.endsWith(`${suffix}:fallback`))) cache.delete(key);
+      }
+    }
+    this.fallbackRevision += 1;
+    await this.postState();
+    await this.refreshFieldDiffView();
   }
 
   private invalidateItemDetails(

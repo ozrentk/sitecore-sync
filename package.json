@@ -2,7 +2,7 @@
   "name": "sitecore-xm-cloud-sync",
   "displayName": "XM Cloud Sync",
   "description": "Compare and synchronize Sitecore XM Cloud authoring content from VS Code.",
-  "version": "0.35.0",
+  "version": "0.36.0",
   "publisher": "OzrenTK",
   "license": "MIT",
   "engines": {
@@ -49,7 +49,8 @@
     "onCommand:xmCloudSync.diagnoseFallbackTestItems",
     "onCommand:xmCloudSync.startMcpAccess",
     "onCommand:xmCloudSync.stopMcpAccess",
-    "onCommand:xmCloudSync.enableMcpMutations"
+    "onCommand:xmCloudSync.enableMcpMutations",
+    "onCustomEditor:xmCloudSync.itemEditor"
   ],
   "main": "./out/extension.js",
   "contributes": {
@@ -296,6 +297,10 @@
         "command": "xmCloudSync.enableMcpMutations",
         "title": "Enable MCP Mutations",
         "category": "XM Cloud Sync"
+      },
+      {
+        "command": "xmCloudSync.editItem",
+        "title": "XM Cloud Sync: Edit Item…"
       }
     ],
     "viewsContainers": {
@@ -641,6 +646,10 @@
         {
           "command": "xmCloudSync.browseConnection",
           "when": "false"
+        },
+        {
+          "command": "xmCloudSync.editItem",
+          "when": "false"
         }
       ]
     },
@@ -673,7 +682,19 @@
           "description": "Connection IDs mapped to {defaultSite, sites: {siteName: {publicBaseUrl, deploymentBaseUrl, languages: {SitecoreLanguage: {language, country}}}}}. Base URLs are configured separately from the shared template. Language/region are inferred; languages contains optional overrides."
         }
       }
-    }
+    },
+    "customEditors": [
+      {
+        "viewType": "xmCloudSync.itemEditor",
+        "displayName": "XM Cloud Item Editor",
+        "selector": [
+          {
+            "filenamePattern": "*.xmitem"
+          }
+        ],
+        "priority": "default"
+      }
+    ]
   },
   "scripts": {
     "clean": "node ./scripts/clean.mjs",

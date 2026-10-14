@@ -1240,6 +1240,17 @@ function showContextMenu(event, pair, clickedSide, forceDisabled = false) {
     closeContextMenu();
   });
 
+  const editItem = document.createElement("button");
+  editItem.className = "context-menu-item";
+  editItem.type = "button";
+  editItem.textContent = "Edit…";
+  const editSide = state.mode === "browse" ? "left" : clickedSide;
+  editItem.disabled = disabled || !editSide || !pair[editSide];
+  editItem.addEventListener("click", () => {
+    if (editSide && pair[editSide]) vscode.postMessage({ type: "editItem", side: editSide, itemId: pair[editSide].itemId });
+    closeContextMenu();
+  });
+
   const runTask = document.createElement("button");
   runTask.className = "context-menu-item";
   runTask.type = "button";
@@ -1380,9 +1391,10 @@ function showContextMenu(event, pair, clickedSide, forceDisabled = false) {
       });
       return action;
     });
-    menu.append(detailedDiff, publishMenu, runTask, ...identityActions, addFavorite,
+    menu.append(editItem, detailedDiff, publishMenu, runTask, ...identityActions, addFavorite,
       createContextMenuSeparator(), itemAction, expandLoaded, load, refreshItem, refreshSubtree);
   } else menu.append(
+    editItem,
     detailedDiff,
     publishMenu,
     addFavorite,

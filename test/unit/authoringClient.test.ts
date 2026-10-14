@@ -628,3 +628,33 @@ test("new version and reset read back the exact acknowledged locale and version"
   await rejects(new AuthoringContentClient(noOpLogger, runtime).addItemVersion(testConnection, "secret", { itemId: "item-id", language: "en" }, AbortSignal.abort()));
   strictEqual(runtime.requests.length, 0);
 });
+
+
+test("editor exact reads reject wrong numbered version and mutation never reads latest or retries", async () => {
+  const runtime = new QueuedHttpRuntime([tokenResponse(), jsonResponse({ data: { item: {
+    itemId: "item-id", language: { name: "en" }, version: 3, fields: null,
+  } } }), jsonResponse({ data: { item: { fields: null } } })]);
+  await rejects(new AuthoringContentClient(noOpLogger, runtime).loadItem(testConnection, "secret", { itemId: "item-id" }, "en", 2, signal, false, true), /different item, locale or version/);
+  const successful = new QueuedHttpRuntime([tokenResponse(), jsonResponse({ data: { updateItem: { item: { itemId: "item-id", language: { name: "en" }, version: 2 } } } })]);
+  await new AuthoringContentClient(noOpLogger, successful).updateEditorFields(testConnection, "secret", { itemId: "item-id", language: "en", version: 2, fields: { Title: "" } }, signal);
+  strictEqual(successful.requests.length, 2);
+  deepStrictEqual((requestBody(successful, 1).variables as { input: unknown }).input, { database: "master", itemId: "item-id", language: "en", version: 2, fields: [{ name: "Title", value: "", reset: false }] });
+  const failure = new QueuedHttpRuntime([tokenResponse(), jsonResponse({}, 503)]);
+  await rejects(new AuthoringContentClient(noOpLogger, failure).updateEditorFields(testConnection, "secret", { itemId: "item-id", language: "en", version: 2, fields: { Title: "text" } }, signal));
+  strictEqual(failure.requests.length, 2); deepStrictEqual(failure.waits, []);
+});
+
+
+test("editor latest read pins field classification and rejects mismatched classification evidence", async () => {
+  for (const metadataVersion of [2, 3]) {
+    const runtime = new QueuedHttpRuntime([tokenResponse(), jsonResponse({ data: { item: {
+      itemId: "item-id", language: { name: "en" }, version: 2, name: "Item", path: "/sitecore/content/Item",
+      template: { templateId: "template", name: "Component" }, fields: null,
+    } } }), jsonResponse({ data: { item: { itemId: "item-id", language: { name: "en" }, version: metadataVersion, fields: null } } })]);
+    const result = new AuthoringContentClient(noOpLogger, runtime).loadItem(testConnection, "secret", { itemId: "item-id" }, "en", undefined, signal, false, true);
+    if (metadataVersion === 3) await rejects(result, /classification returned a different/);
+    else strictEqual((await result).version, 2);
+    deepStrictEqual((requestBody(runtime, 2).variables as { where: unknown }).where, { database: "master", itemId: "item-id", language: "en", version: 2 });
+    match(String(requestBody(runtime, 2).query), /withLanguageFallback: false/);
+  }
+});

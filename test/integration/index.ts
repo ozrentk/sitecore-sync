@@ -1,3 +1,4 @@
+import { itemEditorTests } from "./itemEditorTests";
 import { strictEqual } from "node:assert/strict";
 import * as vscode from "vscode";
 import { connectionStoreTests } from "./connectionStoreTests";
@@ -33,6 +34,7 @@ interface IntegrationTest {
 
 const integrationTests: readonly IntegrationTest[] = [
   ...fallbackWebviewTests,
+  ...itemEditorTests,
   {
     name: "exposes the unified dashboard on connection context menus",
     async execute(): Promise<void> {

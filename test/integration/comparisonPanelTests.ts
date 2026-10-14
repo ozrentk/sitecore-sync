@@ -38,6 +38,29 @@ interface ComparisonPanelHarness {
 }
 
 export const comparisonPanelTests: readonly IntegrationTest[] = [{
+  name: "Edit captures the clicked side and rejects stale, switching and Browse-right actions",
+  async execute(): Promise<void> {
+    const session = new ContentSession();
+    session.openCompare({ connectionId: "left", language: "en-AU", rootPath: "/" }, { connectionId: "right", language: "fr", rootPath: "/" });
+    const manager = Object.create(ComparisonPanelManager.prototype) as { handleMessage(message: unknown): Promise<void> };
+    Object.assign(manager, { contentSession: session, workspaceState: new MemoryMemento(), connectionStore: { get: (id: string) => ({ id }) } });
+    const calls: unknown[][] = [];
+    const command = mock.method(vscode.commands, "executeCommand", async (...args: unknown[]) => { calls.push(args); });
+    try {
+      await manager.handleMessage({ type: "editItem", side: "right", itemId: "item", viewContext: session.revisionId });
+      deepStrictEqual(calls, [["xmCloudSync.editItem", { connectionId: "right", itemId: "item", language: "fr" }]]);
+      await manager.handleMessage({ type: "editItem", side: "left", itemId: "item", viewContext: -1 });
+      Object.assign(manager, { pendingLanguageView: {} });
+      await manager.handleMessage({ type: "editItem", side: "left", itemId: "item", viewContext: session.revisionId });
+      Object.assign(manager, { pendingLanguageView: undefined });
+      session.openConnection({ connectionId: "left", language: "en-AU", rootPath: "/" });
+      await manager.handleMessage({ type: "editItem", side: "right", itemId: "item", viewContext: session.revisionId });
+      strictEqual(calls.length, 1);
+      await manager.handleMessage({ type: "editItem", side: "left", itemId: "item", viewContext: session.revisionId });
+      deepStrictEqual(calls[1], ["xmCloudSync.editItem", { connectionId: "left", itemId: "item", language: "en-AU" }]);
+    } finally { command.mock.restore(); session.dispose(); }
+  },
+}, {
   name: "Item Details copies trusted side paths and IDs, rejecting stale and Browse-right requests",
   async execute(): Promise<void> {
     const copied: string[] = [];
