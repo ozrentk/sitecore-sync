@@ -303,7 +303,7 @@ export const itemEditorTests: readonly IntegrationTest[] = [{
     let doc: ItemDocument | undefined; let listener: vscode.Disposable | undefined; let timer: ReturnType<typeof setTimeout> | undefined;
     try {
       const state = fixture();
-      const fields = ["Single-Line Text", "Multi-Line Text", "Checkbox", "Integer", "Number", "Date", "Datetime", "Rich Text"].map((type, index) => ({ ...state.base.fields[0], fieldId: (index + 4).toString(16).padStart(32, "0"), name: `Field${index}`, label: type, type, sortOrder: index % 2 ? -100 : 100, sectionName: index === 7 ? "Statistics" : index % 2 ? "Options" : "Content", sectionId: index === 7 ? "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" : index % 2 ? "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb" : "cccccccccccccccccccccccccccccccc", isStandardTemplate: index === 7, value: type === "Rich Text" ? "<img src=x onerror=alert(1)>" : "" }));
+      const fields = ["Single-Line Text", "Multi-Line Text", "Checkbox", "Integer", "Number", "Date", "Datetime", "Rich Text"].map((type, index) => ({ ...state.base.fields[0], fieldId: (index + 4).toString(16).padStart(32, "0"), name: `Field${index}`, label: type, type, sortOrder: index % 2 ? -100 : 100, sectionName: index === 7 ? "Statistics" : index % 2 ? "Options" : "Content", sectionId: (index + 20).toString(16).padStart(32, "0"), isStandardTemplate: index === 7, value: type === "Rich Text" ? "<img src=x onerror=alert(1)>" : "" }));
       const expanded = { ...state, base: { ...state.base, fields } };
       await vscode.workspace.fs.createDirectory(provider.directory);
       const uri = vscode.Uri.joinPath(provider.directory, `${editorKey(state.target)}.xmitem`);
@@ -334,6 +334,12 @@ export const itemEditorTests: readonly IntegrationTest[] = [{
           row.querySelector(".field-info-button").dispatchEvent(new KeyboardEvent("keydown", {key:"Escape", bubbles:true}));
           if (getComputedStyle(info).display !== "none") throw Error("Escape must dismiss information");
         }
+        const heading = document.querySelector(".field > label");
+        const originalName = heading.textContent;
+        window.dispatchEvent(new MessageEvent("message", {data:{type:"fieldTitles",revision:event.data.revision-1,titles:{[heading.htmlFor]:"Stale"}}}));
+        if (heading.textContent !== originalName) throw Error("Stale title accepted");
+        window.dispatchEvent(new MessageEvent("message", {data:{type:"fieldTitles",revision:event.data.revision,titles:{[heading.htmlFor]:"Block Eyebrow"}}}));
+        if (heading.textContent !== "Block Eyebrow" || !heading.parentElement.querySelector(".field-info-content").textContent.includes(originalName)) throw Error("Title/internal name separation failed");
         const checkbox = document.querySelector('input[type="checkbox"]');
         if ([...checkbox.parentElement.querySelectorAll("button")].some(b => b.textContent === "Clear")) throw Error("Checkbox must not have a Clear button");
         checkbox.checked = true; checkbox.dispatchEvent(new Event("input"));

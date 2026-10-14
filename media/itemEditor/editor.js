@@ -14,6 +14,16 @@ const send = (type, extra = {}) => api.postMessage({ type, revision, ...extra })
 for (const action of ["save", "revert", "reconcile", "locale"]) document.getElementById(action).addEventListener("click", () => send(action));
 window.addEventListener("message", event => {
   const state = event.data;
+  if (state.type === "fieldTitles") {
+    if (state.revision !== revision) return;
+    for (const label of document.querySelectorAll(".field > label")) {
+      const title = state.titles?.[label.htmlFor];
+      if (typeof title !== "string" || !title.trim()) continue;
+      label.textContent = title;
+      label.parentElement.querySelector(".field-info-button")?.setAttribute("aria-label", `${title} information`);
+    }
+    return;
+  }
   if (state.type === "selectionLabel") {
     if (state.revision !== revision) return;
     for (const label of document.querySelectorAll("[data-selection-label]")) {
@@ -66,13 +76,14 @@ window.addEventListener("message", event => {
   const root = document.getElementById("fields"); root.replaceChildren();
   const groups = new Map();
   for (const field of state.fields) {
-    const key = field.sectionId ? `id:${field.sectionId}` : `name:${field.section}`;
+    const key = `name:${field.section}`;
     if (!groups.has(key)) groups.set(key, { name: field.section, fields: [] });
     groups.get(key).fields.push(field);
   }
   for (const [key, group] of groups) {
     const section = document.createElement("details"); section.className = "field-section";
-    section.open = sectionOpen.has(key) ? sectionOpen.get(key) : !group.fields.every(field => field.isStandardTemplate);
+    const previousStates = group.fields.map(field => sectionOpen.get(`id:${field.sectionId}`)).filter(value => typeof value === "boolean");
+    section.open = sectionOpen.has(key) ? sectionOpen.get(key) : previousStates.length ? previousStates.some(Boolean) : !group.fields.every(field => field.isStandardTemplate);
     const heading = document.createElement("summary"); heading.textContent = group.name;
     section.append(heading); root.append(section);
     section.addEventListener("toggle", () => {

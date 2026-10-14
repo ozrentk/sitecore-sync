@@ -507,7 +507,9 @@ Item-editor failures expose the failed operation stage and safe error categories
 
 Every item-editor field, including read-only fields, has a hover/click/focus information icon containing its internal name, type, scope, value source and stored value. Reference paths appear there when resolved. Stored values describe the loaded snapshot until Save or reload; drafts remain in the controls. Long values scroll within the popover. Read-only reasons remain visible beside the field.
 
-Item-editor fields are grouped into collapsible Sitecore template sections, ordering sections by section sort order and then name, and fields within them by field sort order and then name. Content groups start expanded; groups containing only standard-template fields start collapsed. Click a heading or use Enter/Space to toggle it. Each editor remembers section expansion across refreshes and webview restoration. Collapsing does not discard drafts. Older snapshots without section IDs group by section name.
+Item-editor fields are grouped into collapsible Sitecore template sections, ordering sections by section sort order and then name, and fields within them by field sort order and then name. Content groups start expanded; groups containing only standard-template fields start collapsed. Click a heading or use Enter/Space to toggle it. Each editor remembers section expansion across refreshes and webview restoration. Collapsing does not discard drafts. Inherited sections with the same name share one visual group, using the lowest contributing section sort order. Fields are sorted across the merged group. Previous expansion settings migrate by keeping the merged group open if any contributing group was open.
+
+Editor field headings resolve template-field Title metadata asynchronously (selected locale, then English for presentation only), falling back to the internal field name. Authoring value labels such as “standard value” are never used as headings. Internal names and value provenance remain in the information box.
 
 ## Item editor Stage B1 — single-selection controls
 

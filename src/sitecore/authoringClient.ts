@@ -968,6 +968,38 @@ export class AuthoringContentClient {
     return parseTreeItem(payload.data.item);
   }
 
+  /** Presentation-only template titles; no content values or fallback writes. */
+  async loadFieldTitles(connection: XmCloudConnection, secret: string, ids: readonly string[], language: string,
+    signal: AbortSignal): Promise<ReadonlyMap<string, string>> {
+    if (ids.length > 32) throw new Error("Too many field titles requested.");
+    const result = new Map<string, string>();
+    if (!ids.length) return result;
+    const variables: Record<string, unknown> = {};
+    const definitions: string[] = []; const selections: string[] = [];
+    ids.forEach((id, index) => {
+      for (const [suffix, locale] of [["local", language], ["english", "en"]]) {
+        const key = `${suffix}${index}`;
+        definitions.push(`$${key}: ItemQueryInput!`);
+        variables[key] = { database: "master", itemId: id, language: locale };
+        selections.push(`${key}: item(where: $${key}) { itemId path title: field(name: "Title") { value } }`);
+      }
+    });
+    const token = await this.getAccessToken(connection, secret, signal);
+    const response = await this.postGraphQl<{ readonly errors?: readonly GraphQlError[]; readonly data?: Record<string, { itemId?: unknown; path?: unknown; title?: { value?: unknown } } | null> }>(
+      connection.serverUrl, token, "Sitecore field titles query", "XmCloudSyncFieldTitles",
+      `query XmCloudSyncFieldTitles(${definitions.join(",")}) { ${selections.join(" ")} }`, variables, signal);
+    ids.forEach((id, index) => {
+      for (const suffix of ["local", "english"]) {
+        const item = response.data?.[`${suffix}${index}`];
+        if (!item) continue;
+        if (typeof item.itemId !== "string" || normalizeGuid(item.itemId) !== normalizeGuid(id)
+          || typeof item.path !== "string" || !item.path.toLowerCase().startsWith("/sitecore/templates/")) throw new Error("Invalid field title identity.");
+        if (typeof item.title?.value === "string" && item.title.value.trim()) { result.set(normalizeGuid(id), item.title.value); break; }
+      }
+    });
+    return result;
+  }
+
   async loadLanguages(
     connection: XmCloudConnection,
     clientSecret: string,
