@@ -1,4 +1,5 @@
-import { selectionKind, selectionSourceReason } from "./singleSelection";
+import { parseMultipleSelection, validateMultipleDraft } from "./multipleSelection";
+import { isMultipleSelection, selectionKind, selectionSourceReason } from "./singleSelection";
 import { createHash } from "node:crypto";
 import type { AuthoringItemDetails, AuthoringItemField } from "../sitecore/authoringClient";
 import { hasPagePresentation } from "../publicPages/publicPageUrl";
@@ -21,7 +22,7 @@ export interface EditorState {
   readonly drafts: Readonly<Record<string, FieldDraft>>;
   readonly attempt?: { readonly phase: "sent" | "acknowledged"; readonly changes: readonly EditorChange[] };
 }
-export type EditorFieldKind = "text" | "multiline" | "checkbox" | "integer" | "number" | "date" | "datetime" | "selection";
+export type EditorFieldKind = "text" | "multiline" | "checkbox" | "integer" | "number" | "date" | "datetime" | "selection" | "multiselection";
 export const normalizeId = (value: string): string => value.replace(/[{}-]/gu, "").toLowerCase();
 export const isGuid = (value: unknown): value is string => typeof value === "string" && /^(?:[0-9a-f]{32}|\{?[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}\}?)$/iu.test(value);
 export const isLocale = (value: unknown): value is string => typeof value === "string" && /^[a-z]{2,8}(?:-[a-z0-9]{1,8})*$/iu.test(value);
@@ -31,6 +32,7 @@ export function editorKey(target: EditorTarget): string {
 }
 
 export function fieldKind(field: AuthoringItemField): EditorFieldKind | undefined {
+  if (isMultipleSelection(selectionKind(field))) return "multiselection";
   if (selectionKind(field)) return "selection";
   const types: Record<string, EditorFieldKind> = { "single-line text": "text", "multi-line text": "multiline",
     checkbox: "checkbox", integer: "integer", number: "number", date: "date", datetime: "datetime" };
@@ -74,6 +76,10 @@ export function readOnlyReason(item: AuthoringItemDetails, field: AuthoringItemF
   if (!kind) return field.type.toLowerCase() === "rich text"
     ? "Rich Text is deferred until visual and HTML source editors can preserve content when switching."
     : "This field type is read-only in Stage A.";
+  if (kind === "multiselection") {
+    try { parseMultipleSelection(field.value); } catch (error) { return (error as Error).message; }
+    return selectionSourceReason(field.selectionSource);
+  }
   if (kind === "selection") return selectionSourceReason(field.selectionSource);
   if (kind === "checkbox" && !["", "0", "1"].includes(field.value)) return "Unrecognized stored checkbox representation.";
   if ((kind === "date" || kind === "datetime") && dateInput(field.value, kind) === undefined) return "Unrecognized or timezone-ambiguous stored date. The original value is preserved.";
@@ -87,6 +93,7 @@ export function serializeDraft(field: AuthoringItemField, draft: FieldDraft): st
   if (draft.input === fieldInput(field)) return field.value;
   const value = draft.input;
   switch (fieldKind(field)) {
+    case "multiselection": validateMultipleDraft(field, value); return value;
     case "selection": return value; // Membership is revalidated by the host immediately before writing.
     case "text": if (/[\r\n]/u.test(value)) throw new EditorValidationError("Single-Line Text cannot contain line breaks."); return value;
     case "multiline": return field.value.includes("\r\n") ? value.replace(/\r\n/gu, "\n").replace(/\n/gu, "\r\n") : value;

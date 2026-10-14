@@ -118,3 +118,10 @@ Use this file as the single backlog inventory. Add newly agreed work here, prese
 - Implemented source-aware Droplist, Droplink, Grouped Droplist, Grouped Droplink and Droptree using the Stage A save/recovery model. Explicit root paths/IDs are supported; queries, filters, tokens, relative and empty Sources remain read-only. Source membership is revalidated on Save; original unresolved values survive unrelated edits.
 - Automated source/serialization/preservation/conflict/cancellation and real webview tests cover B1. Read-only Dev metadata was checked; live mutations and full native manual acceptance remain pending.
 - B24/B25 remain partially complete: B2 multi-selection, B3 General Link/Name Value List and later Rich Text/media/fallback/page stages are not delivered by B1.
+
+### B24/B25 delivery update — Stage B2 (0.38.0)
+
+- Implemented Checklist, Multilist, Treelist and TreelistEx for explicit root paths/IDs, preserving unknown references and original representations. Added checkbox/list/tree controls, explicit removal/clear and ordering where supported.
+- Reused B1 bounded metadata/choices and Stage A Save/Revert/conflict/journal/readback. Save validates new IDs against fresh Sources; malformed/duplicate lists and unsupported Source expressions remain read-only.
+- Automated domain and real-webview coverage exercises preservation, add/remove/reorder, lazy branches, restrictions and unchanged drafts. Read-only Dev checks confirmed storage and query-based configurations; live writes remain untested.
+- B24/B25 remain partial for B3 General Link/Name Value List and later Rich Text/media/fallback/page stages. Parameter/query Source support is not included in B2.

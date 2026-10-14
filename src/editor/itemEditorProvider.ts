@@ -1,3 +1,5 @@
+import { parseMultipleSelection, validateMultipleSelection } from "./multipleSelection";
+import { isMultipleSelection } from "./singleSelection";
 import { orderEditorFields } from "./fieldOrder";
 import { loadSelectionMetadata, selectionIO } from "./selectionClient";
 import { loadSelectionPage, selectionKind, selectionValue, validateSelection } from "./singleSelection";
@@ -244,8 +246,13 @@ export class ItemEditorProvider implements vscode.CustomEditorProvider<ItemDocum
     const fields = doc.state.base.fields.filter(field => {
       const kind = selectionKind(field);
       return kind && !kind.includes("droplist");
-    }).map(field => ({ id: normalizeId(field.fieldId), value: doc.state.drafts[normalizeId(field.fieldId)]?.clear
-      ? "" : doc.state.drafts[normalizeId(field.fieldId)]?.input ?? field.value })).filter(field => field.value);
+    }).flatMap(field => {
+      const snapshot = doc.state.drafts[normalizeId(field.fieldId)]?.clear ? "" : doc.state.drafts[normalizeId(field.fieldId)]?.input ?? field.value;
+      const multi = isMultipleSelection(selectionKind(field));
+      let values: readonly string[];
+      try { values = multi ? parseMultipleSelection(snapshot) : [snapshot]; } catch { values = []; }
+      return values.filter(Boolean).map(value => ({ id: normalizeId(field.fieldId), value, snapshot, multi }));
+    });
     const connection = this.connections.get(doc.state.target.connectionId);
     const target = doc.state.target;
     const signal = AbortSignal.any([controller.signal, doc.lifetime.signal]);
@@ -258,7 +265,7 @@ export class ItemEditorProvider implements vscode.CustomEditorProvider<ItemDocum
     await Promise.all(Array.from({ length: Math.min(4, fields.length) }, async () => {
       for (const field of pending) {
         if (signal.aborted || doc.revision !== revision) return;
-        let label = "Unavailable item";
+        let label = field.multi ? `Unavailable item (${field.value})` : "Unavailable item";
         let name: string | undefined; let path: string | undefined;
         if (connection && secret && isGuid(field.value)) {
           try {
@@ -271,8 +278,9 @@ export class ItemEditorProvider implements vscode.CustomEditorProvider<ItemDocum
         const live = this.connections.get(target.connectionId);
         if (signal.aborted || doc.revision !== revision || doc.labelRequest !== controller) return;
         if (!live || new URL(live.serverUrl).origin !== target.serverUrl) { label = "Unavailable item"; name = undefined; path = undefined; }
-        const current = doc.state.drafts[field.id];
-        if ((current?.clear ? "" : current?.input ?? doc.state.base.fields.find(f => normalizeId(f.fieldId) === field.id)?.value) !== field.value) continue;
+        const draft = doc.state.drafts[field.id];
+        const current = draft?.clear ? "" : draft?.input ?? doc.state.base.fields.find(f => normalizeId(f.fieldId) === field.id)?.value;
+        if (field.multi ? !current?.split("|").includes(field.value) : current !== field.snapshot) continue;
         await Promise.all([...doc.panels].map(panel => panel.webview.postMessage({ type: "selectionLabel", revision, id: field.id, value: field.value, label, name, path })));
       }
     }));
@@ -331,7 +339,8 @@ export class ItemEditorProvider implements vscode.CustomEditorProvider<ItemDocum
         const io = selectionIO(this.client, connection, secret, doc.state.target.language, AbortSignal.any([signal, AbortSignal.timeout(30_000)]));
         for (const change of changes) {
           const field = item.fields.find(f => normalizeId(f.fieldId) === change.fieldId)!;
-          if (selectionKind(field)) await validateSelection(field, change.value, io);
+          if (isMultipleSelection(selectionKind(field))) await validateMultipleSelection(field, change.value, io);
+          else if (selectionKind(field)) await validateSelection(field, change.value, io);
         }
       },
       persist: state => { doc.stage = "Local save journal"; return this.persist(doc.uri, state); },

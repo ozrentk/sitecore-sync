@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.38.0
+
+- Add Checklist, Multilist, Treelist and TreelistEx editing through the existing draft, Save/Revert and recovery pipeline.
+- Preserve unresolved references and stored ID representations; support explicit add/remove, ordered list movement and lazy tree browsing. Checklist has no ordering controls.
+- Validate newly added references against fresh supported Sources before Save. Query/parameterized Sources and malformed or duplicate stored lists remain read-only.
+
 ## 0.37.7
 
 - Merge inherited template sections with the same name into one editor group, preserving field order and prior expansion choices.
