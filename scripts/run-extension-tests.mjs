@@ -43,6 +43,7 @@ try {
 
   await runTests({
     version: "1.100.0",
+    vscodeExecutablePath: process.env.XM_CLOUD_SYNC_TEST_VSCODE_EXECUTABLE,
     extensionDevelopmentPath: [repositoryRoot, editorFixturePath],
     extensionTestsPath,
     launchArgs: [workspacePath, "--disable-extensions"],

@@ -26,6 +26,16 @@ import {
 } from "./itemIcon";
 
 export class AuthoringItemNotFoundError extends Error {}
+/** The editor reports only this fixed classification, never raw GraphQL response text. */
+export class AuthoringGraphQlError extends Error {
+  readonly reason: "permission" | "locked" | "validation" | "other";
+  constructor(message: string) {
+    super(message);
+    this.reason = /access denied|unauthori[sz]ed|forbidden|permission/iu.test(message) ? "permission"
+      : /locked|check.?out/iu.test(message) ? "locked"
+      : /cannot query field|unknown argument|invalid value|not defined by type|validation/iu.test(message) ? "validation" : "other";
+  }
+}
 
 const tokenEndpoint = "https://auth.sitecorecloud.io/oauth/token";
 const audience = "https://api.sitecorecloud.io";
@@ -1959,7 +1969,7 @@ function throwForGraphQlErrors(errors: readonly GraphQlError[] | undefined): voi
     .map((error) => error.message)
     .filter((message): message is string => typeof message === "string")
     .join("; ");
-  throw new Error(messages || "Authoring API returned a GraphQL error.");
+  throw new AuthoringGraphQlError(messages || "Authoring API returned a GraphQL error.");
 }
 
 function property(value: unknown, ...names: readonly string[]): unknown {

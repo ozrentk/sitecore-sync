@@ -24,8 +24,14 @@ export const itemEditorTests: readonly IntegrationTest[] = [{
   async execute(): Promise<void> {
     const directory = await mkdtemp(join(tmpdir(), "xm-editor-native-"));
     const extension = vscode.extensions.getExtension("OzrenTK.sitecore-xm-cloud-sync")!;
+    let remote = fixture().base;
+    let writes = 0;
     const provider = new ItemEditorProvider({ globalStorageUri: vscode.Uri.file(directory), extensionUri: extension.extensionUri } as vscode.ExtensionContext,
-      { get: () => ({ name: "Test" }) } as unknown as ConnectionStore, {} as AuthoringContentClient);
+      { get: () => ({ name: "Test", id: "test", serverUrl: "https://example.test" }), getClientSecret: async () => "fixture-secret" } as unknown as ConnectionStore,
+      { loadItem: async () => remote, updateEditorFields: async (_connection: unknown, _secret: unknown, input: UpdateAuthoringItemInput, signal: AbortSignal) => {
+        strictEqual(signal.aborted, false); writes++; remote = { ...remote, fields: remote.fields.map(f => ({ ...f, value: input.fields[f.name] ?? f.value })) };
+      } } as unknown as AuthoringContentClient);
+    const warning = mock.method(vscode.window, "showWarningMessage", async () => "Save to Sitecore");
     const type = "xmCloudSync.testItemEditor";
     const registration = vscode.window.registerCustomEditorProvider(type, provider, { supportsMultipleEditorsPerDocument: false });
     const harness = provider as unknown as { documents: Map<string, ItemDocument>; message(doc: ItemDocument, message: unknown): Promise<void> };
@@ -43,14 +49,22 @@ export const itemEditorTests: readonly IntegrationTest[] = [{
       await vscode.commands.executeCommand("vscode.openWith", uri, type, { preview: false });
       strictEqual(matchingTabs().length, 1); strictEqual([...harness.documents.values()][0], doc);
       strictEqual(doc.state.drafts[fieldId].input, "retained draft");
-      // No remote mutation is necessary when the value is restored to the original.
-      await harness.message(doc, { type: "change", revision: doc.revision, id: fieldId, input: "old", clear: false });
+      // Save while hidden, then edit/save again after native journal persistence.
       const other = await vscode.workspace.openTextDocument({ content: "" });
       await vscode.window.showTextDocument(other);
       await vscode.workspace.save(uri);
       await wait(() => !matchingTabs()[0].isDirty);
+      strictEqual(writes, 1);
+      strictEqual(remote.fields[0].value, "retained draft");
+      await harness.message(doc, { type: "change", revision: doc.revision, id: fieldId, input: "second draft", clear: false });
+      await wait(() => matchingTabs()[0].isDirty);
+      await vscode.workspace.save(uri);
+      await wait(() => !matchingTabs()[0].isDirty);
+      strictEqual(writes, 2);
+      strictEqual(doc.lifetime.signal.aborted, false);
+      strictEqual(Buffer.from(await vscode.workspace.fs.readFile(uri)).toString(), JSON.stringify(state));
       strictEqual(await vscode.window.tabGroups.close(matchingTabs()), true);
-    } finally { registration.dispose(); provider.dispose(); await rm(directory, { recursive: true, force: true }); }
+    } finally { warning.mock.restore(); registration.dispose(); provider.dispose(); await rm(directory, { recursive: true, force: true }); }
   },
 }, {
   name: "item editor protects pinned targets, drafts, backup/revert, cancellation and save readback",
@@ -59,10 +73,13 @@ export const itemEditorTests: readonly IntegrationTest[] = [{
     const extension = vscode.extensions.getExtension("OzrenTK.sitecore-xm-cloud-sync")!;
     let remote = fixture().base; const writes: UpdateAuthoringItemInput[] = []; const reads: unknown[][] = [];
     let serverUrl = "https://example.test";
+    let failWrite = false;
     const store = { get: () => ({ id: "test", name: "Test", serverUrl }), getClientSecret: async () => "test-secret" } as unknown as ConnectionStore;
     const client = { loadItem: async (...args: unknown[]): Promise<AuthoringItemDetails> => { reads.push(args); return remote; },
       updateEditorFields: async (_connection: unknown, _secret: unknown, input: UpdateAuthoringItemInput) => {
-        writes.push(input); remote = { ...remote, fields: remote.fields.map(f => ({ ...f, value: input.fields[f.name] ?? f.value })) };
+        writes.push(input);
+        if (failWrite) throw new Error("update Authoring item failed (403).");
+        remote = { ...remote, fields: remote.fields.map(f => ({ ...f, value: input.fields[f.name] ?? f.value })) };
       } } as unknown as AuthoringContentClient;
     const provider = new ItemEditorProvider({ globalStorageUri: vscode.Uri.file(directory), extensionUri: extension.extensionUri } as vscode.ExtensionContext, store, client);
     const token = new vscode.CancellationTokenSource();
@@ -100,7 +117,20 @@ export const itemEditorTests: readonly IntegrationTest[] = [{
       await rejects(provider.saveCustomDocument(doc, token.token), /target changed/); strictEqual(writes.length, 1);
       serverUrl = "https://example.test";
       await provider.revertCustomDocument(doc, token.token); deepStrictEqual(doc.state.drafts, {});
-      strictEqual(parseEditorState(Buffer.from(await vscode.workspace.fs.readFile(uri)).toString()).base.fields[0].value, "draft");
+      strictEqual(parseEditorState(Buffer.from(await vscode.workspace.fs.readFile(uri)).toString()).base.fields[0].value, "old", "The open document file must remain stable");
+      strictEqual(parseEditorState(Buffer.from(await vscode.workspace.fs.readFile(uri.with({ path: `${uri.path}.state` }))).toString()).base.fields[0].value, "draft");
+      failWrite = true;
+      await harness.message(doc, { type: "change", revision: doc.revision, id: fieldId, input: "denied", clear: false });
+      await rejects(provider.saveCustomDocument(doc, token.token), /Sitecore write:.*HTTP 403/);
+      strictEqual(doc.state.attempt?.phase, "sent");
+      strictEqual(doc.state.drafts[fieldId].input, "denied");
+      const failedWrites = writes.length;
+      await rejects(provider.saveCustomDocument(doc, token.token));
+      strictEqual(writes.length, failedWrites, "An unconfirmed write must not replay");
+      restored?.dispose();
+      restored = await provider.openCustomDocument(uri, { backupId: backup.id, untitledDocumentData: undefined });
+      strictEqual(restored.state.attempt?.phase, "sent", "The sidecar intent takes priority over an older backup");
+      strictEqual(restored.state.drafts[fieldId].input, "denied");
       await backup.delete(); subscription.dispose();
       await rejects(provider.openCustomDocument(vscode.Uri.file(join(directory, "foreign.xmitem")), { backupId: undefined, untitledDocumentData: undefined }));
     } finally { warning.mock.restore(); doc?.dispose(); restored?.dispose(); token.dispose(); provider.dispose(); await rm(directory, { recursive: true, force: true }); }

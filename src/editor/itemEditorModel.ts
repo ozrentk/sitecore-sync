@@ -2,6 +2,8 @@ import { createHash } from "node:crypto";
 import type { AuthoringItemDetails, AuthoringItemField } from "../sitecore/authoringClient";
 import { hasPagePresentation } from "../publicPages/publicPageUrl";
 
+export class EditorValidationError extends Error {}
+
 export interface EditorTarget {
   readonly connectionId: string;
   readonly serverUrl: string;
@@ -82,30 +84,30 @@ export function serializeDraft(field: AuthoringItemField, draft: FieldDraft): st
   if (draft.input === fieldInput(field)) return field.value;
   const value = draft.input;
   switch (fieldKind(field)) {
-    case "text": if (/[\r\n]/u.test(value)) throw new Error("Single-Line Text cannot contain line breaks."); return value;
+    case "text": if (/[\r\n]/u.test(value)) throw new EditorValidationError("Single-Line Text cannot contain line breaks."); return value;
     case "multiline": return field.value.includes("\r\n") ? value.replace(/\r\n/gu, "\n").replace(/\n/gu, "\r\n") : value;
-    case "checkbox": if (!["", "1"].includes(value)) throw new Error("Invalid checkbox value."); return value;
-    case "integer": if (value && !/^[+-]?\d+$/u.test(value)) throw new Error("Enter a whole integer or clear the field."); return value;
-    case "number": if (value && !/^[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?$/u.test(value)) throw new Error("Enter a decimal number or clear the field (no commas, NaN or Infinity)."); return value;
+    case "checkbox": if (!["", "1"].includes(value)) throw new EditorValidationError("Invalid checkbox value."); return value;
+    case "integer": if (value && !/^[+-]?\d+$/u.test(value)) throw new EditorValidationError("Enter a whole integer or clear the field."); return value;
+    case "number": if (value && !/^[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?$/u.test(value)) throw new EditorValidationError("Enter a decimal number or clear the field (no commas, NaN or Infinity)."); return value;
     case "date":
       if (!value) return "";
-      if (!validDate(value)) throw new Error("Enter a valid date.");
+      if (!validDate(value)) throw new EditorValidationError("Enter a valid date.");
       return `${value.replace(/-/gu, "")}T000000Z`;
     case "datetime": {
       if (!value) return "";
       const match = /^(\d{4}-\d{2}-\d{2})T(\d{2}):(\d{2})(?::(\d{2}))?$/u.exec(value);
-      if (!match || !validDate(match[1]) || Number(match[2]) > 23 || Number(match[3]) > 59 || Number(match[4] ?? 0) > 59) throw new Error("Enter a valid date and time in UTC.");
+      if (!match || !validDate(match[1]) || Number(match[2]) > 23 || Number(match[3]) > 59 || Number(match[4] ?? 0) > 59) throw new EditorValidationError("Enter a valid date and time in UTC.");
       return `${match[1].replace(/-/gu, "")}T${match[2]}${match[3]}${match[4] ?? "00"}Z`;
     }
-    default: throw new Error("Unsupported field type.");
+    default: throw new EditorValidationError("Unsupported field type.");
   }
 }
 
 export function assertItem(target: EditorTarget, item: AuthoringItemDetails): void {
   if (normalizeId(target.itemId) !== normalizeId(item.itemId) || target.language.toLowerCase() !== item.language.toLowerCase()
-    || target.version !== item.version) throw new Error("Authoring returned a different item, locale or numbered version.");
+    || target.version !== item.version) throw new EditorValidationError("Authoring returned a different item, locale or numbered version.");
   const ids = item.fields.map(field => normalizeId(field.fieldId));
-  if (new Set(ids).size !== ids.length) throw new Error("Authoring returned duplicate field IDs.");
+  if (new Set(ids).size !== ids.length) throw new EditorValidationError("Authoring returned duplicate field IDs.");
 }
 
 export function planChanges(state: EditorState): readonly EditorChange[] {
@@ -113,9 +115,9 @@ export function planChanges(state: EditorState): readonly EditorChange[] {
   const changes: EditorChange[] = [];
   for (const [id, draft] of Object.entries(state.drafts)) {
     const field = state.base.fields.find(candidate => normalizeId(candidate.fieldId) === id);
-    if (!field) throw new Error("A draft field no longer exists.");
+    if (!field) throw new EditorValidationError("A draft field no longer exists.");
     const reason = readOnlyReason(state.base, field);
-    if (reason) throw new Error(reason);
+    if (reason) throw new EditorValidationError(reason);
     const value = serializeDraft(field, draft);
     if (value !== field.value || (draft.clear && (field.containsInheritedValue || field.containsStandardValue))) changes.push({ fieldId: id, name: field.name, value, scope: field.scope });
   }
@@ -129,12 +131,12 @@ function fingerprint(field: AuthoringItemField): string {
 
 export function checkConflicts(state: EditorState, fresh: AuthoringItemDetails, changes: readonly EditorChange[]): void {
   assertItem(state.target, fresh);
-  if (normalizeId(state.base.template.templateId) !== normalizeId(fresh.template.templateId)) throw new Error("Item template changed. Revert/reload before editing again.");
+  if (normalizeId(state.base.template.templateId) !== normalizeId(fresh.template.templateId)) throw new EditorValidationError("Item template changed. Revert/reload before editing again.");
   for (const change of changes) {
     const old = state.base.fields.find(field => normalizeId(field.fieldId) === change.fieldId);
     const current = fresh.fields.find(field => normalizeId(field.fieldId) === change.fieldId);
     if (!old || !current || readOnlyReason(fresh, current) || fingerprint(old) !== fingerprint(current)) {
-      throw new Error(`Conflict in ${change.name}. Your draft is preserved; review the current saved values before retrying.`);
+      throw new EditorValidationError(`Conflict in ${change.name}. Your draft is preserved; review the current saved values before retrying.`);
     }
   }
 }
@@ -153,7 +155,7 @@ export interface EditorIO {
 
 /** Persist the write intent before a non-retried mutation; readback is mandatory. */
 export async function saveEditor(state: EditorState, io: EditorIO, update: (state: EditorState) => void): Promise<EditorState> {
-  if (state.attempt) throw new Error("The previous save needs reconciliation. No automatic retry is allowed.");
+  if (state.attempt) throw new EditorValidationError("The previous save needs reconciliation. No automatic retry is allowed.");
   const changes = planChanges(state);
   if (!changes.length) return state;
   const fresh = await io.read();
@@ -167,7 +169,7 @@ export async function saveEditor(state: EditorState, io: EditorIO, update: (stat
   await io.persist(current);
   const readback = await io.read();
   assertItem(state.target, readback);
-  if (appliedChanges(readback, changes).length !== changes.length) throw new Error("Readback did not confirm every changed field. Save may be partial; reconcile before retrying.");
+  if (appliedChanges(readback, changes).length !== changes.length) throw new EditorValidationError("Readback did not confirm every changed field. Save may be partial; reconcile before retrying.");
   current = { ...state, base: readback, drafts: {} };
   await io.persist(current);
   update(current);
@@ -180,7 +182,7 @@ export async function reconcileEditor(state: EditorState, io: EditorIO): Promise
   assertItem(state.target, fresh);
   const applied = appliedChanges(fresh, state.attempt.changes);
   if (applied.length === state.attempt.changes.length) return { ...state, base: fresh, drafts: {}, attempt: undefined };
-  if (state.attempt.phase === "sent") throw new Error("Remote outcome is still unknown. Readback does not prove a timed-out write has finished. Drafts remain blocked; inspect Sitecore before discarding/reloading.");
+  if (state.attempt.phase === "sent") throw new EditorValidationError("Remote outcome is still unknown. Readback does not prove a timed-out write has finished. Drafts remain blocked; inspect Sitecore before discarding/reloading.");
   const pending = state.attempt.changes.filter(change => !applied.includes(change));
   checkConflicts(state, fresh, pending);
   // An acknowledged, partially applied request can be reviewed and saved again explicitly.
@@ -189,40 +191,40 @@ export async function reconcileEditor(state: EditorState, io: EditorIO): Promise
 
 /** Backups and local state are untrusted; reject malformed or excessive payloads. */
 export function parseEditorState(text: string): EditorState {
-  if (Buffer.byteLength(text) > 8 * 1024 * 1024) throw new Error("Editor backup exceeds its size limit.");
+  if (Buffer.byteLength(text) > 8 * 1024 * 1024) throw new EditorValidationError("Editor backup exceeds its size limit.");
   const value: unknown = JSON.parse(text);
-  if (!value || typeof value !== "object") throw new Error("Invalid editor backup.");
+  if (!value || typeof value !== "object") throw new EditorValidationError("Invalid editor backup.");
   const state = value as EditorState;
   const target = state.target;
   if (state.formatVersion !== 1 || !target || typeof target.connectionId !== "string" || !isGuid(target.itemId) || !isLocale(target.language)
-    || !Number.isInteger(target.version) || target.version < 0 || typeof target.serverUrl !== "string") throw new Error("Invalid editor target.");
+    || !Number.isInteger(target.version) || target.version < 0 || typeof target.serverUrl !== "string") throw new EditorValidationError("Invalid editor target.");
   const url = new URL(target.serverUrl);
-  if (url.protocol !== "https:" || url.origin !== target.serverUrl || url.username || url.password) throw new Error("Invalid editor server.");
+  if (url.protocol !== "https:" || url.origin !== target.serverUrl || url.username || url.password) throw new EditorValidationError("Invalid editor server.");
   const item = state.base;
   if (!item || !isGuid(item.itemId) || !isLocale(item.language) || typeof item.name !== "string" || typeof item.displayName !== "string"
     || typeof item.path !== "string" || !item.template || !isGuid(item.template.templateId) || typeof item.template.name !== "string"
-    || !Array.isArray(item.fields) || item.fields.length > 4096 || !Array.isArray(item.availableVersions)) throw new Error("Invalid editor item.");
+    || !Array.isArray(item.fields) || item.fields.length > 4096 || !Array.isArray(item.availableVersions)) throw new EditorValidationError("Invalid editor item.");
   for (const field of item.fields) {
     if (!field || !isGuid(field.fieldId) || [field.name, field.label, field.value, field.type, field.typeKey, field.sectionName].some(v => typeof v !== "string")
       || !["SHARED", "UNVERSIONED", "VERSIONED"].includes(field.scope)
       || [field.containsFallbackValue, field.containsStandardValue, field.containsInheritedValue, field.isStandardTemplate].some(v => typeof v !== "boolean")
-      || !Number.isFinite(field.sortOrder) || !Number.isFinite(field.sectionSortOrder)) throw new Error("Invalid editor field.");
+      || !Number.isFinite(field.sortOrder) || !Number.isFinite(field.sectionSortOrder)) throw new EditorValidationError("Invalid editor field.");
   }
-  if (item.availableVersions.some(v => !v || !isLocale(v.language) || !Number.isInteger(v.version) || v.version < 1)) throw new Error("Invalid editor versions.");
+  if (item.availableVersions.some(v => !v || !isLocale(v.language) || !Number.isInteger(v.version) || v.version < 1)) throw new EditorValidationError("Invalid editor versions.");
   assertItem(target, item);
-  if (!state.drafts || typeof state.drafts !== "object" || Array.isArray(state.drafts)) throw new Error("Invalid editor draft.");
+  if (!state.drafts || typeof state.drafts !== "object" || Array.isArray(state.drafts)) throw new EditorValidationError("Invalid editor draft.");
   for (const [id, draft] of Object.entries(state.drafts)) {
     if (!/^[a-f0-9]{32}$/iu.test(id) || !draft || typeof draft.input !== "string" || draft.input.length > 1024 * 1024 || typeof draft.clear !== "boolean"
-      || !item.fields.some(field => normalizeId(field.fieldId) === id)) throw new Error("Invalid editor field draft.");
+      || !item.fields.some(field => normalizeId(field.fieldId) === id)) throw new EditorValidationError("Invalid editor field draft.");
   }
   if (state.attempt) {
     if (!["sent", "acknowledged"].includes(state.attempt.phase) || !Array.isArray(state.attempt.changes) || !state.attempt.changes.length
       || state.attempt.changes.length > item.fields.length || state.attempt.changes.some(c => !c || !isGuid(c.fieldId)
-        || typeof c.name !== "string" || typeof c.value !== "string" || !["SHARED", "UNVERSIONED", "VERSIONED"].includes(c.scope))) throw new Error("Invalid editor save journal.");
+        || typeof c.name !== "string" || typeof c.value !== "string" || !["SHARED", "UNVERSIONED", "VERSIONED"].includes(c.scope))) throw new EditorValidationError("Invalid editor save journal.");
   }
   if (state.attempt) {
     const planned = planChanges({ ...state, attempt: undefined });
-    if (JSON.stringify(planned) !== JSON.stringify(state.attempt.changes)) throw new Error("Save journal does not match the retained draft.");
+    if (JSON.stringify(planned) !== JSON.stringify(state.attempt.changes)) throw new EditorValidationError("Save journal does not match the retained draft.");
   }
   return state;
 }

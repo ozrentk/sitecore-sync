@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.36.1
+
+- Keep open item-editor resources stable while persisting save journals in a separate state file, with recovery of existing drafts.
+- Report the failing save stage and safe permission, HTTP, response-validation or cancellation details while retaining drafts and blocking uncertain write retries.
+
 ## 0.36.0
 
 - Add Edit… from Browse and the clicked Compare side, opening a dedicated item editor pinned to connection, item, locale and numbered version.
