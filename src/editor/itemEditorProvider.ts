@@ -177,11 +177,13 @@ export class ItemEditorProvider implements vscode.CustomEditorProvider<ItemDocum
       const page = await loadSelectionPage(field, io, message.parent as string | undefined);
       let currentLabel = field.value ? "Unresolved or outside allowed Source (original value preserved)" : "No selection";
       const current = page.choices.find(choice => selectionKind(field)!.includes("droplist") ? choice.name === field.value : normalizeId(choice.itemId) === normalizeId(field.value));
+      let currentName = current ? current.displayName || current.name : undefined;
+      let currentPath = current?.path;
       if (current) currentLabel = `${current.displayName || current.name} · ${current.path}${current.disabled ? " · ambiguous name" : ""}`;
       else if (isGuid(field.value)) {
-        try { const item = await io.item({ itemId: field.value }); currentLabel = `${item.displayName || item.name} · ${item.path} (not in this choice list; original preserved)`; } catch { /* Keep raw current reference visible. */ }
+        try { const item = await io.item({ itemId: field.value }); currentName = item.displayName || item.name; currentPath = item.path; currentLabel = `${currentName} · ${item.path} (not in this choice list; original preserved)`; } catch { /* Keep raw current reference visible. */ }
       }
-      response = { page: { ...page, choices: page.choices.map(choice => ({ ...choice, value: selectionValue(selectionKind(field)!, choice) })) }, currentLabel };
+      response = { page: { ...page, choices: page.choices.map(choice => ({ ...choice, value: selectionValue(selectionKind(field)!, choice) })) }, currentLabel, currentName, currentPath };
     } catch (error) {
       response = { error: error instanceof EditorValidationError ? error.message : "Could not load verified choices. Check source access or limits, then retry; the current value is preserved." };
     }
@@ -236,19 +238,21 @@ export class ItemEditorProvider implements vscode.CustomEditorProvider<ItemDocum
       for (const field of pending) {
         if (signal.aborted || doc.revision !== revision) return;
         let label = "Unavailable item";
+        let name: string | undefined; let path: string | undefined;
         if (connection && secret && isGuid(field.value)) {
           try {
             const item = await this.client.loadSelectionItem(connection, secret, { itemId: field.value }, target.language,
               AbortSignal.any([signal, AbortSignal.timeout(30_000)]));
-            label = `${item.displayName || item.name} · ${item.path}`;
+            name = item.displayName || item.name; path = item.path;
+            label = `${name} · ${path}`;
           } catch { /* Missing/inaccessible references retain their raw stored value. */ }
         }
         const live = this.connections.get(target.connectionId);
         if (signal.aborted || doc.revision !== revision || doc.labelRequest !== controller) return;
-        if (!live || new URL(live.serverUrl).origin !== target.serverUrl) label = "Unavailable item";
+        if (!live || new URL(live.serverUrl).origin !== target.serverUrl) { label = "Unavailable item"; name = undefined; path = undefined; }
         const current = doc.state.drafts[field.id];
         if ((current?.clear ? "" : current?.input ?? doc.state.base.fields.find(f => normalizeId(f.fieldId) === field.id)?.value) !== field.value) continue;
-        await Promise.all([...doc.panels].map(panel => panel.webview.postMessage({ type: "selectionLabel", revision, id: field.id, value: field.value, label })));
+        await Promise.all([...doc.panels].map(panel => panel.webview.postMessage({ type: "selectionLabel", revision, id: field.id, value: field.value, label, name, path })));
       }
     }));
   }

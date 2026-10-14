@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.37.3
+
+- Compact selection fields into a name-only textbox with Clear on the right; clicking or keyboard-opening the textbox loads choices.
+- Close choices after selection, Escape, outside click or focus leaving the field.
+- Move selection metadata, stored value and full item path into a hover/click/focus information popover.
+
 ## 0.37.2
 
 - Resolve selected Droplink, Grouped Droplink and Droptree names/paths automatically when fields appear, independently of loading their choices.
