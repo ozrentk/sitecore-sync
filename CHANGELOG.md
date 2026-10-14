@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.37.1
+
+- Remove the redundant Clear button from checkbox fields; check or uncheck directly.
+- Accept literal punctuation such as braces in returned selection item paths without weakening Source restrictions or membership checks.
+
 ## 0.37.0
 
 - Add source-aware single-selection controls for Droplist, Droplink, Grouped Droplist, Grouped Droplink and Droptree.

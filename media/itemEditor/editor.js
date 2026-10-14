@@ -88,10 +88,13 @@ window.addEventListener("message", event => {
         document.getElementById("status").textContent = "Unsaved changes";
       };
       control.addEventListener("input", () => changed(false));
-      const clear = document.createElement("button"); clear.textContent = "Clear"; clear.disabled = blocked;
-      clear.title = "Store an explicit empty value; does not reset to inherited or Standard Values";
-      clear.addEventListener("click", () => { control.value = ""; control.checked = false; changed(true); });
-      row.append(control, clear);
+      row.append(control);
+      if (field.kind !== "checkbox") {
+        const clear = document.createElement("button"); clear.textContent = "Clear"; clear.disabled = blocked;
+        clear.title = "Store an explicit empty value; does not reset to inherited or Standard Values";
+        clear.addEventListener("click", () => { control.value = ""; changed(true); });
+        row.append(clear);
+      }
     }
     section.append(row);
   }

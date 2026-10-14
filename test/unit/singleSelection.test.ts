@@ -124,3 +124,23 @@ test("successful selection save validates fresh membership before intent and pre
     deepStrictEqual(saved.drafts, {});
   }
 });
+
+
+test("returned choice paths accept literal braces without relaxing Source restrictions or membership", async () => {
+  const choice = node(30, "Station Wagon {Base}", root.path + "/Station Wagon {Base}");
+  const branch = { ...choice, hasChildren: true };
+  const nested = node(31, "Option {A}", choice.path + "/Option {A}");
+  const literalIO: SelectionIO = {
+    item: async locator => "path" in locator ? root : locator.itemId === root.itemId ? root : locator.itemId === choice.itemId ? branch : nested,
+    children: async locator => "itemId" in locator && locator.itemId === choice.itemId ? { item: branch, children: [nested] } : { item: root, children: [choice] },
+  };
+  strictEqual((await loadSelectionPage(field(), literalIO)).choices[0].name, choice.name);
+  await validateSelection(field(), choice.itemId, literalIO);
+  strictEqual((await loadSelectionPage(field("Droptree"), literalIO, choice.itemId)).choices[0].itemId, nested.itemId);
+  await validateSelection(field("Droptree"), nested.itemId, literalIO);
+  await rejects(validateSelection(field(), nested.itemId, literalIO), /outside/);
+  strictEqual(Boolean(selectionSourceReason(root.path + "/query:*")), true);
+  for (const path of [root.path + "/../Elsewhere", root.path + "//Broken", "/unrelated/Choice"]) {
+    await rejects(loadSelectionPage(field(), { ...literalIO, children: async () => ({ item: root, children: [{ ...choice, path }] }) }), /identity/);
+  }
+});

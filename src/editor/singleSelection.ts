@@ -29,8 +29,14 @@ function locator(field: AuthoringItemField): AuthoringItemLocator {
   if (reason) throw new EditorValidationError(reason);
   return isGuid(field.selectionSource) ? { itemId: field.selectionSource } : { path: field.selectionSource! };
 }
+// Returned item paths are data, not Source expressions. Names can legitimately
+// contain punctuation (for example braces) excluded by the Source parser.
+function validItemPath(path: string): boolean {
+  return /^\/sitecore(?:\/[^/]+)*$/iu.test(path) && !/[\\\x00-\x1f]/u.test(path)
+    && !path.split("/").some(part => part === "." || part === "..");
+}
 function assertItem(item: AuthoringTreeItem): void {
-  if (!isGuid(item.itemId) || !validPath(item.path) || !item.name || item.name.includes("|") || item.name.includes("/")) throw new EditorValidationError("Invalid selection item identity.");
+  if (!isGuid(item.itemId) || !validItemPath(item.path) || !item.name || item.name.includes("|") || item.name.includes("/")) throw new EditorValidationError("Invalid selection item identity.");
 }
 function distance(root: string, path: string): number {
   const prefix = `${root.toLowerCase()}/`;
