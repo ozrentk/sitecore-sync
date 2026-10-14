@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.40.0
+
+- Replace selected-list Move up/down buttons with same-field drag handles and Alt+Up/Alt+Down keyboard reordering for Multilist, Treelist and TreelistEx. Add insertion markers, edge scrolling, compact removal, full-label tooltips and accessible move announcements.
+- Make completed reorders coherent native Undo/Redo edits; existing draft edits use the same event model. Preserve exact reference tokens and validate reorder snapshots without changing Save or Source protections.
+
 ## 0.39.0
 
 - Support bounded relative immediate-child queries with one exact template-ID filter for Droplist, Droplink, Checklist and Multilist, including the Hotspots Source form.

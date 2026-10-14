@@ -20,6 +20,48 @@ function fixture(): EditorState {
 }
 
 export const itemEditorTests: readonly IntegrationTest[] = [{
+  name: "reorder host validates exact drafts and supports isolated undo redo backup and saved-base restoration",
+  async execute(): Promise<void> {
+    const directory = await mkdtemp(join(tmpdir(), "xm-reorder-host-"));
+    const initial = fixture(); const first = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", second = "{BBBBBBBB-BBBB-BBBB-BBBB-BBBBBBBBBBBB}";
+    const extraId = "99999999999999999999999999999999";
+    const state = { ...initial, base: { ...initial.base, fields: [{ ...initial.base.fields[0], type:"Multilist", value:`${first}|${second}`, selectionSource:"/sitecore/content/Choices" }, { ...initial.base.fields[0], fieldId:extraId, name:"Other" }] } };
+    const provider = new ItemEditorProvider({ globalStorageUri:vscode.Uri.file(directory) } as vscode.ExtensionContext, { get:()=>undefined } as unknown as ConnectionStore, {} as AuthoringContentClient);
+    const edits: vscode.CustomDocumentEditEvent<ItemDocument>[] = [];
+    const subscription = provider.onDidChangeCustomDocument(edit => edits.push(edit));
+    const harness = provider as unknown as { message(doc:ItemDocument, message:unknown):Promise<void> };
+    let doc: ItemDocument | undefined;
+    try {
+      await vscode.workspace.fs.createDirectory(provider.directory);
+      const uri = vscode.Uri.joinPath(provider.directory, `${editorKey(state.target)}.xmitem`);
+      await vscode.workspace.fs.writeFile(uri, Buffer.from(JSON.stringify(state)));
+      doc = await provider.openCustomDocument(uri,{backupId:undefined,untitledDocumentData:undefined});
+      const current = () => doc!.state.drafts[fieldId];
+      const reorder = (before:string,input:string,revision=doc!.revision) => harness.message(doc!,{type:"reorder",id:fieldId,before,input,clear:false,revision});
+      await reorder(state.base.fields[0].value, `${second}|${first}`);
+      strictEqual(edits.length,1); strictEqual(edits[0].label,"Reorder Title");
+      await harness.message(doc,{type:"change",id:extraId,input:"keep",clear:false,revision:doc.revision});
+      await edits[0].undo(); strictEqual(current(),undefined); strictEqual(doc.state.drafts[extraId].input,"keep");
+      await edits[0].redo(); strictEqual(current().input,`${second}|${first}`);
+      const count=edits.length;
+      await reorder(`${first}|${second}`,`${second}|${first}`); // stale current value
+      await reorder(`${second}|${first}`,`${first}|${second}`,-1); // stale document revision
+      await reorder(`${second}|${first}`,`${second}|${first}`); // no-op
+      strictEqual(edits.length,count);
+      await rejects(reorder(`${second}|${first}`,first),/preserve/);
+      const backup=await provider.backupCustomDocument(doc,{destination:vscode.Uri.file(join(directory,"backup"))});
+      strictEqual(parseEditorState(Buffer.from(await vscode.workspace.fs.readFile(vscode.Uri.parse(backup.id))).toString()).drafts[fieldId].input,`${second}|${first}`);
+      // Save updates the base and clears drafts; Undo must recover the old order, not the old base.
+      doc.state={...doc.state,base:{...doc.state.base,fields:[{...doc.state.base.fields[0],value:`${second}|${first}`},doc.state.base.fields[1]]},drafts:{[extraId]:{input:"keep",clear:false}}};
+      await edits[0].undo(); strictEqual(doc.state.drafts[fieldId].input,`${first}|${second}`); strictEqual(doc.state.base.fields[0].value,`${second}|${first}`);
+      await edits[0].redo(); strictEqual(doc.state.drafts[fieldId],undefined);
+      doc.state={...doc.state,base:{...doc.state.base,fields:[{...doc.state.base.fields[0],type:"Checklist"},doc.state.base.fields[1]]}};
+      await reorder(`${second}|${first}`,`${first}|${second}`); strictEqual(edits.length,count);
+      doc.busy=true; await rejects(Promise.resolve().then(()=>edits[0].undo()),/current editor state/);
+      doc.busy=false; doc.historyEpoch++; await rejects(Promise.resolve().then(()=>edits[0].undo()),/current editor state/);
+    } finally { subscription.dispose(); doc?.dispose(); provider.dispose(); await rm(directory,{recursive:true,force:true}); }
+  },
+}, {
   name: "compact selection webview opens from textbox, closes on selection and preserves grouped/tree values",
   async execute(): Promise<void> {
     const directory = await mkdtemp(join(tmpdir(), "xm-selection-webview-"));
@@ -158,9 +200,33 @@ export const itemEditorTests: readonly IntegrationTest[] = [{
             rows[1].querySelector(".multiple-choice button").click();
             if (!raw(rows[1]).startsWith(unknown+"|")) throw Error("Add lost unknown reference");
             const selected = rows[1].querySelector(".multiple-selected");
-            [...selected.children[1].querySelectorAll("button")].find(b=>b.textContent==="Move up").click();
+            selected.children[1].querySelector(".reorder-handle").dispatchEvent(new KeyboardEvent("keydown",{key:"ArrowUp",altKey:true,bubbles:true}));
             if (!raw(rows[1]).endsWith("|"+unknown)) throw Error("Reorder failed");
-            rows[1].querySelector(".multiple-selected li button").click();
+            if (document.activeElement !== selected.children[0].querySelector(".reorder-handle")) throw Error("Keyboard focus lost");
+            const reordered = raw(rows[1]);
+            selected.children[0].querySelector(".reorder-handle").dispatchEvent(new KeyboardEvent("keydown",{key:"ArrowUp",altKey:true,bubbles:true}));
+            if (raw(rows[1]) !== reordered) throw Error("Boundary move changed order");
+            if (!rows[1].querySelector("[aria-live]").textContent.includes("position 1")) throw Error("Missing move announcement");
+            const startDrag = () => { const data = new DataTransfer(); selected.children[0].querySelector(".reorder-handle").dispatchEvent(new DragEvent("dragstart",{dataTransfer:data,bubbles:true,cancelable:true})); return data; };
+            const drop = (list,data,y) => list.dispatchEvent(new DragEvent("drop",{dataTransfer:data,clientY:y,bubbles:true,cancelable:true}));
+            let data = startDrag();
+            const otherList = rows[2].querySelector(".multiple-selected"); const otherBefore = raw(rows[2]);
+            drop(otherList,data,otherList.getBoundingClientRect().bottom);
+            if (raw(rows[2]) !== otherBefore) throw Error("Cross-field drop accepted");
+            document.dispatchEvent(new KeyboardEvent("keydown",{key:"Escape",bubbles:true}));
+            drop(selected,data,selected.getBoundingClientRect().bottom);
+            if (raw(rows[1]) !== reordered) throw Error("Cancelled drag changed order");
+            drop(selected,new DataTransfer(),selected.getBoundingClientRect().bottom);
+            if (raw(rows[1]) !== reordered) throw Error("External drop accepted");
+            data = startDrag(); drop(selected,data,selected.children[0].getBoundingClientRect().top);
+            if (raw(rows[1]) !== reordered) throw Error("No-op drag changed order");
+            data = startDrag(); drop(selected,data,selected.getBoundingClientRect().bottom);
+            if (raw(rows[1]) === reordered) throw Error("Drag to last failed");
+            const last = selected.children[1].querySelector(".reorder-handle"); data = new DataTransfer();
+            last.dispatchEvent(new DragEvent("dragstart",{dataTransfer:data,bubbles:true,cancelable:true}));
+            drop(selected,data,selected.children[0].getBoundingClientRect().top);
+            if (raw(rows[1]) !== reordered) throw Error("Drag to first failed");
+            rows[1].querySelector(".multiple-selected li .selection-remove").click();
             if (raw(rows[1]) !== unknown) throw Error("Remove dropped wrong reference");
             for (const row of rows.slice(2)) {
               open(row); await until(()=>row.querySelector(".multiple-available details"));
@@ -321,6 +387,10 @@ export const itemEditorTests: readonly IntegrationTest[] = [{
       await vscode.commands.executeCommand("vscode.openWith", uri, type, { preview: false });
       strictEqual(matchingTabs().length, 1); strictEqual([...harness.documents.values()][0], doc);
       strictEqual(doc.state.drafts[fieldId].input, "retained draft");
+      await vscode.commands.executeCommand("undo");
+      await wait(() => !doc.state.drafts[fieldId]);
+      await vscode.commands.executeCommand("redo");
+      await wait(() => doc.state.drafts[fieldId]?.input === "retained draft");
       // Save while hidden, then edit/save again after native journal persistence.
       const other = await vscode.workspace.openTextDocument({ content: "" });
       await vscode.window.showTextDocument(other);

@@ -6,6 +6,13 @@ let frozenControls = [];
 const selectionRequests = new Map();
 let selectionRequestId = 0;
 let activePicker;
+let cancelDrag;
+document.addEventListener("keydown", event => { if (event.key === "Escape") cancelDrag?.(); });
+document.addEventListener("keydown", event => {
+  if ((event.ctrlKey || event.metaKey) && !event.altKey && !event.target.matches("input, textarea") && ["z", "y"].includes(event.key.toLowerCase())) {
+    event.preventDefault(); send(event.shiftKey || event.key.toLowerCase() === "y" ? "redo" : "undo");
+  }
+});
 const savedSections = api.getState()?.sections;
 const sectionOpen = new Map(savedSections && typeof savedSections === "object" && !Array.isArray(savedSections)
   ? Object.entries(savedSections).filter(([, open]) => typeof open === "boolean") : []);
@@ -46,6 +53,7 @@ window.addEventListener("message", event => {
     return;
   }
   if (state.type === "freeze") {
+    cancelDrag?.();
     activePicker?.close(false);
     blocked = true;
     const drafts = {};
@@ -60,6 +68,7 @@ window.addEventListener("message", event => {
     return;
   }
   if (state.type !== "state") return;
+  cancelDrag?.();
   activePicker?.close(false);
   selectionRequests.clear();
   revision = state.revision;
@@ -138,6 +147,10 @@ window.addEventListener("message", event => {
     section.append(row);
     }
   }
+  if (state.focus) {
+    const handle = [...document.querySelectorAll("[data-reorder-field]")].find(control => control.dataset.reorderField === state.focus.id && control.dataset.reorderValue === state.focus.value);
+    (handle || document.getElementById(state.focus.id))?.focus();
+  }
 });
 function selectionLabel(field) {
   const label = document.createElement("p"); label.className = "selection-current"; label.id = field.id; label.setAttribute("role", "status");
@@ -152,7 +165,7 @@ function setSelectionLabel(control, text, path = "") {
     const detail = document.getElementById(`${control.id}-path`);
     if (detail) { detail.textContent = path; detail.hidden = !path; }
   } else {
-    control.textContent = text; control.title = path;
+    control.textContent = text; control.title = path ? `${text}\n${path}` : text;
     control.dispatchEvent(new CustomEvent("referenceResolved", {bubbles:true,detail:{text,path}}));
     const detail = document.getElementById(`${control.id}-path`);
     if (detail) { detail.textContent = path; detail.hidden = !path; }
@@ -321,6 +334,34 @@ function renderMultipleSelection(row, field) {
   const clear = document.createElement("button"); clear.textContent = "Clear"; clear.disabled = blocked;
   controls.append(trigger, clear);
   const selected = document.createElement("ol"); selected.className = "multiple-selected"; selected.setAttribute("aria-label", `${field.label} selected items`);
+  const hint = document.createElement("p"); hint.className = "reorder-hint meta"; hint.id = `${field.id}-reorder-hint`;
+  hint.textContent = "Drag the handle to reorder, or focus it and press Alt+↑ / Alt+↓."; hint.hidden = checklist;
+  const announcement = document.createElement("span"); announcement.className = "visually-hidden"; announcement.setAttribute("role", "status"); announcement.setAttribute("aria-live", "polite");
+  let drag;
+  let scrollFrame;
+  let scrollSpeed = 0;
+  const dragType = "application/x-xm-selection-reorder";
+  const clearIndicator = () => { for (const entry of selected.children) entry.classList.remove("drop-before", "drop-after"); };
+  const stopScroll = () => { cancelAnimationFrame(scrollFrame); scrollFrame = undefined; scrollSpeed = 0; };
+  const endDrag = () => { drag = undefined; clearIndicator(); stopScroll(); selected.classList.remove("dragging"); if (cancelDrag === endDrag) cancelDrag = undefined; };
+  const validDrag = event => drag && !blocked && row.isConnected && revision === drag.revision && stored.value === drag.before && event.dataTransfer?.types.includes(dragType);
+  const slotAt = y => { const entries = [...selected.children]; const slot = entries.findIndex(entry => y < entry.getBoundingClientRect().top + entry.getBoundingClientRect().height / 2); return slot < 0 ? entries.length : slot; };
+  const indicator = slot => { clearIndicator(); const entry = selected.children[Math.min(slot, values.length - 1)]; entry?.classList.add(slot === values.length ? "drop-after" : "drop-before"); };
+  const scroll = () => { if (!drag || !scrollSpeed || blocked || !row.isConnected) { stopScroll(); return; } selected.scrollTop += scrollSpeed; indicator(slotAt(drag.y)); scrollFrame = requestAnimationFrame(scroll); };
+  selected.addEventListener("dragover", event => {
+    if (!validDrag(event)) { event.preventDefault(); if (event.dataTransfer) event.dataTransfer.dropEffect = "none"; return; }
+    event.preventDefault(); event.dataTransfer.dropEffect = "move"; drag.y = event.clientY; indicator(slotAt(event.clientY));
+    const rect = selected.getBoundingClientRect(); scrollSpeed = event.clientY < rect.top + 28 ? -6 : event.clientY > rect.bottom - 28 ? 6 : 0;
+    if (scrollSpeed && !scrollFrame) scrollFrame = requestAnimationFrame(scroll); else if (!scrollSpeed) stopScroll();
+  });
+  selected.addEventListener("dragleave", event => { if (!selected.contains(event.relatedTarget)) { clearIndicator(); stopScroll(); } });
+  selected.addEventListener("drop", event => {
+    event.preventDefault();
+    if (!validDrag(event) || event.dataTransfer.getData(dragType) !== drag.token) return;
+    event.preventDefault(); event.stopPropagation();
+    const from = drag.index; const slot = slotAt(event.clientY); endDrag();
+    move(from, slot > from ? slot - 1 : slot);
+  });
   const popup = document.createElement("div"); popup.className = "selection-popup"; popup.hidden = true; popup.id = `${field.id}-choices`;
   trigger.setAttribute("aria-controls", popup.id);
   const status = document.createElement("p"); status.setAttribute("role", "status");
@@ -331,17 +372,25 @@ function renderMultipleSelection(row, field) {
     const label = event.target;
     if (label.dataset.selectionLabel === field.id) names.set(norm(label.dataset.value), {name:event.detail.text,path:event.detail.path});
   });
-  const edit = next => {
-    if (blocked) return;
+  const edit = (next, reorder = false, focusValue) => {
+    if (blocked || !row.isConnected || next.join("|") === stored.value) return;
+    const before = stored.value; endDrag();
     const focusedChoice = document.activeElement?.dataset.choiceId;
     values = next; stored.value = values.join("|"); stored.dataset.explicitClear = String(!values.length);
-    send("change", {id:field.id,input:stored.value,clear:!values.length});
+    send(reorder ? "reorder" : "change", {id:field.id,input:stored.value,clear:!values.length,...(reorder ? {before,focusValue} : {})});
     document.getElementById("status").textContent = "Unsaved changes";
     drawSelected(); refreshChoices();
     if (focusedChoice) {
       const replacement = [...available.querySelectorAll("[data-choice-id]")].find(control => control.dataset.choiceId === focusedChoice);
       if (replacement && !replacement.disabled) replacement.focus(); else trigger.focus();
     }
+  };
+  const move = (from, to) => {
+    if (checklist || !Number.isInteger(from) || !Number.isInteger(to) || from < 0 || to < 0 || from >= values.length || to >= values.length || from === to || blocked || !row.isConnected) return;
+    const next = [...values]; const [value] = next.splice(from, 1); next.splice(to, 0, value);
+    edit(next, true, value);
+    const handle = selected.children[to]?.querySelector(".reorder-handle"); handle?.focus(); handle?.scrollIntoView({block:"nearest"});
+    announcement.textContent = `Moved ${names.get(norm(value))?.name || "selected item"} to position ${to + 1} of ${values.length}.`;
   };
   const add = choice => {
     if (choice.disabled || values.some(value => norm(value) === norm(choice.itemId)) || values.length >= 256) return;
@@ -354,22 +403,30 @@ function renderMultipleSelection(row, field) {
     edit(next);
   };
   const drawSelected = () => {
+    endDrag();
     selected.replaceChildren();
     if (!values.length) { const empty = document.createElement("li"); empty.textContent = "No selection"; selected.append(empty); }
     values.forEach((value, index) => {
       const entry = document.createElement("li");
       const label = document.createElement("span"); label.dataset.selectionLabel = field.id; label.dataset.value = value;
-      const known = names.get(norm(value)); label.textContent = known?.name || `Loading selected item… (${value})`; label.title = known?.path || value;
-      const remove = document.createElement("button"); remove.textContent = "Remove"; remove.disabled = blocked;
+      const known = names.get(norm(value)); label.textContent = known?.name || `Loading selected item… (${value})`; label.title = known ? `${known.name}\n${known.path || value}` : value;
+      const remove = document.createElement("button"); remove.className = "selection-remove"; remove.textContent = "×"; remove.title = "Remove selected item"; remove.disabled = blocked;
       remove.setAttribute("aria-label", `Remove selected item ${index + 1}`);
-      remove.addEventListener("click", () => { edit(values.filter((_, position) => position !== index)); selected.querySelectorAll("button")[Math.min(index, values.length - 1) * (checklist ? 1 : 3)]?.focus(); });
-      entry.append(label, remove);
-      if (!checklist) for (const [direction, title] of [[-1, "Move up"], [1, "Move down"]]) {
-        const move = document.createElement("button"); move.textContent = title; move.disabled = blocked || index + direction < 0 || index + direction >= values.length;
-        move.setAttribute("aria-label", `${title}: selected item ${index + 1}`);
-        move.addEventListener("click", () => { const next = [...values]; [next[index], next[index + direction]] = [next[index + direction], next[index]]; edit(next); selected.children[index + direction]?.querySelector("button")?.focus(); });
-        entry.append(move);
+      remove.addEventListener("click", () => { if (!entry.isConnected) return; edit(values.filter((_, position) => position !== index)); (selected.children[Math.min(index, values.length - 1)]?.querySelector(".selection-remove") || trigger).focus(); });
+      if (!checklist) {
+        const handle = document.createElement("button"); handle.className = "reorder-handle"; handle.textContent = "⠿"; handle.draggable = !blocked; handle.disabled = blocked;
+        handle.dataset.reorderField = field.id; handle.dataset.reorderValue = value;
+        handle.setAttribute("aria-label", `Reorder selected item ${index + 1} of ${values.length}`);
+        handle.setAttribute("aria-describedby", hint.id); handle.setAttribute("aria-keyshortcuts", "Alt+ArrowUp Alt+ArrowDown"); handle.title = "Drag to reorder · Alt+↑ / Alt+↓";
+        handle.addEventListener("keydown", event => { if (handle.isConnected && values[index] === value && event.altKey && !event.ctrlKey && !event.metaKey && ["ArrowUp", "ArrowDown"].includes(event.key)) { event.preventDefault(); event.stopPropagation(); move(index, index + (event.key === "ArrowUp" ? -1 : 1)); } });
+        handle.addEventListener("dragstart", event => {
+          if (blocked || !handle.isConnected || values[index] !== value || !event.dataTransfer) { event.preventDefault(); return; }
+          cancelDrag?.(); drag = { index, before: stored.value, token: crypto.randomUUID(), y: event.clientY, revision }; cancelDrag = endDrag;
+          event.dataTransfer.setData(dragType, drag.token); event.dataTransfer.effectAllowed = "move"; event.dataTransfer.setDragImage(entry, 12, entry.offsetHeight / 2); selected.classList.add("dragging");
+        });
+        handle.addEventListener("dragend", endDrag); entry.append(handle);
       }
+      entry.append(label, remove);
       selected.append(entry);
     });
   };
@@ -434,5 +491,5 @@ function renderMultipleSelection(row, field) {
   });
   row.addEventListener("keydown", event => { if (event.key === "Escape" && !popup.hidden) { event.preventDefault(); close(); } });
   row.addEventListener("focusout", event => { if (event.relatedTarget && !row.contains(event.relatedTarget)) close(false); });
-  row.append(stored,controls,selected,popup); drawSelected();
+  row.append(stored,controls,hint,selected,announcement,popup); drawSelected();
 }

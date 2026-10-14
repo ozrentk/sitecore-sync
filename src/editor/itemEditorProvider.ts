@@ -1,4 +1,4 @@
-import { parseMultipleSelection, validateMultipleSelection } from "./multipleSelection";
+import { parseMultipleSelection, validateMultipleSelection, validateReorder } from "./multipleSelection";
 import { isMultipleSelection } from "./singleSelection";
 import { orderEditorFields } from "./fieldOrder";
 import { loadSelectionMetadata, selectionIO } from "./selectionClient";
@@ -10,7 +10,7 @@ import { randomBytes } from "node:crypto";
 import { ConnectionStore } from "../connections/connectionStore";
 import { AuthoringContentClient } from "../sitecore/authoringClient";
 import { assertItem, editorKey, fieldInput, fieldKind, isGuid, isLocale, normalizeId, parseEditorState,
-  EditorValidationError, planChanges, readOnlyReason, reconcileEditor, saveEditor, type EditorIO, type EditorState, type EditorTarget } from "./itemEditorModel";
+  EditorValidationError, planChanges, readOnlyReason, reconcileEditor, saveEditor, type FieldDraft, type EditorIO, type EditorState, type EditorTarget } from "./itemEditorModel";
 
 function localKey(uri: vscode.Uri): string {
   const path = resolve(uri.fsPath);
@@ -26,6 +26,8 @@ export class ItemDocument implements vscode.CustomDocument {
   error: string | undefined;
   stage = "Editor operation";
   revision = 0;
+  historyEpoch = 0;
+  restoredEditRegistered = false;
   flush: { id: string; finish: (value: unknown) => void } | undefined;
   readonly lifetime = new AbortController();
   private readonly disposed = new vscode.EventEmitter<void>();
@@ -36,7 +38,7 @@ export class ItemDocument implements vscode.CustomDocument {
 
 /** VS Code owns dirty/close/backup handling; the document owns its immutable remote target. */
 export class ItemEditorProvider implements vscode.CustomEditorProvider<ItemDocument>, vscode.Disposable {
-  private readonly changed = new vscode.EventEmitter<vscode.CustomDocumentContentChangeEvent<ItemDocument>>();
+  private readonly changed = new vscode.EventEmitter<vscode.CustomDocumentEditEvent<ItemDocument>>();
   readonly onDidChangeCustomDocument = this.changed.event;
   private readonly saved = new vscode.EventEmitter<EditorTarget>();
   readonly onDidSave = this.saved.event;
@@ -120,7 +122,13 @@ export class ItemEditorProvider implements vscode.CustomEditorProvider<ItemDocum
       });
     });
     panel.onDidDispose(() => { subscription.dispose(); doc.panels.delete(panel); });
-    if (Object.keys(doc.state.drafts).length || doc.state.attempt) this.changed.fire({ document: doc });
+    if (!doc.restoredEditRegistered) {
+      doc.restoredEditRegistered = true;
+      for (const [id, draft] of Object.entries(doc.state.drafts)) {
+        const field = doc.state.base.fields.find(f => normalizeId(f.fieldId) === id)!;
+        this.recordEdit(doc, id, { input: fieldInput(field), clear: false }, draft, `Restore ${field.name} draft`);
+      }
+    }
   }
 
   private async message(doc: ItemDocument, raw: unknown): Promise<void> {
@@ -133,11 +141,20 @@ export class ItemEditorProvider implements vscode.CustomEditorProvider<ItemDocum
       await this.choices(doc, message);
       return;
     }
-    if (message.type === "change" && typeof message.id === "string" && typeof message.input === "string" && message.input.length <= 1024 * 1024 && typeof message.clear === "boolean") {
+    if (["change", "reorder"].includes(String(message.type)) && typeof message.id === "string" && typeof message.input === "string" && message.input.length <= 1024 * 1024 && typeof message.clear === "boolean") {
       const field = doc.state.base.fields.find(f => normalizeId(f.fieldId) === message.id);
       if (!field || readOnlyReason(doc.state.base, field) || doc.state.attempt) return;
-      doc.state = { ...doc.state, drafts: { ...doc.state.drafts, [message.id]: { input: message.input, clear: message.clear } } };
-      this.changed.fire({ document: doc });
+      const before = doc.state.drafts[message.id] ?? { input: fieldInput(field), clear: false };
+      if (message.type === "reorder") {
+        if (!["multilist", "treelist", "treelistex"].includes(selectionKind(field) ?? "") || message.clear || before.clear || message.before !== before.input) return;
+        validateReorder(before.input, message.input);
+      }
+      const after = { input: message.input, clear: message.clear };
+      if (before.input === after.input && before.clear === after.clear) return;
+      const focusValue = message.type === "reorder" && typeof message.focusValue === "string" && before.input.split("|").includes(message.focusValue) ? message.focusValue : undefined;
+      this.recordEdit(doc, message.id, before, after, `${message.type === "reorder" ? "Reorder" : "Edit"} ${field.name}`, focusValue);
+    } else if (message.type === "undo" || message.type === "redo") {
+      if (!doc.state.attempt && [...doc.panels].some(panel => panel.active)) await vscode.commands.executeCommand(message.type);
     } else if (message.type === "save") {
       await vscode.workspace.save(doc.uri);
     } else if (message.type === "revert") {
@@ -158,6 +175,28 @@ export class ItemEditorProvider implements vscode.CustomEditorProvider<ItemDocum
       const choice = await vscode.window.showQuickPick(doc.state.base.availableVersions.map(v => ({ label: `${v.language} · v${v.version}`, ...v })), { title: "Open an existing exact-locale version", ignoreFocusOut: true });
       if (choice) await this.open({ ...doc.state.target, language: choice.language, version: choice.version });
     }
+  }
+
+  private recordEdit(doc: ItemDocument, id: string, before: FieldDraft, after: FieldDraft, label: string, focusValue?: string): void {
+    const epoch = doc.historyEpoch;
+    const original = doc.state.base.fields.find(f => normalizeId(f.fieldId) === id)!;
+    const templateId = normalizeId(doc.state.base.template.templateId);
+    const apply = (draft: FieldDraft) => {
+      const field = doc.state.base.fields.find(f => normalizeId(f.fieldId) === id);
+      if (doc.lifetime.signal.aborted || doc.busy || doc.state.attempt || epoch !== doc.historyEpoch || !field || readOnlyReason(doc.state.base, field)
+        || field.type !== original.type || field.scope !== original.scope || field.selectionSource !== original.selectionSource
+        || normalizeId(doc.state.base.template.templateId) !== templateId) throw new Error("This edit cannot be restored in the current editor state.");
+      const drafts = { ...doc.state.drafts };
+      if (!draft.clear && draft.input === fieldInput(field)) delete drafts[id]; else drafts[id] = draft;
+      doc.state = { ...doc.state, drafts };
+    };
+    // Initial application is already authorized by message validation (or recovered storage).
+    doc.state = { ...doc.state, drafts: { ...doc.state.drafts, [id]: after } };
+    const restore = async (draft: FieldDraft) => {
+      apply(draft); doc.cancelSelections(); doc.revision++;
+      await this.render(doc, { id, value: focusValue ?? draft.input.split("|")[0] });
+    };
+    this.changed.fire({ document: doc, label, undo: () => restore(before), redo: () => restore(after) });
   }
 
   private async choices(doc: ItemDocument, message: Record<string, unknown>): Promise<void> {
@@ -197,7 +236,7 @@ export class ItemEditorProvider implements vscode.CustomEditorProvider<ItemDocum
     await Promise.all([...doc.panels].map(panel => panel.webview.postMessage({ type: "choices", id, request: message.request, revision, ...response })));
   }
 
-  private async render(doc: ItemDocument): Promise<void> {
+  private async render(doc: ItemDocument, focus?: { id: string; value: string }): Promise<void> {
     let status = "";
     try { status = `${planChanges(doc.state).length} changed field(s)`; } catch (error) { status = error instanceof Error ? error.message : "Invalid draft"; }
     if (doc.state.attempt) status = "Save outcome needs reconciliation. Draft preserved; further writes are blocked.";
@@ -205,7 +244,7 @@ export class ItemEditorProvider implements vscode.CustomEditorProvider<ItemDocum
     const payload = { type: "state", revision: doc.revision, busy: doc.busy, status, pending: Boolean(doc.state.attempt),
       connection: this.connections.get(doc.state.target.connectionId)?.name ?? "Unavailable connection", target: doc.state.target,
       item: { name: doc.state.base.displayName || doc.state.base.name, path: doc.state.base.path },
-      error: doc.error,
+      error: doc.error, focus,
       fields: orderEditorFields(doc.state.base.fields).map(field => ({
         id: normalizeId(field.fieldId), label: field.name, name: field.name, section: field.sectionName || "Fields", type: field.type,
         sectionId: field.sectionId ? normalizeId(field.sectionId) : undefined, isStandardTemplate: field.isStandardTemplate,
@@ -428,7 +467,7 @@ export class ItemEditorProvider implements vscode.CustomEditorProvider<ItemDocum
     try { await this.exclusive(doc, async () => {
       const fresh = await this.io(doc, AbortSignal.any([doc.lifetime.signal, abort.signal])).read(); assertItem(doc.state.target, fresh);
       const state: EditorState = { ...doc.state, base: fresh, drafts: {}, attempt: undefined };
-      await this.persist(doc.uri, state); doc.state = state;
+      await this.persist(doc.uri, state); doc.state = state; doc.historyEpoch++;
     }); } finally { cancellation.dispose(); }
   }
   saveCustomDocumentAs(): Promise<void> { return Promise.reject(new Error("Save As is unavailable for a pinned Sitecore item. Use Save.")); }

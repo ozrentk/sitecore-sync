@@ -130,3 +130,8 @@ Use this file as the single backlog inventory. Add newly agreed work here, prese
 
 - Added immediate-child exact-template queries for flat B1/B2 lists (`query:./child::*[@@templateid='GUID']` and `query:./*[@@templateid='GUID']`). Context is the edited item/connection/locale; complete bounded children are filtered by direct template equality.
 - Existing Source conflict, fresh membership, reference preservation, cancellation and Save guarantees apply. General queries, grouped/tree query semantics and parameterized Sources remain deferred; B3 General Link/Name Value List and Image/DAM remain separate.
+
+### B24/B25 delivery update - selected-item reordering (0.40.0)
+
+- Multilist/Treelist/TreelistEx selected lists now use same-field drag handles and accessible Alt+Up/Alt+Down movement, replacing visible reorder buttons. Compact Remove actions and tooltips keep rows uniform; Checklist remains unordered.
+- Completed moves use native undoable draft edits with exact-token and snapshot validation. Native edit events also cover existing field changes, preserving Save/conflict/recovery and bounded Source-query behavior. B3 and media work remain separate.

@@ -3,6 +3,12 @@ import { EditorValidationError, normalizeId } from "./itemEditorModel";
 import { isTreeSelection, loadSelectionPage, selectionKind, selectionSourceReason, validateSelection, type SelectionIO } from "./singleSelection";
 
 export const multipleSelectionLimit = 256;
+/** A reorder can only permute the exact current tokens; it cannot add, drop or repair references. */
+export function validateReorder(before: string, after: string): void {
+  const previous = parseMultipleSelection(before);
+  const next = parseMultipleSelection(after);
+  if (previous.length !== next.length || next.some(token => !previous.includes(token))) throw new EditorValidationError("Reorder must preserve every selected reference.");
+}
 /** Retain each original token exactly; never repair duplicates or malformed legacy values. */
 export function parseMultipleSelection(value: string): readonly string[] {
   if (!value) return [];
