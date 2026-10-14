@@ -69,10 +69,12 @@ export const itemEditorTests: readonly IntegrationTest[] = [{
     const root = { itemId: "44444444444444444444444444444444", name: "Root", displayName: "Root", path: "/sitecore/content/Root", hasChildren: true };
     const group = { ...root, itemId: "55555555555555555555555555555555", name: "Group", displayName: "Group", path: root.path + "/Group" };
     const leaf = { ...root, itemId: "66666666666666666666666666666666", name: "Choice {Base}", displayName: "Choice label", path: group.path + "/Choice {Base}", hasChildren: false };
+    const secondGroup = { ...group, itemId:"88888888888888888888888888888888", name:"Other", path:root.path + "/Other" };
+    const secondLeaf = { ...leaf, itemId:"99999999999999999999999999999999", name:"Other choice", path:secondGroup.path + "/Other choice" };
     const provider = new ItemEditorProvider({ globalStorageUri: vscode.Uri.file(directory), extensionUri: extension.extensionUri } as vscode.ExtensionContext,
       { get: () => ({ id: "test", name: "Test", serverUrl: "https://example.test" }), getClientSecret: async () => "secret" } as unknown as ConnectionStore,
       { loadSelectionItem: async (_c: unknown, _s: string, locator: { itemId?: string }) => locator.itemId === group.itemId ? group : root,
-        loadTreeLevel: async (_c: unknown, _s: string, locator: { itemId: string }) => locator.itemId === group.itemId ? { item: group, children: [leaf] } : { item: root, children: [group] } } as unknown as AuthoringContentClient);
+        loadTreeLevel: async (_c: unknown, _s: string, locator: { itemId: string }) => locator.itemId === group.itemId ? { item: group, children: [leaf] } : locator.itemId === secondGroup.itemId ? {item:secondGroup,children:[secondLeaf]} : { item: root, children: [group,secondGroup] } } as unknown as AuthoringContentClient);
     const panel = vscode.window.createWebviewPanel("selectionSmoke", "Selection smoke", vscode.ViewColumn.Active, { enableScripts: true });
     let doc: ItemDocument | undefined; let listener: vscode.Disposable | undefined; let timer: ReturnType<typeof setTimeout> | undefined;
     try {
@@ -95,7 +97,7 @@ export const itemEditorTests: readonly IntegrationTest[] = [{
             await until(()=>rows[1].querySelector("[data-selection-label]").value === "Group");
             if (!rows[1].querySelector(".field-info-content").textContent.includes("/sitecore/content/Root/Group")) throw Error("Path must be in information box");
             if (rows[1].querySelector(".selection-trigger").value.includes("/sitecore/")) throw Error("Textbox must show only item name");
-            if (document.querySelector("select, .selection-tree")) throw Error("Label resolution must not load choices");
+            if (document.querySelector(".picker-choice")) throw Error("Label resolution must not load choices");
             if (rows[4].querySelector("[data-selection-label]").value !== "Unavailable item") throw Error("Missing unresolved reference feedback");
             if ([...document.querySelectorAll("button")].some(b=>/Load choices|Browse choices/.test(b.textContent))) throw Error("Legacy loading button remains");
             if (getComputedStyle(rows[0].querySelector(".field-info-content")).display !== "none") throw Error("Metadata should be collapsed");
@@ -107,34 +109,45 @@ export const itemEditorTests: readonly IntegrationTest[] = [{
               if (row.querySelector("[data-field-id]").value !== expected) throw Error("Current value lost on open");
               row.querySelector(".selection-trigger").click();
               if (row.querySelector(".selection-trigger").nextElementSibling.textContent !== "Clear") throw Error("Clear is not right of textbox");
-              await until(()=>row.querySelector("select, .selection-tree"));
+              await until(()=>row.querySelector(".picker-choice"));
               if (row.querySelector("[data-field-id]").value !== expected) throw Error("Loading changed current value");
             }
-            if (!rows[2].querySelector("optgroup") || !rows[3].querySelector("optgroup")) throw Error("Missing groups");
+            if (!rows[2].querySelector(".picker-group") || !rows[3].querySelector(".picker-group")) throw Error("Missing groups");
+            const duplicatePaths = [...rows[3].querySelectorAll(".picker-choice-path")].map(n=>n.textContent);
+            if (duplicatePaths.length !== 2 || !duplicatePaths[0].startsWith("Group") || !duplicatePaths[1].startsWith("Other")) throw Error("Duplicate labels lack relative parent disambiguation");
+            if (!rows[3].querySelector(".picker-choice").title.includes("/sitecore/content/Root/Group/Choice")) throw Error("Missing full choice tooltip");
+            if (rows[3].querySelector(".picker-source").textContent.includes("/sitecore/") || !rows[3].querySelector(".picker-source").title.includes("/sitecore/content/Root")) throw Error("Source breadcrumb or tooltip incorrect");
             rows[0].querySelector(".selection-trigger").dispatchEvent(new KeyboardEvent("keydown", {key:"ArrowDown", bubbles:true}));
-            await until(()=>rows[0].querySelector("select"));
+            await until(()=>rows[0].querySelector(".picker-choice"));
             const filter = rows[0].querySelector("input[type=search]"); filter.value="not found"; filter.dispatchEvent(new Event("input"));
-            if (rows[0].querySelectorAll("option").length !== 1) throw Error("Filter failed");
+            if (rows[0].querySelectorAll(".picker-choice").length !== 0) throw Error("Filter failed");
             if (rows[0].querySelector("[data-field-id]").value !== "unresolved-original") throw Error("Filtering changed value");
             filter.value=""; filter.dispatchEvent(new Event("input"));
-            const flat = rows[0].querySelector("select"); flat.selectedIndex=1; flat.dispatchEvent(new Event("change"));
+            filter.dispatchEvent(new KeyboardEvent("keydown",{key:"ArrowDown",bubbles:true}));
+            if (document.activeElement !== rows[0].querySelector(".picker-choice")) throw Error("Arrow navigation failed");
+            const flat = rows[0].querySelector(".picker-choice"); flat.click();
             if (rows[0].querySelector("[data-field-id]").value !== "Group") throw Error("Droplist did not store name");
             if (!rows[0].querySelector(".selection-popup").hidden || rows[0].querySelector(".selection-trigger").getAttribute("aria-expanded") !== "false") throw Error("Selection must close popup");
-            rows[1].querySelector(".selection-trigger").click(); await until(()=>rows[1].querySelector("select"));
+            rows[1].querySelector(".selection-trigger").click(); await until(()=>rows[1].querySelector(".picker-choice"));
             rows[1].querySelector("input[type=search]").dispatchEvent(new KeyboardEvent("keydown", {key:"Escape", bubbles:true}));
             if (!rows[1].querySelector(".selection-popup").hidden) throw Error("Escape must close popup");
-            rows[1].querySelector(".selection-trigger").click(); await until(()=>rows[1].querySelector("select"));
-            const linked = rows[1].querySelector("select"); linked.selectedIndex=1; linked.dispatchEvent(new Event("change"));
+            rows[1].querySelector(".selection-trigger").click(); await until(()=>rows[1].querySelector(".picker-choice"));
+            const linked = rows[1].querySelector(".picker-choice"); linked.click();
             if (rows[1].querySelector("[data-field-id]").value !== "{55555555-5555-5555-5555-555555555555}") throw Error("Droplink did not store ID");
             if (!rows[1].querySelector(".selection-popup").hidden) throw Error("Droplink selection must close popup");
-            rows[4].querySelector(".selection-trigger").click(); await until(()=>rows[4].querySelector("details"));
-            const branch = rows[4].querySelector("details"); branch.open=true;
-            await until(()=>branch.querySelector("button")); branch.querySelector("button").click();
+            rows[4].querySelector(".selection-trigger").click(); await until(()=>rows[4].querySelector(".picker-children"));
+            rows[4].querySelector(".picker-children").click();
+            await until(()=>rows[4].querySelector(".picker-choice-name")?.textContent === "Choice label");
+            rows[4].querySelector('[aria-label="Back to parent"]').click();
+            if (!rows[4].querySelector(".picker-children") || rows[4].querySelector(".picker-choice-name").textContent !== "Group") throw Error("Tree Back lost parent level");
+            rows[4].querySelector(".picker-choice").focus(); rows[4].querySelector(".picker-choice").dispatchEvent(new KeyboardEvent("keydown",{key:"ArrowRight",bubbles:true}));
+            await until(()=>rows[4].querySelector(".picker-choice-name")?.textContent === "Choice label"); rows[4].querySelector(".picker-choice").click();
             if (rows[4].querySelector("[data-field-id]").value !== "{66666666-6666-6666-6666-666666666666}") throw Error("Tree selection failed");
             if (!rows[4].querySelector(".selection-popup").hidden) throw Error("Tree selection must close popup");
             rows[0].querySelector(".selection-trigger").click();
             document.body.dispatchEvent(new PointerEvent("pointerdown", {bubbles:true}));
             if (!rows[0].querySelector(".selection-popup").hidden) throw Error("Outside click must close popup");
+            if (document.activeElement !== rows[0].querySelector(".selection-trigger")) throw Error("Outside blank click must restore focus");
             api.postMessage({type:"selectionSmoke",ok:true});
           } catch(error) { api.postMessage({type:"selectionSmoke",error:String(error)}); }
         });`;
@@ -188,16 +201,23 @@ export const itemEditorTests: readonly IntegrationTest[] = [{
             if (rows.length !== 4) throw Error("Missing B2 controls");
             for (const [index,row] of rows.entries()) if (raw(row) !== unknown + (index === 3 ? "|66666666666666666666666666666666" : "")) throw Error("Lost stored reference");
             const open = row => row.querySelector(".selection-controls button").click();
-            open(rows[0]); await until(()=>rows[0].querySelector(".multiple-available input[type=checkbox]"));
+            open(rows[0]); await until(()=>rows[0].querySelector(".picker-choice"));
             if (raw(rows[0]) !== unknown || rows[0].textContent.includes("Move up")) throw Error("Checklist mutated or has reorder controls");
-            const checkbox = rows[0].querySelector(".multiple-available input[type=checkbox]"); checkbox.click();
+            const checkbox = rows[0].querySelector(".picker-choice"); checkbox.focus(); checkbox.click();
+            if (rows[0].querySelector(".selection-popup").hidden || document.activeElement !== checkbox) throw Error("Add closed picker or stole focus");
+            if (checkbox.getAttribute("aria-disabled") !== "true" || !checkbox.textContent.includes("Added")) throw Error("Missing Added state");
+            const afterAdd = raw(rows[0]); checkbox.click(); if (raw(rows[0]) !== afterAdd) throw Error("Added row changed draft");
+            if (!rows[0].querySelector(".picker-source").title.includes("query:./child")) throw Error("Source expression missing from tooltip");
+            rows[0].querySelector('[aria-label="Close choices"]').click();
+            if (!rows[0].querySelector(".selection-popup").hidden || document.activeElement !== rows[0].querySelector(".selection-controls button")) throw Error("Close button focus failed");
+            open(rows[0]); await until(()=>rows[0].querySelector(".picker-choice"));
             if (!raw(rows[0]).startsWith(unknown+"|")) throw Error("Checklist dropped unavailable reference");
             const filter = rows[0].querySelector("input[type=search]"); filter.value="missing"; filter.dispatchEvent(new Event("input"));
             if (!raw(rows[0]).startsWith(unknown+"|")) throw Error("Filtering changed selection");
             rows[0].querySelector(".multiple-selected li button").click();
             if (raw(rows[0]).includes(unknown) || !raw(rows[0]).includes("55555555-5555-5555-5555-555555555555")) throw Error("Explicit removal of unavailable reference failed");
-            open(rows[1]); await until(()=>rows[1].querySelector(".multiple-choice button"));
-            rows[1].querySelector(".multiple-choice button").click();
+            open(rows[1]); await until(()=>rows[1].querySelector(".picker-choice"));
+            rows[1].querySelector(".picker-choice").click();
             if (!raw(rows[1]).startsWith(unknown+"|")) throw Error("Add lost unknown reference");
             const selected = rows[1].querySelector(".multiple-selected");
             selected.children[1].querySelector(".reorder-handle").dispatchEvent(new KeyboardEvent("keydown",{key:"ArrowUp",altKey:true,bubbles:true}));
@@ -229,14 +249,14 @@ export const itemEditorTests: readonly IntegrationTest[] = [{
             rows[1].querySelector(".multiple-selected li .selection-remove").click();
             if (raw(rows[1]) !== unknown) throw Error("Remove dropped wrong reference");
             for (const row of rows.slice(2)) {
-              open(row); await until(()=>row.querySelector(".multiple-available details"));
-              const branch=row.querySelector(".multiple-available details"); branch.open=true;
-              await until(()=>branch.querySelector("button")); branch.querySelector("button").click();
+              open(row); await until(()=>row.querySelector(".picker-children"));
+              row.querySelector(".picker-children").click();
+              await until(()=>row.querySelector(".picker-choice-name")?.textContent === "Choice label"); const branch=row.querySelector(".picker-choice"); branch.click();
               if (!raw(row).startsWith(unknown+"|") || !raw(row).replace(/[{}-]/g, "").includes("66666666666666666666666666666666")) throw Error("Lazy tree add failed");
               row.querySelector(".selection-controls button:last-child").click();
               if (raw(row) !== "" || row.querySelector("[data-field-id]").dataset.explicitClear !== "true") throw Error("Explicit clear failed");
               if (row === rows[3]) {
-                branch.querySelector("button").click();
+                branch.click();
                 if (raw(row) !== "66666666666666666666666666666666") throw Error("Re-add normalized an original token");
                 row.querySelector(".selection-controls button:last-child").click();
               }

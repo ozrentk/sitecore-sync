@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.41.0
+
+- Replace inline item choices with compact, viewport-bounded searchable popovers. Multi-selection uses Add items, persistent Added indicators and add-only result rows; single-selection closes after choosing.
+- Keep search fixed above scrolling results, shorten Source breadcrumbs, show relative paths only for duplicate labels, and retain full paths/Source expressions in tooltips. Add accessible close/keyboard navigation and explicit child-level tree navigation.
+- Preserve selected-list removal/reordering, draft Undo/Redo, Source validation and Save behavior.
+
 ## 0.40.0
 
 - Replace selected-list Move up/down buttons with same-field drag handles and Alt+Up/Alt+Down keyboard reordering for Multilist, Treelist and TreelistEx. Add insertion markers, edge scrolling, compact removal, full-label tooltips and accessible move announcements.

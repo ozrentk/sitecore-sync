@@ -7,7 +7,7 @@ const selectionRequests = new Map();
 let selectionRequestId = 0;
 let activePicker;
 let cancelDrag;
-document.addEventListener("keydown", event => { if (event.key === "Escape") cancelDrag?.(); });
+document.addEventListener("keydown", event => { if (event.key === "Escape") { cancelDrag?.(); activePicker?.close(); } });
 document.addEventListener("keydown", event => {
   if ((event.ctrlKey || event.metaKey) && !event.altKey && !event.target.matches("input, textarea") && ["z", "y"].includes(event.key.toLowerCase())) {
     event.preventDefault(); send(event.shiftKey || event.key.toLowerCase() === "y" ? "redo" : "undo");
@@ -16,7 +16,9 @@ document.addEventListener("keydown", event => {
 const savedSections = api.getState()?.sections;
 const sectionOpen = new Map(savedSections && typeof savedSections === "object" && !Array.isArray(savedSections)
   ? Object.entries(savedSections).filter(([, open]) => typeof open === "boolean") : []);
-document.addEventListener("pointerdown", event => { if (activePicker && !activePicker.row.contains(event.target)) activePicker.close(false); });
+document.addEventListener("pointerdown", event => { if (activePicker && !activePicker.popup.contains(event.target) && !activePicker.trigger.contains(event.target)) activePicker.close(!event.target.closest("button, input, textarea, select, a[href], [tabindex], summary")); });
+window.addEventListener("resize", () => activePicker?.position());
+document.addEventListener("scroll", event => { if (activePicker && !activePicker.popup.contains(event.target)) activePicker.position(); }, true);
 const send = (type, extra = {}) => api.postMessage({ type, revision, ...extra });
 for (const action of ["save", "revert", "reconcile", "locale"]) document.getElementById(action).addEventListener("click", () => send(action));
 window.addEventListener("message", event => {
@@ -197,124 +199,26 @@ function renderSelection(row, field) {
   label.dataset.selectionLabel = field.id; label.dataset.value = stored.value;
   label.setAttribute("role", "combobox"); label.setAttribute("aria-expanded", "false"); label.setAttribute("aria-haspopup", "dialog");
   setSelectionLabel(label, !stored.value ? "No selection" : field.selectionKind.includes("droplist") ? stored.value : "Loading selected item…");
-  const status = document.createElement("p"); status.className = "meta"; status.setAttribute("role", "status");
-  const content = document.createElement("div"); content.className = "selection-choices";
-  const popup = document.createElement("div"); popup.className = "selection-popup"; popup.hidden = true; popup.id = `${field.id}-choices`;
-  popup.setAttribute("role", "dialog"); popup.setAttribute("aria-label", `${field.label} choices`); popup.append(status, content);
-  label.setAttribute("aria-controls", popup.id);
-  const close = (focus = true) => {
-    popup.hidden = true; label.setAttribute("aria-expanded", "false");
-    selectionRequests.delete(field.id);
-    if (activePicker?.row === row) activePicker = undefined;
-    if (focus) label.focus();
-  };
-  row.addEventListener("keydown", event => { if (event.key === "Escape" && !popup.hidden) { event.preventDefault(); event.stopPropagation(); close(); } });
-  row.addEventListener("focusout", event => { if (event.relatedTarget && !row.contains(event.relatedTarget)) close(false); });
   const choose = (value, name, clear = false, path = "") => {
-    if (blocked) return;
-    stored.value = value; stored.dataset.explicitClear = String(clear);
-    label.dataset.value = value;
-    setSelectionLabel(label, name, path);
-    close();
+    if (blocked || !row.isConnected) return;
+    stored.value = value; stored.dataset.explicitClear = String(clear); label.dataset.value = value;
+    setSelectionLabel(label, name, path); picker.close();
     send("change", { id: field.id, input: value, clear });
     document.getElementById("status").textContent = "Unsaved changes";
   };
+  const picker = createChoicePicker(row, field, label, {
+    multiple: false, tree: field.selectionKind === "droptree",
+    chosen: choice => field.selectionKind.includes("droplist") ? stored.value === choice.value : stored.value.replace(/[{}-]/g, "").toLowerCase() === choice.itemId.replace(/[{}-]/g, "").toLowerCase(),
+    accept: choice => choose(choice.value, choice.displayName || choice.name, false, choice.path),
+    loaded: result => { if (stored.value === field.original && stored.dataset.explicitClear !== "true") setSelectionLabel(label, result.currentName ?? result.currentLabel, result.currentPath); },
+  });
   const clear = document.createElement("button"); clear.textContent = "Clear"; clear.disabled = blocked;
   clear.title = "Store an explicit empty value; does not reset to inherited or Standard Values";
   clear.addEventListener("click", () => choose("", "Explicit empty selection", true));
-  const request = (parent, receive) => {
-    if (blocked) return;
-    const previous = selectionRequests.get(field.id);
-    if (previous) previous.receive({ error: "Choice loading was superseded. Collapse and expand this branch to retry." });
-    const id = String(++selectionRequestId);
-    selectionRequests.set(field.id, { id, receive });
-    send("choices", { id: field.id, request: id, ...(parent ? { parent } : {}) });
-  };
-  const showTree = (container, page) => {
-    container.replaceChildren();
-    const list = document.createElement("ul"); list.className = "selection-tree";
-    for (const choice of page.choices) {
-      const item = document.createElement("li");
-      const select = document.createElement("button"); select.textContent = `Select ${choice.displayName || choice.name}`;
-      select.title = `${choice.path} · ${choice.value}`; select.disabled = blocked;
-      select.addEventListener("click", () => choose(choice.value, choice.displayName || choice.name, false, choice.path));
-      const path = document.createElement("span"); path.className = "meta"; path.textContent = choice.path;
-      item.append(select, path);
-      if (choice.hasChildren) {
-        const branch = document.createElement("details");
-        const heading = document.createElement("summary"); heading.textContent = `Children of ${choice.displayName || choice.name}`;
-        const nested = document.createElement("div"); branch.append(heading, nested);
-        branch.addEventListener("toggle", () => {
-          if (!branch.open || blocked) return;
-          nested.textContent = "Loading…";
-          request(choice.itemId, result => {
-            if (result.error) nested.textContent = result.error;
-            else showTree(nested, result.page);
-          });
-        });
-        item.append(branch);
-      }
-      list.append(item);
-    }
-    container.append(list);
-    if (!page.choices.length) container.textContent = "No accessible children.";
-  };
-  const showList = page => {
-    content.replaceChildren();
-    const search = document.createElement("input"); search.type = "search"; search.placeholder = "Filter by name or path";
-    search.setAttribute("aria-label", `Filter ${field.label} choices`); search.disabled = blocked;
-    const select = document.createElement("select"); select.size = 7; select.disabled = blocked;
-    select.setAttribute("aria-label", `${field.label} choices`);
-    const draw = () => {
-      select.replaceChildren();
-      const prompt = document.createElement("option"); prompt.value = ""; prompt.textContent = "Choose an item (current value stays unchanged)"; prompt.selected = true; prompt.disabled = true; select.append(prompt);
-      const groups = new Map();
-      for (const choice of page.choices.filter(c => `${c.name} ${c.displayName} ${c.path}`.toLowerCase().includes(search.value.toLowerCase()))) {
-        let parent = select;
-        if (choice.group) {
-          if (!groups.has(choice.group)) { const group = document.createElement("optgroup"); group.label = choice.group; groups.set(choice.group, group); select.append(group); }
-          parent = groups.get(choice.group);
-        }
-        const option = document.createElement("option"); option.value = choice.itemId;
-        option.textContent = `${choice.displayName || choice.name} · ${choice.path}${choice.disabled ? " · ambiguous name" : ""}`;
-        option.disabled = Boolean(choice.disabled); parent.append(option);
-      }
-    };
-    search.addEventListener("input", draw);
-    const accept = () => {
-      if (popup.hidden) return;
-      const choice = page.choices.find(c => c.itemId === select.value);
-      if (choice && !choice.disabled) choose(choice.value, choice.displayName || choice.name, false, choice.path);
-    };
-    select.addEventListener("change", accept);
-    select.addEventListener("click", accept);
-    select.addEventListener("keydown", event => { if (event.key === "Enter") { event.preventDefault(); accept(); } });
-    draw(); content.append(search, select);
-    if (!page.choices.length) status.textContent = "No accessible choices. The current value is preserved.";
-    search.focus();
-  };
-  const open = () => {
-    if (blocked) return;
-    if (!popup.hidden) { close(); return; }
-    activePicker?.close(false);
-    activePicker = { row, close };
-    popup.hidden = false; label.setAttribute("aria-expanded", "true");
-    status.textContent = "Loading choices…"; content.replaceChildren();
-    request(undefined, result => {
-      if (result.error) { status.textContent = result.error; return; }
-      status.textContent = `Source: ${result.page.root.path}`;
-      // Resolving the original value must not overwrite feedback for a new draft.
-      if (stored.value === field.original && stored.dataset.explicitClear !== "true") setSelectionLabel(label, result.currentName ?? result.currentLabel, result.currentPath);
-      if (field.selectionKind === "droptree") showTree(content, result.page);
-      else showList(result.page);
-    });
-  };
-  label.addEventListener("click", open);
-  label.addEventListener("keydown", event => {
-    if (["Enter", " ", "ArrowDown"].includes(event.key)) { event.preventDefault(); if (popup.hidden) open(); else content.querySelector("input, select, button, summary")?.focus(); }
-  });
+  label.addEventListener("click", picker.open);
+  label.addEventListener("keydown", event => { if (["Enter", " ", "ArrowDown"].includes(event.key)) { event.preventDefault(); if (picker.popup.hidden) picker.open(); else picker.search.focus(); } });
   const controls = document.createElement("div"); controls.className = "selection-controls"; controls.append(label, clear);
-  row.append(stored, controls, popup);
+  row.append(stored, controls, picker.popup);
 }
 send("ready");
 
@@ -330,7 +234,7 @@ function renderMultipleSelection(row, field) {
   const originalTokens = field.original ? field.original.split("|") : [];
   const controls = document.createElement("div"); controls.className = "selection-controls";
   const trigger = document.createElement("button"); trigger.id = field.id; trigger.disabled = blocked;
-  trigger.setAttribute("aria-expanded", "false"); trigger.textContent = "Choose items…";
+  trigger.setAttribute("aria-expanded", "false"); trigger.textContent = "Add items…";
   const clear = document.createElement("button"); clear.textContent = "Clear"; clear.disabled = blocked;
   controls.append(trigger, clear);
   const selected = document.createElement("ol"); selected.className = "multiple-selected"; selected.setAttribute("aria-label", `${field.label} selected items`);
@@ -362,12 +266,13 @@ function renderMultipleSelection(row, field) {
     const from = drag.index; const slot = slotAt(event.clientY); endDrag();
     move(from, slot > from ? slot - 1 : slot);
   });
-  const popup = document.createElement("div"); popup.className = "selection-popup"; popup.hidden = true; popup.id = `${field.id}-choices`;
-  trigger.setAttribute("aria-controls", popup.id);
-  const status = document.createElement("p"); status.setAttribute("role", "status");
-  const available = document.createElement("div"); available.className = "multiple-available";
-  popup.append(status, available);
-  let refreshChoices = () => {};
+  const picker = createChoicePicker(row, field, trigger, {
+    multiple: true, tree,
+    chosen: choice => values.some(value => norm(value) === norm(choice.itemId)),
+    limited: () => values.length >= 256,
+    accept: choice => add(choice),
+    loaded: result => { for (const choice of result.page.choices) names.set(norm(choice.itemId), {name:choice.displayName || choice.name,path:choice.path}); drawSelected(); },
+  });
   row.addEventListener("referenceResolved", event => {
     const label = event.target;
     if (label.dataset.selectionLabel === field.id) names.set(norm(label.dataset.value), {name:event.detail.text,path:event.detail.path});
@@ -375,15 +280,10 @@ function renderMultipleSelection(row, field) {
   const edit = (next, reorder = false, focusValue) => {
     if (blocked || !row.isConnected || next.join("|") === stored.value) return;
     const before = stored.value; endDrag();
-    const focusedChoice = document.activeElement?.dataset.choiceId;
     values = next; stored.value = values.join("|"); stored.dataset.explicitClear = String(!values.length);
     send(reorder ? "reorder" : "change", {id:field.id,input:stored.value,clear:!values.length,...(reorder ? {before,focusValue} : {})});
     document.getElementById("status").textContent = "Unsaved changes";
-    drawSelected(); refreshChoices();
-    if (focusedChoice) {
-      const replacement = [...available.querySelectorAll("[data-choice-id]")].find(control => control.dataset.choiceId === focusedChoice);
-      if (replacement && !replacement.disabled) replacement.focus(); else trigger.focus();
-    }
+    drawSelected(); picker.refresh();
   };
   const move = (from, to) => {
     if (checklist || !Number.isInteger(from) || !Number.isInteger(to) || from < 0 || to < 0 || from >= values.length || to >= values.length || from === to || blocked || !row.isConnected) return;
@@ -431,65 +331,119 @@ function renderMultipleSelection(row, field) {
     });
   };
   clear.addEventListener("click", () => edit([]));
-  const close = (focus = true) => { popup.hidden = true; trigger.setAttribute("aria-expanded", "false"); selectionRequests.delete(field.id); if (activePicker?.row === row) activePicker = undefined; if (focus) trigger.focus(); };
-  const request = (parent, receive) => {
-    if (blocked) return;
-    const previous = selectionRequests.get(field.id); previous?.receive({error:"Loading was superseded. Collapse and expand to retry."});
-    const id = String(++selectionRequestId); selectionRequests.set(field.id, {id,receive});
+  trigger.addEventListener("click", picker.open);
+  row.append(stored,controls,hint,selected,announcement,picker.popup); drawSelected();
+
+}
+function createChoicePicker(row, field, trigger, options) {
+  const popup = document.createElement("div"); popup.className = "selection-popup"; popup.hidden = true; popup.id = `${field.id}-choices`;
+  popup.setAttribute("role", "dialog"); popup.setAttribute("aria-label", `${field.label} choices`);
+  trigger.setAttribute("aria-controls", popup.id); trigger.setAttribute("aria-haspopup", "dialog");
+  const header = document.createElement("div"); header.className = "picker-header";
+  const back = document.createElement("button"); back.textContent = "‹"; back.title = "Back to parent"; back.setAttribute("aria-label", "Back to parent"); back.hidden = true;
+  const source = document.createElement("span"); source.className = "picker-source";
+  const dismiss = document.createElement("button"); dismiss.textContent = "×"; dismiss.title = "Close choices"; dismiss.setAttribute("aria-label", "Close choices");
+  header.append(back,source,dismiss);
+  const search = document.createElement("input"); search.type = "search"; search.className = "picker-search";
+  search.placeholder = options.tree ? "Filter this level" : "Search items"; search.setAttribute("aria-label", `Search ${field.label} choices`);
+  const status = document.createElement("p"); status.className = "picker-status meta"; status.setAttribute("role", "status");
+  const results = document.createElement("div"); results.className = "picker-results"; results.setAttribute("role", "list"); results.setAttribute("aria-label", `${field.label} choices`);
+  const scope = document.createElement("p"); scope.className = "picker-scope meta"; scope.textContent = "Current level only. Open children to browse."; scope.hidden = !options.tree;
+  popup.append(header,search,status,scope,results);
+  let page; let history = []; let controls = [];
+  const shortPath = path => { const parts = path.split("/").filter(Boolean); return `${parts.length > 2 ? "… › " : ""}${parts.slice(-2).join(" › ")}`; };
+  const position = () => {
+    if (popup.hidden || !trigger.isConnected) return;
+    const rect = trigger.getBoundingClientRect(); const width = document.documentElement.clientWidth; const height = window.innerHeight;
+    if (rect.bottom < 0 || rect.top > height) { close(false); return; }
+    const below = Math.max(0, height - rect.bottom - 12); const above = Math.max(0, rect.top - 12);
+    const useBelow = below >= 180 || below >= above; const room = Math.min(360, useBelow ? below : above);
+    popup.style.width = `${Math.min(480, Math.max(0, width - 16))}px`;
+    popup.style.maxHeight = `${room}px`;
+    popup.style.left = `${Math.max(8, Math.min(rect.left, width - Math.min(480, width - 16) - 8))}px`;
+    popup.style.top = useBelow ? `${rect.bottom + 4}px` : "auto";
+    popup.style.bottom = useBelow ? "auto" : `${height - rect.top + 4}px`;
+  };
+  const close = (focus = true) => {
+    popup.hidden = true; trigger.setAttribute("aria-expanded", "false"); selectionRequests.delete(field.id);
+    if (activePicker?.popup === popup) activePicker = undefined;
+    if (focus && trigger.isConnected && !trigger.disabled) trigger.focus();
+  };
+  const update = () => {
+    let added = 0;
+    for (const {button, badge, choice} of controls) {
+      const chosen = options.chosen(choice); if (chosen) added++;
+      badge.textContent = chosen ? (options.multiple ? "✓ Added" : "✓ Current") : choice.disabled ? "Unavailable" : "";
+      button.setAttribute("aria-pressed", String(chosen));
+      button.setAttribute("aria-disabled", String(blocked || Boolean(choice.disabled) || (options.multiple && (chosen || options.limited?.()))));
+    }
+    status.textContent = !page ? "Loading choices…" : !page.choices.length ? "No accessible choices at this level." : !controls.length ? "No matching choices at this level." : options.multiple && options.limited?.() ? "256 selections reached. Remove an item to add another." : options.multiple && added === controls.length ? "All shown items added." : "";
+    position();
+  };
+  const draw = () => {
+    results.replaceChildren(); controls = []; if (!page) return;
+    const counts = new Map(); for (const choice of page.choices) { const name = (choice.displayName || choice.name).toLowerCase(); counts.set(name, (counts.get(name) || 0) + 1); }
+    let group;
+    for (const choice of page.choices.filter(choice => `${choice.name} ${choice.displayName} ${choice.path}`.toLowerCase().includes(search.value.toLowerCase()))) {
+      if (choice.group && choice.group !== group) { group = choice.group; const heading = document.createElement("div"); heading.className = "picker-group"; heading.textContent = group.split(" · ")[0]; heading.title = group; results.append(heading); }
+      const entry = document.createElement("div"); entry.className = "picker-row"; entry.setAttribute("role", "listitem");
+      const button = document.createElement("button"); button.className = "picker-choice"; button.dataset.choiceId = choice.itemId.replace(/[{}-]/g, "").toLowerCase();
+      button.title = `${choice.path}${choice.disabled ? `\n${choice.disabled}` : ""}`;
+      const text = document.createElement("span"); text.className = "picker-choice-text";
+      const name = document.createElement("span"); name.className = "picker-choice-name"; name.textContent = choice.displayName || choice.name; text.append(name);
+      if (counts.get(name.textContent.toLowerCase()) > 1) {
+        const parent = choice.path.slice(0,choice.path.lastIndexOf("/"));
+        const relative = parent.toLowerCase().startsWith(`${page.root.path.toLowerCase()}/`) ? parent.slice(page.root.path.length + 1) : parent === page.root.path ? page.root.name : parent;
+        const sameParent = page.choices.filter(other => (other.displayName || other.name).toLowerCase() === name.textContent.toLowerCase() && other.path.slice(0,other.path.lastIndexOf("/")).toLowerCase() === parent.toLowerCase()).length > 1;
+        const detail = document.createElement("span"); detail.className = "picker-choice-path"; detail.textContent = `${relative || "Source"}${sameParent ? ` · ${choice.name}` : ""}`; text.append(detail);
+      }
+      const badge = document.createElement("span"); badge.className = "picker-choice-state"; button.append(text,badge); entry.append(button);
+      button.addEventListener("click", () => {
+        if (popup.hidden || blocked || !button.isConnected || button.getAttribute("aria-disabled") === "true") return;
+        options.accept(choice);
+        if (options.multiple) { update(); status.textContent = `Added ${choice.displayName || choice.name}.${controls.every(control => options.chosen(control.choice)) ? " All shown items added." : ""}`; }
+      });
+      controls.push({button,badge,choice});
+      if (options.tree && choice.hasChildren) {
+        const children = document.createElement("button"); children.className = "picker-children"; children.textContent = "›"; children.setAttribute("aria-label", `Open children of ${choice.displayName || choice.name}`); children.title = "Open children";
+        children.addEventListener("click", () => { if (blocked || popup.hidden || !children.isConnected) return; const previous = page; history.push(previous); load(choice.itemId); }); entry.append(children);
+      }
+      results.append(entry);
+    }
+    update();
+  };
+  const load = parent => {
+    page = undefined; controls = []; results.replaceChildren(); search.value = ""; status.textContent = "Loading choices…"; back.hidden = !history.length; search.focus(); position();
+    const id = String(++selectionRequestId);
+    selectionRequests.set(field.id, { id, receive: result => {
+      if (popup.hidden || !row.isConnected) return;
+      if (result.error) { status.textContent = result.error; position(); return; }
+      page = result.page; const path = page.parent?.path || page.root.path;
+      source.textContent = shortPath(path); source.title = `Source: ${field.selectionSource || page.root.path}\nCurrent level: ${path}`;
+      options.loaded?.(result); draw();
+    } });
     send("choices", {id:field.id,request:id,...(parent ? {parent} : {})});
   };
-  const choiceControl = choice => {
-    const entry = document.createElement("div"); entry.className = "multiple-choice";
-    const title = `${choice.displayName || choice.name} · ${choice.path}`;
-    names.set(norm(choice.itemId), {name:choice.displayName || choice.name,path:choice.path});
-    const chosen = values.some(value => norm(value) === norm(choice.itemId));
-    if (checklist) {
-      const label = document.createElement("label"); const box = document.createElement("input"); box.type = "checkbox"; box.checked = chosen; box.dataset.choiceId = norm(choice.itemId);
-      box.disabled = blocked || Boolean(choice.disabled) || (!chosen && values.length >= 256);
-      box.addEventListener("change", () => { if (box.checked) add(choice); else edit(values.filter(value => norm(value) !== norm(choice.itemId))); });
-      label.append(box, document.createTextNode(title)); entry.append(label);
-    } else {
-      const addButton = document.createElement("button"); addButton.textContent = chosen ? "Selected" : "Add";
-      addButton.disabled = blocked || chosen || Boolean(choice.disabled) || values.length >= 256;
-      addButton.dataset.choiceId = norm(choice.itemId);
-      addButton.addEventListener("click", () => add(choice));
-      const name = document.createElement("span"); name.textContent = title; entry.append(addButton, name);
-    }
-    return entry;
-  };
-  const showTree = (container, page) => {
-    container.replaceChildren();
-    if (!page.choices.length) { container.textContent = "No accessible children."; return; }
-    for (const choice of page.choices) {
-      const entry = choiceControl(choice); container.append(entry);
-      if (choice.hasChildren) {
-        const branch = document.createElement("details"); const summary = document.createElement("summary"); summary.textContent = `Children of ${choice.displayName || choice.name}`;
-        const nested = document.createElement("div"); nested.className = "selection-tree"; branch.append(summary, nested); entry.append(branch);
-        branch.addEventListener("toggle", () => { if (branch.open && !popup.hidden && !blocked) { nested.textContent = "Loading…"; request(choice.itemId, result => { if (result.error) nested.textContent = result.error; else { showTree(nested, result.page); drawSelected(); } }); } });
-      }
-    }
-  };
-  trigger.addEventListener("click", () => {
-    if (blocked) return;
+  const open = () => {
+    if (blocked || !row.isConnected) return;
     if (!popup.hidden) { close(); return; }
-    activePicker?.close(false); activePicker = {row,close}; popup.hidden = false; trigger.setAttribute("aria-expanded", "true");
-    available.replaceChildren(); status.textContent = "Loading choices…";
-    request(undefined, result => {
-      if (result.error) { status.textContent = result.error; return; }
-      status.textContent = `Source: ${result.page.root.path}`;
-      if (tree) {
-        showTree(available, result.page);
-        refreshChoices = () => { for (const button of available.querySelectorAll("[data-choice-id]")) { const chosen = values.some(value => norm(value) === button.dataset.choiceId); button.disabled = blocked || chosen || values.length >= 256; button.textContent = chosen ? "Selected" : "Add"; } };
-      } else {
-        const search = document.createElement("input"); search.type = "search"; search.placeholder = "Filter by name or path"; search.setAttribute("aria-label", `Filter ${field.label} choices`);
-        const list = document.createElement("div"); available.append(search,list);
-        const draw = () => { list.replaceChildren(); for (const choice of result.page.choices.filter(choice => `${choice.name} ${choice.displayName} ${choice.path}`.toLowerCase().includes(search.value.toLowerCase()))) list.append(choiceControl(choice)); if (!list.children.length) list.textContent = "No matching choices."; };
-        refreshChoices = draw; search.addEventListener("input", draw); draw(); search.focus();
-      }
-      drawSelected();
-    });
+    activePicker?.close(false); activePicker = {row,popup,trigger,close,position}; history = []; source.textContent = "Choices"; source.title = field.selectionSource || "";
+    trigger.scrollIntoView({block:"nearest"});
+    popup.hidden = false; trigger.setAttribute("aria-expanded", "true"); load();
+  };
+  back.addEventListener("click", () => { if (blocked || !history.length) return; selectionRequests.delete(field.id); page = history.pop(); back.hidden = !history.length; search.value = ""; source.textContent = shortPath(page.parent?.path || page.root.path); source.title = `Source: ${field.selectionSource || page.root.path}\nCurrent level: ${page.parent?.path || page.root.path}`; draw(); search.focus(); });
+  search.addEventListener("input", draw); dismiss.addEventListener("click", () => close());
+  popup.addEventListener("keydown", event => {
+    if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); close(); return; }
+    if (options.tree && !event.target.matches("input") && !event.altKey && !event.ctrlKey && !event.metaKey) {
+      if (event.key === "ArrowRight") { const child = event.target.closest(".picker-row")?.querySelector(".picker-children"); if (child) { event.preventDefault(); child.click(); return; } }
+      if (event.key === "ArrowLeft" && history.length) { event.preventDefault(); back.click(); return; }
+    }
+    if (!["ArrowDown", "ArrowUp"].includes(event.key) || event.altKey || event.ctrlKey || event.metaKey) return;
+    const buttons = [...results.querySelectorAll(".picker-choice")]; if (!buttons.length) return;
+    event.preventDefault(); const index = buttons.indexOf(document.activeElement?.closest(".picker-row")?.querySelector(".picker-choice")); const next = index < 0 ? (event.key === "ArrowDown" ? 0 : buttons.length - 1) : Math.max(0, Math.min(buttons.length - 1,index + (event.key === "ArrowDown" ? 1 : -1)));
+    buttons[next].focus(); buttons[next].scrollIntoView({block:"nearest"});
   });
-  row.addEventListener("keydown", event => { if (event.key === "Escape" && !popup.hidden) { event.preventDefault(); close(); } });
-  row.addEventListener("focusout", event => { if (event.relatedTarget && !row.contains(event.relatedTarget)) close(false); });
-  row.append(stored,controls,hint,selected,announcement,popup); drawSelected();
+  row.addEventListener("focusout", event => { if (!popup.hidden && event.relatedTarget && !row.contains(event.relatedTarget)) close(false); });
+  return {popup,search,open,close,refresh:update};
 }
