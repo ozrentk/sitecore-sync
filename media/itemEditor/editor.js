@@ -6,6 +6,9 @@ let frozenControls = [];
 const selectionRequests = new Map();
 let selectionRequestId = 0;
 let activePicker;
+const savedSections = api.getState()?.sections;
+const sectionOpen = new Map(savedSections && typeof savedSections === "object" && !Array.isArray(savedSections)
+  ? Object.entries(savedSections).filter(([, open]) => typeof open === "boolean") : []);
 document.addEventListener("pointerdown", event => { if (activePicker && !activePicker.row.contains(event.target)) activePicker.close(false); });
 const send = (type, extra = {}) => api.postMessage({ type, revision, ...extra });
 for (const action of ["save", "revert", "reconcile", "locale"]) document.getElementById(action).addEventListener("click", () => send(action));
@@ -61,15 +64,24 @@ window.addEventListener("message", event => {
   document.getElementById("reconcile").hidden = !state.pending;
   document.getElementById("reconcile").disabled = state.busy;
   const root = document.getElementById("fields"); root.replaceChildren();
-  let sectionName;
-  let section;
+  const groups = new Map();
   for (const field of state.fields) {
-    if (sectionName !== field.section) {
-      sectionName = field.section;
-      section = document.createElement("section");
-      const heading = document.createElement("h2"); heading.textContent = sectionName;
-      section.append(heading); root.append(section);
-    }
+    const key = field.sectionId ? `id:${field.sectionId}` : `name:${field.section}`;
+    if (!groups.has(key)) groups.set(key, { name: field.section, fields: [] });
+    groups.get(key).fields.push(field);
+  }
+  for (const [key, group] of groups) {
+    const section = document.createElement("details"); section.className = "field-section";
+    section.open = sectionOpen.has(key) ? sectionOpen.get(key) : !group.fields.every(field => field.isStandardTemplate);
+    const heading = document.createElement("summary"); heading.textContent = group.name;
+    section.append(heading); root.append(section);
+    section.addEventListener("toggle", () => {
+      if (!section.isConnected) return;
+      sectionOpen.set(key, section.open);
+      api.setState({ sections: Object.fromEntries(sectionOpen) });
+      if (!section.open && activePicker && section.contains(activePicker.row)) activePicker.close(false);
+    });
+    for (const field of group.fields) {
     const row = document.createElement("div"); row.className = "field";
     const label = document.createElement("label"); label.htmlFor = field.id; label.textContent = field.label;
     const meta = document.createElement("p"); meta.className = "meta";
@@ -111,6 +123,7 @@ window.addEventListener("message", event => {
       }
     }
     section.append(row);
+    }
   }
 });
 function selectionLabel(field) {

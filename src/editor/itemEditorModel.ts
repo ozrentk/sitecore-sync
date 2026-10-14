@@ -214,6 +214,7 @@ export function parseEditorState(text: string): EditorState {
     || typeof item.path !== "string" || !item.template || !isGuid(item.template.templateId) || typeof item.template.name !== "string"
     || !Array.isArray(item.fields) || item.fields.length > 4096 || !Array.isArray(item.availableVersions)) throw new EditorValidationError("Invalid editor item.");
   for (const field of item.fields) {
+    if (field?.sectionId !== undefined && (typeof field.sectionId !== "string" || field.sectionId.length > 256)) throw new EditorValidationError("Invalid field section identity.");
     if (field?.selectionSource !== undefined && (typeof field.selectionSource !== "string" || field.selectionSource.length > 8192)) throw new EditorValidationError("Invalid field Source metadata.");
     if (!field || !isGuid(field.fieldId) || [field.name, field.label, field.value, field.type, field.typeKey, field.sectionName].some(v => typeof v !== "string")
       || !["SHARED", "UNVERSIONED", "VERSIONED"].includes(field.scope)
