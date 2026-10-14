@@ -505,6 +505,8 @@ Save requires explicit native confirmation (also for autosave), rereads the pinn
 
 Item-editor failures expose the failed operation stage and safe error categories without raw server text. Durable state uses a `.xmitem.state` sidecar so journal writes do not replace the open custom-document resource. Existing single-file journals remain readable; unresolved durable intent takes precedence over older VS Code backups.
 
+Every item-editor field, including read-only fields, has a hover/click/focus information icon containing its internal name, type, scope, value source and stored value. Reference paths appear there when resolved. Stored values describe the loaded snapshot until Save or reload; drafts remain in the controls. Long values scroll within the popover. Read-only reasons remain visible beside the field.
+
 ## Item editor Stage B1 — single-selection controls
 
 B1 extends the existing pinned custom document, draft/journal, explicit Save, conflict/readback and no-retry pipeline with Droplist, Droplink, Grouped Droplist, Grouped Droplink and Droptree. Droplists store names; link/tree variants store one canonical braced GUID on explicit selection. Original representations remain intact when untouched. Searchable native single-select lists expose groups; the keyboard-accessible tree loads a branch on expansion. Original raw selections remain visible when missing, inaccessible, ambiguous or outside the current Source. Opening/loading/filtering creates no draft; duplicate names cannot be newly selected in name-based controls.

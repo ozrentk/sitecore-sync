@@ -314,12 +314,20 @@ export const itemEditorTests: readonly IntegrationTest[] = [{
         if (document.querySelectorAll("input").length !== 6 || document.querySelectorAll("textarea").length !== 1) throw Error("Missing controls");
         if (document.querySelector("img") || !document.body.textContent.includes("visual and HTML")) throw Error("Unsafe or editable Rich Text");
         if (!document.body.textContent.includes("UTC (no local-time conversion)")) throw Error("Missing explicit timezone");
+        for (const row of document.querySelectorAll(".field")) {
+          const info = row.querySelector(".field-info-content");
+          if (!info || getComputedStyle(info).display !== "none") throw Error("Missing collapsed field information");
+          row.querySelector(".field-info-button").click();
+          if (getComputedStyle(info).display === "none" || !info.textContent.includes("Stored value:")) throw Error("Missing information");
+          row.querySelector(".field-info-button").dispatchEvent(new KeyboardEvent("keydown", {key:"Escape", bubbles:true}));
+          if (getComputedStyle(info).display !== "none") throw Error("Escape must dismiss information");
+        }
         const checkbox = document.querySelector('input[type="checkbox"]');
-        if (checkbox.parentElement.querySelector("button")) throw Error("Checkbox must not have a Clear button");
+        if ([...checkbox.parentElement.querySelectorAll("button")].some(b => b.textContent === "Clear")) throw Error("Checkbox must not have a Clear button");
         checkbox.checked = true; checkbox.dispatchEvent(new Event("input"));
         checkbox.checked = false; checkbox.dispatchEvent(new Event("input"));
         const text = document.querySelector('input[type="text"]'); text.value = "  draft  "; text.dispatchEvent(new Event("input"));
-        text.parentElement.querySelector("button").click();
+        [...text.parentElement.querySelectorAll("button")].find(b => b.textContent === "Clear").click();
         api.postMessage({ type: "smokeResult", ok: true });
       } catch (error) { api.postMessage({ type: "smokeResult", error: String(error) }); } });`;
       const scriptPath = join(directory, "smoke.js"); await writeFile(scriptPath, script);

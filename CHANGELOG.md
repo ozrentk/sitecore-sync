@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.37.4
+
+- Extend the information popover to every editable and read-only field, with metadata and stored values. Reference paths remain in the popover.
+- Preserve whitespace and allow scrolling for long stored values.
+
 ## 0.37.3
 
 - Compact selection fields into a name-only textbox with Clear on the right; clicking or keyboard-opening the textbox loads choices.

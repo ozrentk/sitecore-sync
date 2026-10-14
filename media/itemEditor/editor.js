@@ -75,14 +75,14 @@ window.addEventListener("message", event => {
     const meta = document.createElement("p"); meta.className = "meta";
     meta.textContent = `${field.name} · ${field.type} · ${field.scope.toLowerCase()} · ${field.source}${field.kind === "datetime" ? " · UTC (no local-time conversion)" : ""}`;
     row.append(label);
-    if (field.kind !== "selection" || field.reason) row.append(meta);
+    renderFieldInfo(row, field, meta);
     if (field.reason) {
       const reason = document.createElement("p"); reason.className = "meta"; reason.textContent = `Read-only: ${field.reason}`;
       const value = document.createElement("pre"); value.textContent = field.raw;
       if (field.selectionKind) row.append(selectionLabel(field));
       row.append(reason, value);
     } else if (field.kind === "selection") {
-      renderSelection(row, field, meta);
+      renderSelection(row, field);
     } else {
       const control = document.createElement(field.kind === "multiline" ? "textarea" : "input"); control.id = field.id;
       if (field.kind !== "multiline") control.type = field.kind === "checkbox" ? "checkbox" : field.kind === "date" ? "date" : field.kind === "datetime" ? "datetime-local" : "text";
@@ -101,19 +101,20 @@ window.addEventListener("message", event => {
         document.getElementById("status").textContent = "Unsaved changes";
       };
       control.addEventListener("input", () => changed(false));
-      row.append(control);
+      const controls = document.createElement("div"); controls.className = "field-controls";
+      controls.append(control); row.append(controls);
       if (field.kind !== "checkbox") {
         const clear = document.createElement("button"); clear.textContent = "Clear"; clear.disabled = blocked;
         clear.title = "Store an explicit empty value; does not reset to inherited or Standard Values";
         clear.addEventListener("click", () => { control.value = ""; changed(true); });
-        row.append(clear);
+        controls.append(clear);
       }
     }
     section.append(row);
   }
 });
 function selectionLabel(field) {
-  const label = document.createElement("p"); label.className = "selection-current"; label.setAttribute("role", "status");
+  const label = document.createElement("p"); label.className = "selection-current"; label.id = field.id; label.setAttribute("role", "status");
   label.dataset.selectionLabel = field.id;
   label.dataset.value = field.clear ? "" : field.input;
   label.textContent = !label.dataset.value ? "No selection" : field.selectionKind.includes("droplist") ? label.dataset.value : "Loading selected item…";
@@ -124,31 +125,38 @@ function setSelectionLabel(control, text, path = "") {
     control.value = text;
     const detail = document.getElementById(`${control.id}-path`);
     if (detail) { detail.textContent = path; detail.hidden = !path; }
-  } else control.textContent = path ? `${text} · ${path}` : text;
+  } else {
+    control.textContent = text;
+    const detail = document.getElementById(`${control.id}-path`);
+    if (detail) { detail.textContent = path; detail.hidden = !path; }
+  }
 }
-function renderSelection(row, field, meta) {
-  // The canonical draft is separate from the choice list: loading/filtering never
-  // changes it, including references absent from the current source.
-  const stored = document.createElement("input"); stored.type = "hidden";
-  stored.dataset.fieldId = field.id; stored.dataset.original = field.original;
-  stored.dataset.explicitClear = String(field.clear); stored.value = field.clear ? "" : field.input;
-  const current = document.createElement("p"); current.className = "meta";
-  row.classList.add("selection-field");
-  const label = document.createElement("input"); label.type = "text"; label.readOnly = true; label.id = field.id;
-  label.className = "selection-trigger"; label.disabled = blocked;
-  label.dataset.selectionLabel = field.id; label.dataset.value = stored.value;
-  label.setAttribute("role", "combobox"); label.setAttribute("aria-expanded", "false"); label.setAttribute("aria-haspopup", "dialog");
-  setSelectionLabel(label, !stored.value ? "No selection" : field.selectionKind.includes("droplist") ? stored.value : "Loading selected item…");
+function renderFieldInfo(row, field, meta) {
+  const current = document.createElement("p"); current.className = "meta field-stored-value";
+  current.textContent = `Stored value: ${field.raw || "(empty)"}`;
   const info = document.createElement("div"); info.className = "field-info";
   const infoButton = document.createElement("button"); infoButton.type = "button"; infoButton.textContent = "ⓘ";
   infoButton.className = "field-info-button"; infoButton.setAttribute("aria-label", `${field.label} information`); infoButton.setAttribute("aria-expanded", "false");
   const infoContent = document.createElement("div"); infoContent.className = "field-info-content"; infoContent.id = `${field.id}-info`;
   infoButton.setAttribute("aria-controls", infoContent.id); infoButton.setAttribute("aria-describedby", infoContent.id);
   const selectedPath = document.createElement("p"); selectedPath.className = "meta"; selectedPath.id = `${field.id}-path`; selectedPath.hidden = true;
-  infoContent.append(meta, current, selectedPath); info.append(infoButton, infoContent);
+  infoContent.append(meta, current); if (field.selectionKind) infoContent.append(selectedPath); info.append(infoButton, infoContent);
   infoButton.addEventListener("click", () => { const open = info.dataset.open !== "true"; info.dataset.open = String(open); infoButton.setAttribute("aria-expanded", String(open)); });
-  info.addEventListener("keydown", event => { if (event.key === "Escape") { info.dataset.open = "false"; infoButton.setAttribute("aria-expanded", "false"); label.focus(); } });
+  info.addEventListener("keydown", event => { if (event.key === "Escape") { info.dataset.open = "false"; infoButton.setAttribute("aria-expanded", "false"); const control = document.getElementById(field.id); if (control?.matches("input, textarea, select")) control.focus(); else { row.tabIndex = -1; row.focus(); } } });
   row.querySelector("label").after(info);
+}
+function renderSelection(row, field) {
+  // The canonical draft is separate from the choice list: loading/filtering never
+  // changes it, including references absent from the current source.
+  const stored = document.createElement("input"); stored.type = "hidden";
+  stored.dataset.fieldId = field.id; stored.dataset.original = field.original;
+  stored.dataset.explicitClear = String(field.clear); stored.value = field.clear ? "" : field.input;
+  row.classList.add("selection-field");
+  const label = document.createElement("input"); label.type = "text"; label.readOnly = true; label.id = field.id;
+  label.className = "selection-trigger"; label.disabled = blocked;
+  label.dataset.selectionLabel = field.id; label.dataset.value = stored.value;
+  label.setAttribute("role", "combobox"); label.setAttribute("aria-expanded", "false"); label.setAttribute("aria-haspopup", "dialog");
+  setSelectionLabel(label, !stored.value ? "No selection" : field.selectionKind.includes("droplist") ? stored.value : "Loading selected item…");
   const status = document.createElement("p"); status.className = "meta"; status.setAttribute("role", "status");
   const content = document.createElement("div"); content.className = "selection-choices";
   const popup = document.createElement("div"); popup.className = "selection-popup"; popup.hidden = true; popup.id = `${field.id}-choices`;
@@ -165,14 +173,12 @@ function renderSelection(row, field, meta) {
   const choose = (value, name, clear = false, path = "") => {
     if (blocked) return;
     stored.value = value; stored.dataset.explicitClear = String(clear);
-    current.textContent = `Stored value: ${value || "(empty)"}`;
     label.dataset.value = value;
     setSelectionLabel(label, name, path);
     close();
     send("change", { id: field.id, input: value, clear });
     document.getElementById("status").textContent = "Unsaved changes";
   };
-  current.textContent = `Stored value: ${stored.value || "(empty)"}`;
   const clear = document.createElement("button"); clear.textContent = "Clear"; clear.disabled = blocked;
   clear.title = "Store an explicit empty value; does not reset to inherited or Standard Values";
   clear.addEventListener("click", () => choose("", "Explicit empty selection", true));
