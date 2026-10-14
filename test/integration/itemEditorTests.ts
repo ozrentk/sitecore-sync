@@ -26,7 +26,7 @@ export const itemEditorTests: readonly IntegrationTest[] = [{
     const extension = vscode.extensions.getExtension("OzrenTK.sitecore-xm-cloud-sync")!;
     const root = { itemId: "44444444444444444444444444444444", name: "Root", displayName: "Root", path: "/sitecore/content/Root", hasChildren: true };
     const group = { ...root, itemId: "55555555555555555555555555555555", name: "Group", displayName: "Group", path: root.path + "/Group" };
-    const leaf = { ...root, itemId: "66666666666666666666666666666666", name: "Choice", displayName: "Choice label", path: group.path + "/Choice", hasChildren: false };
+    const leaf = { ...root, itemId: "66666666666666666666666666666666", name: "Choice {Base}", displayName: "Choice label", path: group.path + "/Choice {Base}", hasChildren: false };
     const provider = new ItemEditorProvider({ globalStorageUri: vscode.Uri.file(directory), extensionUri: extension.extensionUri } as vscode.ExtensionContext,
       { get: () => ({ id: "test", name: "Test", serverUrl: "https://example.test" }), getClientSecret: async () => "secret" } as unknown as ConnectionStore,
       { loadSelectionItem: async (_c: unknown, _s: string, locator: { itemId?: string }) => locator.itemId === group.itemId ? group : root,
@@ -254,6 +254,10 @@ export const itemEditorTests: readonly IntegrationTest[] = [{
         if (document.querySelectorAll("input").length !== 6 || document.querySelectorAll("textarea").length !== 1) throw Error("Missing controls");
         if (document.querySelector("img") || !document.body.textContent.includes("visual and HTML")) throw Error("Unsafe or editable Rich Text");
         if (!document.body.textContent.includes("UTC (no local-time conversion)")) throw Error("Missing explicit timezone");
+        const checkbox = document.querySelector('input[type="checkbox"]');
+        if (checkbox.parentElement.querySelector("button")) throw Error("Checkbox must not have a Clear button");
+        checkbox.checked = true; checkbox.dispatchEvent(new Event("input"));
+        checkbox.checked = false; checkbox.dispatchEvent(new Event("input"));
         const text = document.querySelector('input[type="text"]'); text.value = "  draft  "; text.dispatchEvent(new Event("input"));
         text.parentElement.querySelector("button").click();
         api.postMessage({ type: "smokeResult", ok: true });
