@@ -18,3 +18,10 @@ select { font:inherit; color:var(--vscode-input-foreground); background:var(--vs
 .field-info-button { padding:0 4px; margin:0; background:transparent; color:var(--vscode-descriptionForeground); }
 .field-info-content { display:none; position:absolute; z-index:3; top:100%; left:0; min-width:280px; width:max-content; max-width:min(600px,70vw); padding:10px; background:var(--vscode-editorHoverWidget-background, var(--vscode-editor-background)); border:1px solid var(--vscode-editorHoverWidget-border, var(--vscode-panel-border)); box-shadow:0 3px 8px var(--vscode-widget-shadow); overflow-wrap:anywhere; }
 .field-info:hover .field-info-content, .field-info:focus-within .field-info-content, .field-info[data-open=true] .field-info-content { display:block; }
+
+.field-info-content { max-height:300px; overflow:auto; }
+.field-stored-value { white-space:pre-wrap; }
+
+.field-controls { display:flex; align-items:flex-start; gap:6px; margin-top:6px; }
+.field-controls input:not([type=checkbox]), .field-controls textarea { flex:1; min-width:0; }
+.field-controls button { flex:none; margin:0; }
