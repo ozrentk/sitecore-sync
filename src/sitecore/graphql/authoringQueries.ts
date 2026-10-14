@@ -223,7 +223,7 @@ export const selectionTreeQuery = gql`
     item(where: $where) {
       itemId name displayName path hasChildren language { name }
       children(first: $pageSize, after: $after) {
-        nodes { itemId name displayName path hasChildren language { name } }
+        nodes { itemId name displayName path hasChildren language { name } template { templateId } }
         pageInfo { hasNextPage endCursor }
       }
     }

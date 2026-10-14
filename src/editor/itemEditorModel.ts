@@ -78,9 +78,9 @@ export function readOnlyReason(item: AuthoringItemDetails, field: AuthoringItemF
     : "This field type is read-only in Stage A.";
   if (kind === "multiselection") {
     try { parseMultipleSelection(field.value); } catch (error) { return (error as Error).message; }
-    return selectionSourceReason(field.selectionSource);
+    return selectionSourceReason(field.selectionSource, selectionKind(field));
   }
-  if (kind === "selection") return selectionSourceReason(field.selectionSource);
+  if (kind === "selection") return selectionSourceReason(field.selectionSource, selectionKind(field));
   if (kind === "checkbox" && !["", "0", "1"].includes(field.value)) return "Unrecognized stored checkbox representation.";
   if ((kind === "date" || kind === "datetime") && dateInput(field.value, kind) === undefined) return "Unrecognized or timezone-ambiguous stored date. The original value is preserved.";
   if (kind === "text" && /[\r\n]/u.test(field.value)) return "Stored single-line text contains line breaks; original value is preserved.";

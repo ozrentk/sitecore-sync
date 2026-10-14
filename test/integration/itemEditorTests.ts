@@ -116,7 +116,7 @@ export const itemEditorTests: readonly IntegrationTest[] = [{
     const directory = await mkdtemp(join(tmpdir(), "xm-selection-webview-"));
     const extension = vscode.extensions.getExtension("OzrenTK.sitecore-xm-cloud-sync")!;
     const root = { itemId: "44444444444444444444444444444444", name: "Root", displayName: "Root", path: "/sitecore/content/Root", hasChildren: true };
-    const group = { ...root, itemId: "55555555555555555555555555555555", name: "Group", displayName: "Group", path: root.path + "/Group" };
+    const group = { ...root, itemId: "55555555555555555555555555555555", name: "Group", displayName: "Group", path: root.path + "/Group", templateId: "f8fa08624c8b4aa19433a9b409dfeb5e" };
     const leaf = { ...root, itemId: "66666666666666666666666666666666", name: "Choice {Base}", displayName: "Choice label", path: group.path + "/Choice {Base}", hasChildren: false };
     const provider = new ItemEditorProvider({ globalStorageUri: vscode.Uri.file(directory), extensionUri: extension.extensionUri } as vscode.ExtensionContext,
       { get: () => ({ id: "test", name: "Test", serverUrl: "https://example.test" }), getClientSecret: async () => "secret" } as unknown as ConnectionStore,
@@ -125,8 +125,9 @@ export const itemEditorTests: readonly IntegrationTest[] = [{
     const panel = vscode.window.createWebviewPanel("selectionSmoke", "Selection smoke", vscode.ViewColumn.Active, { enableScripts: true });
     let doc: ItemDocument | undefined; let listener: vscode.Disposable | undefined; let timer: ReturnType<typeof setTimeout> | undefined;
     try {
-      const state = fixture();
-      const fields = ["Checklist", "Multilist", "Treelist", "TreelistEx"].map((type, index) => ({ ...state.base.fields[0], fieldId: (index + 10).toString(16).padStart(32, "0"), name: `Select${index}`, label: type, type, value: index === 3 ? "77777777777777777777777777777777|" + leaf.itemId : "77777777777777777777777777777777", selectionSource: root.path }));
+      const initial = fixture();
+      const state = { ...initial, target: { ...initial.target, itemId: root.itemId }, base: { ...initial.base, ...root } };
+      const fields = ["Checklist", "Multilist", "Treelist", "TreelistEx"].map((type, index) => ({ ...state.base.fields[0], fieldId: (index + 10).toString(16).padStart(32, "0"), name: `Select${index}`, label: type, type, value: index === 3 ? "77777777777777777777777777777777|" + leaf.itemId : "77777777777777777777777777777777", selectionSource: index < 2 ? "query:./child::*[@@templateid= '{F8FA0862-4C8B-4AA1-9433-A9B409DFEB5E}']" : root.path }));
       await vscode.workspace.fs.createDirectory(provider.directory);
       const uri = vscode.Uri.joinPath(provider.directory, `${editorKey(state.target)}.xmitem`);
       await vscode.workspace.fs.writeFile(uri, Buffer.from(JSON.stringify({ ...state, base: { ...state.base, fields } })));
@@ -260,7 +261,7 @@ export const itemEditorTests: readonly IntegrationTest[] = [{
     } finally { doc?.dispose(); provider.dispose(); await rm(directory, { recursive: true, force: true }); }
   },
 }, {
-  name: "multiple-selection requests reject superseded results and abort on disposal",
+  name: "child query requests use the pinned editor context, reject superseded results and abort on disposal",
   async execute(): Promise<void> {
     const directory = await mkdtemp(join(tmpdir(), "xm-selection-host-"));
     const root = { itemId: "44444444444444444444444444444444", name: "Root", displayName: "Root", path: "/sitecore/content/Root", hasChildren: true };
@@ -268,11 +269,11 @@ export const itemEditorTests: readonly IntegrationTest[] = [{
     const signals: AbortSignal[] = []; const posted: Record<string, unknown>[] = [];
     const provider = new ItemEditorProvider({ globalStorageUri: vscode.Uri.file(directory) } as vscode.ExtensionContext,
       { get: () => ({ id: "test", serverUrl: "https://example.test" }), getClientSecret: async () => "secret" } as unknown as ConnectionStore,
-      { loadSelectionItem: async (_c: unknown, _s: string, _l: unknown, _lang: string, signal: AbortSignal) => { signals.push(signal); calls++; return calls === 1 ? new Promise<typeof root>(resolve => { finish = resolve; }) : root; },
+      { loadSelectionItem: async (_c: unknown, _s: string, locator: unknown, language: string, signal: AbortSignal) => { deepStrictEqual(locator, { itemId: root.itemId }); strictEqual(language, "en-AU"); signals.push(signal); calls++; return calls === 1 ? new Promise<typeof root>(resolve => { finish = resolve; }) : root; },
         loadTreeLevel: async () => ({ item: root, children: [] }) } as unknown as AuthoringContentClient);
     let doc: ItemDocument | undefined;
     try {
-      const initial = fixture(); const state = { ...initial, base: { ...initial.base, fields: [{ ...initial.base.fields[0], type: "Multilist", value: "", selectionSource: root.path }] } };
+      const initial = fixture(); const state = { ...initial, target: { ...initial.target, itemId: root.itemId }, base: { ...initial.base, ...root, fields: [{ ...initial.base.fields[0], type: "Multilist", value: "", selectionSource: "query:./child::*[@@templateid= '{F8FA0862-4C8B-4AA1-9433-A9B409DFEB5E}']" }] } };
       await vscode.workspace.fs.createDirectory(provider.directory);
       const uri = vscode.Uri.joinPath(provider.directory, `${editorKey(state.target)}.xmitem`);
       await vscode.workspace.fs.writeFile(uri, Buffer.from(JSON.stringify(state)));

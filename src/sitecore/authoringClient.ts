@@ -113,6 +113,7 @@ interface SiteQueryResult {
 }
 
 interface RawAuthoringTreeItem {
+  readonly template?: { readonly templateId?: unknown } | null;
   readonly itemId?: unknown;
   readonly name?: unknown;
   readonly displayName?: unknown;
@@ -252,6 +253,7 @@ interface DeleteItemMutationResponse {
 }
 
 export interface AuthoringTreeItem {
+  readonly templateId?: string;
   readonly itemId: string;
   readonly name: string;
   readonly displayName: string;
@@ -1882,6 +1884,7 @@ function parseTreeItem(value: RawAuthoringTreeItem): AuthoringTreeItem {
     displayName: typeof value.displayName === "string" ? value.displayName : value.name,
     path: value.path,
     hasChildren: value.hasChildren === true,
+    ...(typeof value.template?.templateId === "string" ? { templateId: value.template.templateId } : {}),
   };
 }
 

@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.39.0
+
+- Support bounded relative immediate-child queries with one exact template-ID filter for Droplist, Droplink, Checklist and Multilist, including the Hotspots Source form.
+- Resolve choices from the pinned edited item and validate fresh Source membership before saving; preserve retained unavailable references. Other query forms and grouped/tree query Sources remain read-only.
+
 ## 0.38.0
 
 - Add Checklist, Multilist, Treelist and TreelistEx editing through the existing draft, Save/Revert and recovery pipeline.

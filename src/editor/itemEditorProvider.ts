@@ -176,7 +176,7 @@ export class ItemEditorProvider implements vscode.CustomEditorProvider<ItemDocum
       if (!connection || new URL(connection.serverUrl).origin !== doc.state.target.serverUrl) throw new Error("Connection target changed.");
       const secret = await this.connections.getClientSecret(connection.id);
       if (!secret) throw new Error("Missing credentials.");
-      const io = selectionIO(this.client, connection, secret, doc.state.target.language, signal);
+      const io = selectionIO(this.client, connection, secret, doc.state.target.language, signal, doc.state.target.itemId);
       const page = await loadSelectionPage(field, io, message.parent as string | undefined);
       let currentLabel = field.value ? "Unresolved or outside allowed Source (original value preserved)" : "No selection";
       const current = page.choices.find(choice => selectionKind(field)!.includes("droplist") ? choice.name === field.value : normalizeId(choice.itemId) === normalizeId(field.value));
@@ -336,7 +336,7 @@ export class ItemEditorProvider implements vscode.CustomEditorProvider<ItemDocum
       validateSelections: async (item, changes) => {
         doc.stage = "Selection source validation";
         const { connection, secret } = await credentials();
-        const io = selectionIO(this.client, connection, secret, doc.state.target.language, AbortSignal.any([signal, AbortSignal.timeout(30_000)]));
+        const io = selectionIO(this.client, connection, secret, doc.state.target.language, AbortSignal.any([signal, AbortSignal.timeout(30_000)]), doc.state.target.itemId);
         for (const change of changes) {
           const field = item.fields.find(f => normalizeId(f.fieldId) === change.fieldId)!;
           if (isMultipleSelection(selectionKind(field))) await validateMultipleSelection(field, change.value, io);
