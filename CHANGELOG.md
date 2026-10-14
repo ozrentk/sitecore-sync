@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.37.7
+
+- Merge inherited template sections with the same name into one editor group, preserving field order and prior expansion choices.
+- Resolve editor headings from template-field Title metadata instead of Authoring value labels such as “standard value”; keep internal names in the information box.
+
 ## 0.37.6
 
 - Fix editor section ordering: equal section sort orders now use section names before field-level ordering, so fields cannot pull their section ahead of another group.

@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import { deepStrictEqual } from "node:assert/strict";
-import { compareEditorFields } from "../../src/editor/fieldOrder";
+import { compareEditorFields, orderEditorFields } from "../../src/editor/fieldOrder";
 import type { AuthoringItemField } from "../../src/sitecore/authoringClient";
 
 const field = (sectionName: string, sectionSortOrder: number, sortOrder: number, name: string): AuthoringItemField => ({
@@ -22,4 +22,17 @@ test("explicit section order wins over names; fields retain their own order with
 test("missing section names and equal metadata retain stable order", () => {
   const fields = [field("", 0, 0, "a"), field("", 0, 0, "A"), field("Content", 0, 0, "Earlier")];
   deepStrictEqual(fields.sort(compareEditorFields).map(f => f.name), ["a", "A", "Earlier"]);
+});
+
+test("inherited sections merge by name and sort fields independently of their section definitions", () => {
+  const fields = [
+    { ...field("Image Data", 200, 10, "FirstImage"), sectionId: "one" },
+    { ...field("Image Data", 0, 100, "LastImage"), sectionId: "two" },
+    field("Content Data", 0, 200, "Content"),
+    field("Text Block Data", -100, 100, "Text"),
+    { ...field("Image Data", 300, 50, "MiddleImage"), sectionId: "three" },
+  ];
+  deepStrictEqual(orderEditorFields(fields).map(f => f.name), ["Text", "Content", "FirstImage", "MiddleImage", "LastImage"]);
+  deepStrictEqual(fields.map(f => f.name), ["FirstImage", "LastImage", "Content", "Text", "MiddleImage"]);
+  deepStrictEqual(orderEditorFields([]), []);
 });

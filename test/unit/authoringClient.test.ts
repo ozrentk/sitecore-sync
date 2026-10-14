@@ -675,3 +675,24 @@ test("selection queries preserve locale and enforce paging limits without return
   strictEqual((await new AuthoringContentClient(noOpLogger, good).loadSelectionItem(testConnection, "secret", { path: root.path }, "en-AU", signal)).itemId, "root-id");
   deepStrictEqual((requestBody(good, 1).variables as { where: unknown }).where, { database: "master", path: root.path, language: "en-AU" });
 });
+
+test("field titles prefer localized Title then English, never a value label", async () => {
+  const item = (itemId: string, value: string) => ({ itemId, path: "/sitecore/templates/Test/Data/Field", title: { value } });
+  const runtime = new QueuedHttpRuntime([tokenResponse(), jsonResponse({ data: {
+    local0: item("one", "Localized title"), english0: item("one", "English title"),
+    local1: item("two", ""), english1: item("two", "Muted"), local2: null, english2: null,
+  } })]);
+  const titles = await new AuthoringContentClient(noOpLogger, runtime).loadFieldTitles(testConnection, "secret", ["one", "two", "three"], "en-AU", signal);
+  deepStrictEqual([...titles], [["one", "Localized title"], ["two", "Muted"]]);
+  const request = requestBody(runtime, 1);
+  match(String(request.query), /field\(name: "Title"\)/u);
+  strictEqual((request.variables as Record<string, { language: string }>).local0.language, "en-AU");
+  strictEqual((request.variables as Record<string, { language: string }>).english0.language, "en");
+});
+
+test("field title reads reject unrelated identities and oversized batches", async () => {
+  const runtime = new QueuedHttpRuntime([tokenResponse(), jsonResponse({ data: { local0: { itemId: "wrong", path: "/sitecore/templates/Test", title: { value: "Wrong" } } } })]);
+  const client = new AuthoringContentClient(noOpLogger, runtime);
+  await rejects(client.loadFieldTitles(testConnection, "secret", ["one"], "en", signal), /Invalid field title identity/u);
+  await rejects(client.loadFieldTitles(testConnection, "secret", Array(33).fill("one"), "en", signal), /Too many/u);
+});

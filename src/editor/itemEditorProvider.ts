@@ -1,4 +1,4 @@
-import { compareEditorFields } from "./fieldOrder";
+import { orderEditorFields } from "./fieldOrder";
 import { loadSelectionMetadata, selectionIO } from "./selectionClient";
 import { loadSelectionPage, selectionKind, selectionValue, validateSelection } from "./singleSelection";
 import { editorFailure } from "./editorFailure";
@@ -204,8 +204,8 @@ export class ItemEditorProvider implements vscode.CustomEditorProvider<ItemDocum
       connection: this.connections.get(doc.state.target.connectionId)?.name ?? "Unavailable connection", target: doc.state.target,
       item: { name: doc.state.base.displayName || doc.state.base.name, path: doc.state.base.path },
       error: doc.error,
-      fields: [...doc.state.base.fields].sort(compareEditorFields).map(field => ({
-        id: normalizeId(field.fieldId), label: field.label || field.name, name: field.name, section: field.sectionName || "Fields", type: field.type,
+      fields: orderEditorFields(doc.state.base.fields).map(field => ({
+        id: normalizeId(field.fieldId), label: field.name, name: field.name, section: field.sectionName || "Fields", type: field.type,
         sectionId: field.sectionId ? normalizeId(field.sectionId) : undefined, isStandardTemplate: field.isStandardTemplate,
         scope: field.scope, source: field.containsFallbackValue ? "Fallback (unverified source)" : field.containsInheritedValue ? "Inherited" : field.containsStandardValue ? "Standard Value" : "Exact locale",
         selectionKind: selectionKind(field),
@@ -217,7 +217,26 @@ export class ItemEditorProvider implements vscode.CustomEditorProvider<ItemDocum
     doc.labelRequest?.abort();
     if (!doc.busy && !doc.lifetime.signal.aborted) {
       const controller = new AbortController(); doc.labelRequest = controller;
+      void this.resolveFieldTitles(doc, doc.revision, controller).catch(() => { /* Internal names remain usable when optional titles fail. */ });
       void this.resolveLabels(doc, doc.revision, controller).catch(() => { /* Labels never affect drafts or save state. */ });
+    }
+  }
+
+  private async resolveFieldTitles(doc: ItemDocument, revision: number, controller: AbortController): Promise<void> {
+    const target = doc.state.target;
+    const connection = this.connections.get(target.connectionId);
+    if (!connection || new URL(connection.serverUrl).origin !== target.serverUrl) return;
+    const secret = await this.connections.getClientSecret(connection.id);
+    if (!secret) return;
+    const signal = AbortSignal.any([controller.signal, doc.lifetime.signal, AbortSignal.timeout(30_000)]);
+    const ids = doc.state.base.fields.map(field => field.fieldId);
+    for (let start = 0; start < ids.length; start += 32) {
+      signal.throwIfAborted();
+      const titles = await this.client.loadFieldTitles(connection, secret, ids.slice(start, start + 32), target.language, signal);
+      const live = this.connections.get(target.connectionId);
+      if (signal.aborted || doc.revision !== revision || doc.labelRequest !== controller
+        || !live || new URL(live.serverUrl).origin !== target.serverUrl) return;
+      await Promise.all([...doc.panels].map(panel => panel.webview.postMessage({ type: "fieldTitles", revision, titles: Object.fromEntries(titles) })));
     }
   }
 
