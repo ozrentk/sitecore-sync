@@ -20,6 +20,110 @@ function fixture(): EditorState {
 }
 
 export const itemEditorTests: readonly IntegrationTest[] = [{
+  name: "structured editor native undo restores encoded rows and custom XML after saved clear and backup",
+  async execute(): Promise<void> {
+    const directory=await mkdtemp(join(tmpdir(),"xm-structured-history-"));const initial=fixture();
+    const linkId="44444444444444444444444444444444";
+    const fields=[{...initial.base.fields[0],type:"Name Value List",value:"a=%2b&a=2"},
+      {...initial.base.fields[0],fieldId:linkId,name:"Link",type:"General Link",value:'<link linktype="external" url="https://example.test" text="Old" dam-id="asset"/>',selectionSource:""}];
+    const state={...initial,base:{...initial.base,fields}};
+    const provider=new ItemEditorProvider({globalStorageUri:vscode.Uri.file(directory)} as vscode.ExtensionContext,{get:()=>undefined} as unknown as ConnectionStore,{} as AuthoringContentClient);
+    const edits:vscode.CustomDocumentEditEvent<ItemDocument>[]=[];const subscription=provider.onDidChangeCustomDocument(edit=>edits.push(edit));
+    const harness=provider as unknown as {message(doc:ItemDocument,message:unknown):Promise<void>};let doc:ItemDocument|undefined;
+    try {
+      await vscode.workspace.fs.createDirectory(provider.directory);const uri=vscode.Uri.joinPath(provider.directory,`${editorKey(state.target)}.xmitem`);
+      await vscode.workspace.fs.writeFile(uri,Buffer.from(JSON.stringify(state)));doc=await provider.openCustomDocument(uri,{backupId:undefined,untitledDocumentData:undefined});
+      for(const id of [fieldId,linkId])await harness.message(doc,{type:"change",id,input:"",clear:true,revision:doc.revision});
+      strictEqual(edits.length,2);strictEqual(planChanges(doc.state).length,2);
+      // Simulate the confirmed empty readback; no Sitecore write is issued by this test.
+      doc.state={...doc.state,base:{...doc.state.base,fields:fields.map(field=>({...field,value:""}))},drafts:{}};
+      await edits[1].undo();await edits[0].undo();
+      const changes=planChanges(doc.state);strictEqual(changes.find(c=>c.fieldId===fieldId)!.value,fields[0].value);strictEqual(changes.find(c=>c.fieldId===linkId)!.value,fields[1].value);
+      const backup=await provider.backupCustomDocument(doc,{destination:vscode.Uri.file(join(directory,"backup"))});
+      const restored=parseEditorState(Buffer.from(await vscode.workspace.fs.readFile(vscode.Uri.parse(backup.id))).toString());deepStrictEqual(planChanges(restored),changes);
+      await edits[0].redo();strictEqual(planChanges(doc.state).length,1);await edits[1].redo();strictEqual(planChanges(doc.state).length,0);
+      const count=edits.length;await harness.message(doc,{type:"change",id:linkId,input:"malformed",clear:false,revision:doc.revision-1});strictEqual(edits.length,count);
+      await backup.delete();
+    } finally {subscription.dispose();doc?.dispose();provider.dispose();await rm(directory,{recursive:true,force:true});}
+  }
+},{
+  name: "structured field webview supports name/value rows and safe General Link forms with pinned item picker",
+  async execute(): Promise<void> {
+    const extension = vscode.extensions.getExtension("OzrenTK.sitecore-xm-cloud-sync")!;
+    const directory = await mkdtemp(join(tmpdir(),"xm-structured-webview-"));
+    const base=fixture();
+    const fields=[
+      {...base.base.fields[0],name:"Parameters",type:"Name Value List",value:"a=%2b&a=2&empty="},
+      {...base.base.fields[0],fieldId:"44444444444444444444444444444444",name:"Link",type:"General Link",value:'<link linktype="external" url="https://example.test" text="Old" />',selectionSource:""},
+      {...base.base.fields[0],fieldId:"55555555555555555555555555555555",name:"DAM",type:"General Link",value:'<link linktype="external" url="https://assets.example.test/file" text="Old" dam-id="asset" />',selectionSource:""},
+      {...base.base.fields[0],fieldId:"66666666666666666666666666666666",name:"Unsupported",type:"General Link",value:'<link linktype="javascript" url="alert(1)"/>',selectionSource:""}
+    ];
+    const root={itemId:"77777777777777777777777777777777",name:"content",displayName:"content",path:"/sitecore/content",hasChildren:true};
+    const target={...root,itemId:"88888888888888888888888888888888",name:"Page",displayName:"Target page",path:"/sitecore/content/Page",hasChildren:false};
+    const calls:string[]=[];
+    const provider=new ItemEditorProvider({globalStorageUri:vscode.Uri.file(directory),extensionUri:extension.extensionUri} as vscode.ExtensionContext,
+      {get:()=>({id:"test",name:"Test",serverUrl:"https://example.test"}),getClientSecret:async()=>"secret"} as unknown as ConnectionStore,
+      {loadSelectionItem:async(_c:unknown,_s:string,locator:{itemId?:string},language:string)=>{calls.push(language);return locator.itemId===target.itemId?target:root;},loadTreeLevel:async()=>({item:root,children:[target]})} as unknown as AuthoringContentClient);
+    const panel=vscode.window.createWebviewPanel("structuredSmoke","Structured fields",vscode.ViewColumn.Active,{enableScripts:true});
+    let doc:ItemDocument|undefined; let listener:vscode.Disposable|undefined; let timer:ReturnType<typeof setTimeout>|undefined;
+    try {
+      const state={...base,base:{...base.base,fields}};
+      await vscode.workspace.fs.createDirectory(provider.directory);
+      const uri=vscode.Uri.joinPath(provider.directory,`${editorKey(state.target)}.xmitem`);
+      await vscode.workspace.fs.writeFile(uri,Buffer.from(JSON.stringify(state)));
+      doc=await provider.openCustomDocument(uri,{backupId:undefined,untitledDocumentData:undefined});
+      await provider.resolveCustomEditor(doc,panel);
+      const script=`let started=false; window.addEventListener("message",async event=>{
+        if(event.data.type!=="state"||started)return;started=true;
+        const until=async fn=>{for(let i=0;i<200;i++){if(fn())return;await new Promise(r=>setTimeout(r,25));}throw Error("Structured UI did not settle");};
+        try {
+          const rows=[...document.querySelectorAll(".field")];
+          const named=name=>rows.find(row=>row.querySelector("label").textContent===name);
+          const nv=named("Parameters"), link=named("Link"), dam=named("DAM");
+          if(nv.querySelectorAll(".name-value-row").length!==3)throw Error("Duplicate or empty entry lost");
+          const first=nv.querySelectorAll(".name-value-row input")[1]; if(first.value!=="+")throw Error("Percent decode failed");
+          first.value="&=+%雪";first.dispatchEvent(new Event("input"));
+          [...nv.querySelectorAll("button")].find(b=>b.textContent==="Add row").click();
+          const last=nv.querySelector(".name-value-row:last-child");if(document.activeElement!==last.querySelector("input"))throw Error("Add row lost focus");
+          last.querySelector("button").click();
+          if(!nv.contains(document.activeElement))throw Error("Remove row lost focus");
+          const text=link.querySelector('[data-link-property="text"]');text.value="New & text";text.dispatchEvent(new Event("input"));
+          const kind=link.querySelector("select");kind.value="mailto";kind.dispatchEvent(new Event("change"));
+          const url=link.querySelector('[data-link-property="url"]');url.value="name@example.test";url.dispatchEvent(new Event("input"));
+          if(JSON.parse(link.querySelector("[data-field-id]").value).url!=="mailto:name@example.test")throw Error("Email representation wrong");
+          kind.value="anchor";kind.dispatchEvent(new Event("change"));url.value="section";url.dispatchEvent(new Event("input"));
+          if(JSON.parse(link.querySelector("[data-field-id]").value).url!=="section")throw Error("Anchor must use documented URL representation");
+          kind.value="internal";kind.dispatchEvent(new Event("change"));
+          link.querySelector(".selection-trigger").click();await until(()=>link.querySelectorAll(".picker-choice").length===2);
+          [...link.querySelectorAll(".picker-choice")].find(b=>b.textContent.includes("Target page")).click();
+          if(!link.querySelector(".selection-popup").hidden||link.querySelector(".selection-trigger").value!=="Target page")throw Error("Internal target selection failed");
+          const damText=dam.querySelector('[data-link-property="text"]');damText.value="Metadata kept";damText.dispatchEvent(new Event("input"));
+          if(!dam.querySelector("select").disabled||!dam.querySelector('[data-link-property="url"]').disabled)throw Error("Custom destination must be protected");
+          if(named("Unsupported").querySelector("[data-field-id]")||document.querySelector("a[href]"))throw Error("Unsupported link became editable or executable");
+          const stored=nv.querySelector("[data-field-id]");
+          window.dispatchEvent(new MessageEvent("message",{data:{type:"draftValidation",revision:event.data.revision-1,id:stored.dataset.fieldId,input:stored.value,error:"STALE"}}));
+          if(document.body.textContent.includes("STALE"))throw Error("Stale validation accepted");
+          api.postMessage({type:"structuredResult",ok:true});
+        }catch(error){api.postMessage({type:"structuredResult",error:String(error)});}
+      });`;
+      const scriptPath=join(directory,"smoke.js"); await writeFile(scriptPath,script);
+      const result=new Promise<void>((resolve,reject)=>{
+        timer=setTimeout(()=>reject(Error("Structured webview timed out")),20000);
+        listener=panel.webview.onDidReceiveMessage(message=>{if(message.type==="structuredResult"){try{strictEqual(message.ok,true,message.error);resolve();}catch(error){reject(error);}}});
+      });
+      const nonce=/nonce="([a-f0-9]+)"/u.exec(panel.webview.html)![1];
+      panel.webview.options={enableScripts:true,localResourceRoots:[vscode.Uri.joinPath(extension.extensionUri,"media","itemEditor"),vscode.Uri.file(directory)]};
+      panel.webview.html=panel.webview.html.replace("</body>",`<script nonce="${nonce}" src="${panel.webview.asWebviewUri(vscode.Uri.file(scriptPath))}"></script></body>`);
+      await result;
+      await (provider as unknown as {flushInputs(document:ItemDocument):Promise<void>}).flushInputs(doc);
+      const changes=planChanges(doc.state);strictEqual(changes.length,3);
+      strictEqual(changes.find(change=>change.name==="Parameters")!.value,"a=%26%3D%2B%25%E9%9B%AA&a=2&empty=");
+      strictEqual(changes.find(change=>change.name==="Link")!.value.includes('linktype="internal"'),true);
+      strictEqual(changes.find(change=>change.name==="DAM")!.value.includes('dam-id="asset"'),true);
+      strictEqual(calls.length>0&&calls.every(language=>language==="en-AU"),true);
+    } finally {clearTimeout(timer);listener?.dispose();panel.dispose();doc?.dispose();provider.dispose();await rm(directory,{recursive:true,force:true});}
+  }
+},{
   name: "reorder host validates exact drafts and supports isolated undo redo backup and saved-base restoration",
   async execute(): Promise<void> {
     const directory = await mkdtemp(join(tmpdir(), "xm-reorder-host-"));

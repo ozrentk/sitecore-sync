@@ -19,6 +19,37 @@ test("editor preserves untouched representations and numeric precision", () => {
   strictEqual(serializeDraft(field("Multi-Line Text", "a\r\nb"), { input: "c\nd", clear: false }), "c\r\nd");
   strictEqual(serializeDraft(field(), { input: "  x  ", clear: false }), "  x  ");
 });
+
+test("structured fields preserve raw no-ops, validate changed-only payloads and survive backup plus Undo after Save", async () => {
+  for (const f of [field("Name Value List", "a=%2b&a=2&empty="), { ...field("General Link", '<link linktype="external" url="https://example.test" text="Old" dam-id="asset" />'), selectionSource: "" }]) {
+    const original = { ...state(), base: item(f), drafts: {} };
+    strictEqual(planChanges(original).length, 0);
+    strictEqual(serializeDraft(f,{input:fieldInput(f),clear:false}),f.value);
+    const data = JSON.parse(fieldInput(f));
+    if (Array.isArray(data)) data[0].value = "&=+%雪"; else data.text = "New & title";
+    const changed = { ...original, drafts: { [fieldId]: {input:JSON.stringify(data),clear:false} } };
+    const changes = planChanges(changed); strictEqual(changes.length,1);
+    deepStrictEqual(parseEditorState(JSON.stringify(changed)), changed);
+    for (const altered of [{...f,selectionSource:"/sitecore/content/Changed"},{...f,containsFallbackValue:true},{...f,value:""}]) throws(()=>checkConflicts(changed,item(altered),changes));
+    let writes=0; let reads=0;
+    const saved=await saveEditor(changed,{read:async()=>++reads===1?item(f):item({...f,value:changes[0].value}),write:async payload=>{writes++;deepStrictEqual(payload,changes);},validateSelections:async()=>{},persist:async()=>{}},()=>{});
+    strictEqual(writes,1); deepStrictEqual(saved.drafts,{});
+    // A native Undo restores the structured input against the new saved base.
+    strictEqual(serializeDraft({...f,value:changes[0].value},{input:fieldInput(f),clear:false}),f.value);
+    strictEqual(serializeDraft({...f,value:""},{input:fieldInput(f),clear:false}),f.value);
+    strictEqual(serializeDraft(f,{input:fieldInput(f),clear:true}),"");
+    await rejects(saveEditor(changed,{read:async()=>item(f),write:async()=>{throw Error("timeout");},validateSelections:async()=>{},persist:async()=>{}},()=>{}),/timeout/);
+  }
+});
+
+test("structured malformed, unsupported and fallback fields cannot bypass host validation", () => {
+  for (const f of [field("Name Value List","=bad"),{...field("General Link",'<link linktype="javascript" url="alert(1)"/>'),selectionSource:""},
+    {...field("General Link",'<link linktype="external" url="https://example.test"/>'),selectionSource:"query:./*"},
+    {...field("Name Value List","a=1"),containsFallbackValue:true}]) throws(()=>planChanges({...state(),base:item(f)}));
+  const f={...field("General Link",""),selectionSource:""};
+  const forged=JSON.stringify({...JSON.parse(fieldInput(f)),url:"javascript:alert(1)"});
+  throws(()=>planChanges({...state(),base:item(f),drafts:{[fieldId]:{input:forged,clear:false}}}));
+});
 test("editor validates calendar/time/integer values without browser timezone conversion", () => {
   strictEqual(serializeDraft(field("Date", ""), { input: "2024-02-29", clear: false }), "20240229T000000Z");
   strictEqual(serializeDraft(field("Datetime", ""), { input: "2026-10-14T12:34", clear: false }), "20261014T123400Z");

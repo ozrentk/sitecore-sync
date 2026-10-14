@@ -97,6 +97,18 @@ test("selection clients isolate locale/connection identity and propagate cancell
   strictEqual((calls[1][0] as { id: string }).id, "other");
 });
 
+test("General Link requires verified shared Source and Type metadata, including an intentionally empty Source", async () => {
+  const initial=state(); const link={...initial.base.fields[0],type:"General Link",value:"",selectionSource:undefined};
+  const item={...initial.base,fields:[link]};
+  for (const [type, scope, expected] of [["General Link","SHARED",""],["Droplink","SHARED",undefined],["General Link","VERSIONED",undefined]] as const) {
+    const client={loadItem:async()=>({...item,itemId:link.fieldId,path:"/sitecore/templates/Example/Link",fields:[
+      {...link,name:"Source",scope,value:""},{...link,name:"Type",scope:"SHARED",value:type}
+    ]})} as unknown as AuthoringContentClient;
+    const result=await loadSelectionMetadata(client,testConnection,"secret",item,new AbortController().signal);
+    strictEqual(result.fields[0].selectionSource,expected);
+  }
+});
+
 test("version-zero template definitions use an advertised existing version only for shared metadata", async () => {
   const initial = state(); const calls: unknown[][] = [];
   const client = { loadItem: async (...args: unknown[]) => { calls.push(args); return calls.length === 1

@@ -23,6 +23,12 @@ const send = (type, extra = {}) => api.postMessage({ type, revision, ...extra })
 for (const action of ["save", "revert", "reconcile", "locale"]) document.getElementById(action).addEventListener("click", () => send(action));
 window.addEventListener("message", event => {
   const state = event.data;
+  if (state.type === "draftValidation") {
+    if (state.revision !== revision) return;
+    const stored = [...document.querySelectorAll("[data-field-id]")].find(control => control.dataset.fieldId === state.id);
+    if (stored?.value === state.input) { const error = stored.closest(".field").querySelector(".structured-error"); if (error) error.textContent = state.error; }
+    return;
+  }
   if (state.type === "fieldTitles") {
     if (state.revision !== revision) return;
     for (const label of document.querySelectorAll(".field > label")) {
@@ -115,6 +121,10 @@ window.addEventListener("message", event => {
       const value = document.createElement("pre"); value.textContent = field.raw;
       if (field.selectionKind && !["checklist", "multilist", "treelist", "treelistex"].includes(field.selectionKind)) row.append(selectionLabel(field));
       row.append(reason, value);
+    } else if (field.kind === "namevalues") {
+      renderNameValues(row, field);
+    } else if (field.kind === "generallink") {
+      renderGeneralLink(row, field);
     } else if (field.kind === "multiselection") {
       renderMultipleSelection(row, field);
     } else if (field.kind === "selection") {
@@ -161,10 +171,113 @@ function selectionLabel(field) {
   label.textContent = !label.dataset.value ? "No selection" : field.selectionKind.includes("droplist") ? label.dataset.value : "Loading selected item…";
   return label;
 }
+function structuredDraft(row, field, empty) {
+  const stored = document.createElement("input"); stored.type = "hidden";
+  stored.dataset.fieldId = field.id; stored.dataset.original = field.original; stored.dataset.explicitClear = String(field.clear);
+  stored.value = field.clear ? JSON.stringify(empty) : field.input; row.append(stored);
+  let data;
+  try { data = JSON.parse(stored.value); } catch { data = null; }
+  const error = document.createElement("p"); error.className = "meta structured-error"; error.setAttribute("role", "status"); row.append(error);
+  const change = (value, clear = false) => {
+    if (blocked || !row.isConnected) return;
+    stored.value = JSON.stringify(value); stored.dataset.explicitClear = String(clear);
+    send("change", { id: field.id, input: stored.value, clear });
+    document.getElementById("status").textContent = "Unsaved changes";
+  };
+  return { data, error, change };
+}
+function renderNameValues(row, field) {
+  const draft = structuredDraft(row, field, []); let entries = draft.data;
+  if (!Array.isArray(entries) || entries.some(entry => !entry || typeof entry.key !== "string" || typeof entry.value !== "string")) {
+    draft.error.textContent = "Invalid retained name/value draft. Revert to reload saved values."; return;
+  }
+  const list = document.createElement("div"); list.className = "name-value-list";
+  const actions = document.createElement("div"); actions.className = "selection-controls";
+  const add = document.createElement("button"); add.id = field.id; add.textContent = "Add row"; add.disabled = blocked;
+  add.setAttribute("aria-label", `${field.label}: Add row`);
+  const clear = document.createElement("button"); clear.textContent = "Clear"; clear.disabled = blocked;
+  clear.title = "Store an explicit empty value; does not reset to inherited or Standard Values";
+  const validate = () => { draft.error.textContent = entries.some(e => !e.key) ? "Enter a key for each row. Empty values are allowed." : ""; };
+  const draw = () => {
+    list.replaceChildren();
+    entries.forEach((entry, index) => {
+      const pair = document.createElement("div"); pair.className = "name-value-row";
+      for (const key of ["key", "value"]) {
+        const input = document.createElement("input"); input.type = "text"; input.value = entry[key]; input.disabled = blocked;
+        input.placeholder = key === "key" ? "Name" : "Value"; input.setAttribute("aria-label", `${field.label} row ${index + 1} ${key}`);
+        input.addEventListener("input", () => { entry[key] = input.value; validate(); draft.change(entries); }); pair.append(input);
+      }
+      const remove = document.createElement("button"); remove.textContent = "×"; remove.disabled = blocked; remove.setAttribute("aria-label", `Remove row ${index + 1}`);
+      remove.addEventListener("click", () => { entries.splice(index, 1); draft.change(entries); draw(); (list.children[Math.min(index, entries.length - 1)]?.querySelector("input") || add).focus(); });
+      pair.append(remove); list.append(pair);
+    });
+    add.disabled = blocked || entries.length >= 256; validate();
+  };
+  add.addEventListener("click", () => { entries.push({ raw: null, key: "", value: "" }); draft.change(entries); draw(); list.lastElementChild.querySelector("input").focus(); });
+  clear.addEventListener("click", () => { entries = []; draft.change(entries, true); draw(); add.focus(); });
+  actions.append(add, clear); row.append(list, actions); draw();
+}
+function renderGeneralLink(row, field) {
+  const empty = () => ({_xml:field.raw,linktype:"external",id:"",url:"",text:"",title:"",target:"",class:"",anchor:"",querystring:""});
+  const draft = structuredDraft(row, field, empty()); let values = draft.data;
+  if (!values || Object.keys(empty()).some(key => typeof values[key] !== "string")) { draft.error.textContent = "Invalid retained link draft. Revert to reload saved values."; return; }
+  let anchorAttributeOnly = values.linktype === "anchor" && !values.url && Boolean(values.anchor);
+  let mirroredAnchor = values.linktype === "anchor" && Boolean(values.url) && values.url === values.anchor;
+  const form = document.createElement("div"); form.className = "link-form";
+  const kind = document.createElement("select"); kind.id = field.id; kind.disabled = blocked || field.linkCustom; kind.setAttribute("aria-label", `${field.label} link kind`);
+  for (const [value, name] of [["external","External URL"],["internal","Sitecore item"],["mailto","Email"],["anchor","Anchor"]]) { const option = document.createElement("option"); option.value = value; option.textContent = name; kind.append(option); }
+  kind.value = values.linktype;
+  const clear = document.createElement("button"); clear.textContent = "Clear"; clear.disabled = blocked; clear.title = "Store an explicit empty value, not a reset";
+  const actions = document.createElement("div"); actions.className = "selection-controls"; actions.append(kind, clear); row.append(actions, form);
+  const controls = new Map(); const groups = new Map();
+  const add = (key, title) => {
+    const group = document.createElement("label"); group.className = "link-property"; group.textContent = title;
+    const input = document.createElement("input"); input.type = "text"; input.value = key === "url" && values.linktype === "mailto" ? values[key].replace(/^mailto:/i, "") : values[key];
+    input.setAttribute("aria-label", `${field.label} ${title}`); input.dataset.linkProperty = key;
+    input.disabled = blocked || (field.linkCustom && !["text","title","target","class"].includes(key));
+    input.addEventListener("input", () => {
+      if (key === "url" && values.linktype === "anchor") { if (anchorAttributeOnly) values.anchor = input.value; else { values.url = input.value; if (mirroredAnchor) values.anchor = input.value; } }
+      else values[key] = key === "url" && values.linktype === "mailto" ? `mailto:${input.value}` : input.value;
+      draft.change(values);
+    });
+    group.append(input); form.append(group); controls.set(key,input); groups.set(key,group); return input;
+  };
+  const destination = add("url", "Destination");
+  const targetGroup = document.createElement("div"); targetGroup.className = "link-property"; targetGroup.textContent = "Target item";
+  const target = document.createElement("input"); target.type = "text"; target.readOnly = true; target.className = "selection-trigger"; target.id = `${field.id}-target`;
+  target.disabled = blocked || field.linkCustom; target.setAttribute("aria-label", `${field.label} target item`); target.setAttribute("role","combobox"); target.setAttribute("aria-expanded","false");
+  target.dataset.selectionLabel = field.id; target.dataset.value = values.id;
+  const refreshTarget = name => { target.dataset.value = values.id; target.value = name || (values.id ? "Loading selected item…" : "Choose an item…"); };
+  refreshTarget(); targetGroup.append(target); form.append(targetGroup);
+  const picker = createChoicePicker(row, field, target, { multiple:false,tree:true,
+    chosen: choice => values.id.replace(/[{}-]/g,"").toLowerCase() === choice.itemId.replace(/[{}-]/g,"").toLowerCase(),
+    accept: choice => { values.id = choice.value; values.url = ""; refreshTarget(choice.displayName || choice.name); const path = document.getElementById(`${field.id}-path`); if(path){path.textContent=choice.path;path.hidden=false;} draft.change(values); picker.close(); }
+  });
+  row.append(picker.popup); target.addEventListener("click",picker.open);
+  target.addEventListener("keydown",event=>{if(["Enter"," ","ArrowDown"].includes(event.key)){event.preventDefault();picker.open();}});
+  add("text", "Link text"); add("title", "Title"); add("target", "Target"); add("class", "CSS class"); add("anchor", "Anchor"); add("querystring", "Query string");
+  const update = () => {
+    kind.value = values.linktype; targetGroup.hidden = values.linktype !== "internal";
+    groups.get("url").hidden = values.linktype === "internal";
+    groups.get("anchor").hidden = ["mailto","anchor"].includes(values.linktype);
+    groups.get("querystring").hidden = values.linktype !== "internal";
+    destination.placeholder = values.linktype === "mailto" ? "name@example.com" : values.linktype === "anchor" ? "Anchor name (without #)" : "https://example.com";
+    for (const [key, input] of controls) input.value = key === "url" && values.linktype === "mailto" ? values[key].replace(/^mailto:/i, "") : values[key];
+    if (values.linktype === "anchor") destination.value = anchorAttributeOnly ? values.anchor : values.url;
+  };
+  kind.addEventListener("change", () => {
+    picker.close(false); values.linktype = kind.value; values.id = ""; values.url = ""; values.anchor = ""; values.querystring = "";
+    anchorAttributeOnly = false; mirroredAnchor = false;
+    refreshTarget(); update(); draft.change(values);
+  });
+  clear.addEventListener("click", () => { picker.close(false); values = empty(); anchorAttributeOnly = false; mirroredAnchor = false; refreshTarget(); update(); draft.change(values,true); kind.focus(); });
+  if (field.linkCustom) { const note = document.createElement("p"); note.className = "meta"; note.textContent = "Custom link metadata is preserved. Destination and kind are read-only."; row.append(note); }
+  update();
+}
 function setSelectionLabel(control, text, path = "") {
   if (control instanceof HTMLInputElement) {
     control.value = text;
-    const detail = document.getElementById(`${control.id}-path`);
+    const detail = document.getElementById(`${control.dataset.selectionLabel || control.id}-path`);
     if (detail) { detail.textContent = path; detail.hidden = !path; }
   } else {
     control.textContent = text; control.title = path ? `${text}\n${path}` : text;
@@ -182,7 +295,9 @@ function renderFieldInfo(row, field, meta) {
   const infoContent = document.createElement("div"); infoContent.className = "field-info-content"; infoContent.id = `${field.id}-info`;
   infoButton.setAttribute("aria-controls", infoContent.id); infoButton.setAttribute("aria-describedby", infoContent.id);
   const selectedPath = document.createElement("p"); selectedPath.className = "meta"; selectedPath.id = `${field.id}-path`; selectedPath.hidden = true;
-  infoContent.append(meta, current); if (field.selectionKind) infoContent.append(selectedPath); info.append(infoButton, infoContent);
+  infoContent.append(meta, current); if (field.selectionKind || field.kind === "generallink") infoContent.append(selectedPath);
+  if (field.selectionSource !== undefined) { const source = document.createElement("p"); source.className = "meta"; source.textContent = `Source: ${field.selectionSource || "(default)"}`; infoContent.append(source); }
+  info.append(infoButton, infoContent);
   infoButton.addEventListener("click", () => { const open = info.dataset.open !== "true"; info.dataset.open = String(open); infoButton.setAttribute("aria-expanded", String(open)); });
   info.addEventListener("keydown", event => { if (event.key === "Escape") { info.dataset.open = "false"; infoButton.setAttribute("aria-expanded", "false"); const control = document.getElementById(field.id); if (control?.matches("input, textarea, select")) control.focus(); else { row.tabIndex = -1; row.focus(); } } });
   row.querySelector("label").after(info);

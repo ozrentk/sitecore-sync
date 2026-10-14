@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.42.0
+
+- Add compact Name Value List rows with lossless encoding, explicit add/remove/clear and validation. Preserve existing duplicates and reject new duplicate keys or malformed rows.
+- Add structured General Link editing for internal, HTTP(S), email and anchor links, with Source-aware item picking. Preserve unknown XML/DAM attributes and original raw values; unsupported variants remain read-only.
+- Retain changed-only Save, exact-locale protection, conflict checks, backups and Undo/Redo, including restoration after Save/Clear. No link execution, asset selection, media upload or publishing is added.
+
 ## 0.41.1
 
 - Show only the final item name in picker headers instead of the shortened breadcrumb; preserve full-path tooltips and tree navigation.

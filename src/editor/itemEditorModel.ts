@@ -3,6 +3,8 @@ import { isMultipleSelection, selectionKind, selectionSourceReason } from "./sin
 import { createHash } from "node:crypto";
 import type { AuthoringItemDetails, AuthoringItemField } from "../sitecore/authoringClient";
 import { hasPagePresentation } from "../publicPages/publicPageUrl";
+import { parseNameValues, serializeNameValues } from "./nameValueList";
+import { generalLinkInput, isGeneralLink, linkSourceReason, parseGeneralLink, serializeGeneralLink, validateLinkValues } from "./generalLink";
 
 export class EditorValidationError extends Error {}
 
@@ -22,7 +24,7 @@ export interface EditorState {
   readonly drafts: Readonly<Record<string, FieldDraft>>;
   readonly attempt?: { readonly phase: "sent" | "acknowledged"; readonly changes: readonly EditorChange[] };
 }
-export type EditorFieldKind = "text" | "multiline" | "checkbox" | "integer" | "number" | "date" | "datetime" | "selection" | "multiselection";
+export type EditorFieldKind = "text" | "multiline" | "checkbox" | "integer" | "number" | "date" | "datetime" | "selection" | "multiselection" | "namevalues" | "generallink";
 export const normalizeId = (value: string): string => value.replace(/[{}-]/gu, "").toLowerCase();
 export const isGuid = (value: unknown): value is string => typeof value === "string" && /^(?:[0-9a-f]{32}|\{?[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}\}?)$/iu.test(value);
 export const isLocale = (value: unknown): value is string => typeof value === "string" && /^[a-z]{2,8}(?:-[a-z0-9]{1,8})*$/iu.test(value);
@@ -32,10 +34,11 @@ export function editorKey(target: EditorTarget): string {
 }
 
 export function fieldKind(field: AuthoringItemField): EditorFieldKind | undefined {
+  if (isGeneralLink(field)) return "generallink";
   if (isMultipleSelection(selectionKind(field))) return "multiselection";
   if (selectionKind(field)) return "selection";
   const types: Record<string, EditorFieldKind> = { "single-line text": "text", "multi-line text": "multiline",
-    checkbox: "checkbox", integer: "integer", number: "number", date: "date", datetime: "datetime" };
+    checkbox: "checkbox", integer: "integer", number: "number", date: "date", datetime: "datetime", "name value list": "namevalues" };
   return Object.hasOwn(types, field.type.toLowerCase()) ? types[field.type.toLowerCase()] : undefined;
 }
 
@@ -58,6 +61,8 @@ function dateInput(value: string, kind: "date" | "datetime"): string | undefined
 
 export function fieldInput(field: AuthoringItemField): string {
   switch (fieldKind(field)) {
+    case "namevalues": try { return JSON.stringify(parseNameValues(field.value)); } catch { return field.value; }
+    case "generallink": try { return generalLinkInput(field.value); } catch { return field.value; }
     case "date": return dateInput(field.value, "date") ?? field.value;
     case "datetime": return dateInput(field.value, "datetime") ?? field.value;
     case "checkbox": return field.value === "1" ? "1" : "";
@@ -81,6 +86,13 @@ export function readOnlyReason(item: AuthoringItemDetails, field: AuthoringItemF
     return selectionSourceReason(field.selectionSource, selectionKind(field));
   }
   if (kind === "selection") return selectionSourceReason(field.selectionSource, selectionKind(field));
+  if (kind === "generallink") {
+    try { const link = parseGeneralLink(field.value); if (field.value) validateLinkValues(link.values); } catch (error) { return (error as Error).message; }
+    return linkSourceReason(field);
+  }
+  if (kind === "namevalues") {
+    try { parseNameValues(field.value); } catch (error) { return (error as Error).message; }
+  }
   if (kind === "checkbox" && !["", "0", "1"].includes(field.value)) return "Unrecognized stored checkbox representation.";
   if ((kind === "date" || kind === "datetime") && dateInput(field.value, kind) === undefined) return "Unrecognized or timezone-ambiguous stored date. The original value is preserved.";
   if (kind === "text" && /[\r\n]/u.test(field.value)) return "Stored single-line text contains line breaks; original value is preserved.";
@@ -93,6 +105,8 @@ export function serializeDraft(field: AuthoringItemField, draft: FieldDraft): st
   if (draft.input === fieldInput(field)) return field.value;
   const value = draft.input;
   switch (fieldKind(field)) {
+    case "namevalues": return serializeNameValues(field.value, value);
+    case "generallink": return serializeGeneralLink(field.value, value);
     case "multiselection": validateMultipleDraft(field, value); return value;
     case "selection": return value; // Membership is revalidated by the host immediately before writing.
     case "text": if (/[\r\n]/u.test(value)) throw new EditorValidationError("Single-Line Text cannot contain line breaks."); return value;
@@ -172,7 +186,7 @@ export async function saveEditor(state: EditorState, io: EditorIO, update: (stat
   if (!changes.length) return state;
   const fresh = await io.read();
   checkConflicts(state, fresh, changes);
-  if (changes.some(change => fresh.fields.some(field => normalizeId(field.fieldId) === change.fieldId && selectionKind(field)))) {
+  if (changes.some(change => fresh.fields.some(field => normalizeId(field.fieldId) === change.fieldId && (selectionKind(field) || isGeneralLink(field))))) {
     if (!io.validateSelections) throw new EditorValidationError("Selection source validation is unavailable.");
     await io.validateSelections(fresh, changes);
   }
