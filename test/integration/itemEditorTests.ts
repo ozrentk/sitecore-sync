@@ -20,6 +20,76 @@ function fixture(): EditorState {
 }
 
 export const itemEditorTests: readonly IntegrationTest[] = [{
+  name: "read-only asset replies are pinned, bounded and discarded after revision or connection changes",
+  async execute(): Promise<void> {
+    const directory = await mkdtemp(join(tmpdir(),"xm-asset-isolation-"));
+    const initial=fixture(); const base={...initial.base,fields:[{...initial.base.fields[0],type:"Image",value:'<image src="https://tenant.stylelabs.cloud/api/public/content/a" dam-id="opaque"/>'}]};
+    let serverUrl="https://example.test"; let resolveAsset: ((value:{url:string;dataUri:string})=>void)|undefined;
+    let calls=0; let receivedSignal: AbortSignal|undefined;
+    const messages:Record<string,unknown>[]=[];
+    const provider=new ItemEditorProvider({globalStorageUri:vscode.Uri.file(directory)} as vscode.ExtensionContext,
+      {get:()=>({id:"test",serverUrl}),getClientSecret:async()=>{throw Error("Public assets must not read secrets");}} as unknown as ConnectionStore,
+      {loadFieldAsset:async(_c:unknown,secret:string,_url:string,_image:boolean,signal:AbortSignal)=>{strictEqual(secret,"");calls++;receivedSignal=signal;return new Promise(resolve=>{resolveAsset=resolve;});}} as unknown as AuthoringContentClient);
+    let doc:ItemDocument|undefined;
+    const harness=provider as unknown as {message(doc:ItemDocument,message:unknown):Promise<void>};
+    try {
+      await vscode.workspace.fs.createDirectory(provider.directory);const uri=vscode.Uri.joinPath(provider.directory,`${editorKey(initial.target)}.xmitem`);
+      await vscode.workspace.fs.writeFile(uri,Buffer.from(JSON.stringify({...initial,base})));
+      doc=await provider.openCustomDocument(uri,{backupId:undefined,untitledDocumentData:undefined});
+      doc.panels.add({webview:{postMessage:async(message:Record<string,unknown>)=>{messages.push(message);return true;}}} as unknown as vscode.WebviewPanel);
+      const request=()=>harness.message(doc!,{type:"previewAsset",id:fieldId,revision:doc!.revision,request:calls+1});
+      const pending=request();await new Promise(resolve=>setTimeout(resolve,0));strictEqual(calls,1);
+      doc.revision++;resolveAsset!({url:"https://tenant.stylelabs.cloud/api/public/content/a",dataUri:"data:image/png;base64,AA=="});await pending;
+      strictEqual(messages.length,0);strictEqual(doc.assets.size,0);
+      const changed=request();await new Promise(resolve=>setTimeout(resolve,0));serverUrl="https://other.test";
+      resolveAsset!({url:"https://tenant.stylelabs.cloud/api/public/content/a",dataUri:"data:image/png;base64,AA=="});await changed;strictEqual(messages.length,0);
+      serverUrl="https://example.test";const cancelled=request();await new Promise(resolve=>setTimeout(resolve,0));doc.cancelSelections();strictEqual(receivedSignal!.aborted,true);
+      resolveAsset!({url:"https://tenant.stylelabs.cloud/api/public/content/a",dataUri:"data:image/png;base64,AA=="});await cancelled;strictEqual(messages.length,0);
+      const good=request();await new Promise(resolve=>setTimeout(resolve,0));resolveAsset!({url:"https://tenant.stylelabs.cloud/api/public/content/a",dataUri:"data:image/png;base64,AA=="});await good;
+      strictEqual(messages.length,1);strictEqual(messages[0].open,true);strictEqual(doc.assets.size,1);strictEqual(Object.keys(doc.state.drafts).length,0);
+    }finally{doc?.dispose();provider.dispose();await rm(directory,{recursive:true,force:true});}
+  }
+},{
+  name: "read-only webview contains rich markup and retains malformed, failed and empty field evidence",
+  async execute(): Promise<void> {
+    const extension=vscode.extensions.getExtension("OzrenTK.sitecore-xm-cloud-sync")!;
+    const directory=await mkdtemp(join(tmpdir(),"xm-readonly-ui-"));
+    const panel=vscode.window.createWebviewPanel("readonlySmoke","Read-only fields",vscode.ViewColumn.Active,{enableScripts:true});
+    let listener:vscode.Disposable|undefined;let timer:ReturnType<typeof setTimeout>|undefined;
+    try {
+      const shared=vscode.Uri.joinPath(extension.extensionUri,"media","shared");
+      panel.webview.options={enableScripts:true,localResourceRoots:[shared,vscode.Uri.file(directory)]};
+      const script=String.raw`
+        try {
+          const raw='<p onclick="window.pwned=1">Hello <strong>world</strong><a href="javascript:alert(1)">link</a><img src="https://evil.test/image" onerror="window.pwned=1"><svg onload="window.pwned=1"/><script>window.pwned=1<\/script></p>';
+          const parent=document.createElement("div");let diffClicks=0;parent.addEventListener("click",()=>diffClicks++);document.body.append(parent);
+          const rich=renderReadOnlyField({raw,presentation:{kind:"richtext",status:"populated"}});parent.append(rich);
+          rich.querySelector("summary").click();if(diffClicks)throw Error("Source toggle launched diff");
+          rich.querySelector("strong").click();if(diffClicks!==1)throw Error("Value click no longer opens text diff");
+          if(rich.querySelector("pre").textContent!==raw)throw Error("Source changed");
+          if(!rich.querySelector(".richtext-preview strong")||rich.querySelector(".richtext-preview").querySelector("[href],[src],[onclick],svg,script"))throw Error("Unsafe markup survived");
+          if(window.pwned)throw Error("Untrusted markup executed");
+          const malformed=renderReadOnlyField({raw:"<broken",presentation:{kind:"image",status:"populated",notice:"Unrecognized"}});document.body.append(malformed);
+          if(malformed.querySelector("pre").textContent!=="<broken")throw Error("Malformed content lost");
+          const empty=renderReadOnlyField({raw:"",presentation:{kind:"image",status:"empty"}});if(!empty.textContent.includes("Empty value"))throw Error("Empty not explicit");
+          const unavailable=renderReadOnlyField({presentation:{kind:"raw",status:"unavailable"}});if(!unavailable.textContent.includes("unavailable"))throw Error("Unavailable treated as empty");
+          let done;const asset=renderReadOnlyField({raw:'<image src="private" custom="kept"/>',presentation:{kind:"image",status:"populated",source:"private",metadata:[["alt","Example"],["custom","kept"]]}},{requestAsset:receive=>done=receive});document.body.append(asset);
+          asset.querySelector("button").click();done({error:"Preview unavailable"});
+          if(!asset.textContent.includes("custom")||!asset.textContent.includes("Preview unavailable")||asset.querySelector("pre").textContent!=='<image src="private" custom="kept"/>')throw Error("Failed preview lost evidence");
+          let verified;let opened=false;
+          const good=renderReadOnlyField({raw:'<image src="public"/>',presentation:{kind:"image",status:"populated",source:"public",alt:"Verified image"}},{requestAsset:receive=>verified=receive,openAsset:()=>opened=true});document.body.append(good);
+          good.querySelector("button").click();verified({dataUri:"data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a2ioAAAAASUVORK5CYII=",open:true});
+          if(good.querySelector("img").alt!=="Verified image")throw Error("Raster preview missing");
+          [...good.querySelectorAll("button")].find(b=>b.textContent==="Open asset").click();if(!opened)throw Error("Verified open action missing");
+          acquireVsCodeApi().postMessage({ok:true});
+        }catch(error){acquireVsCodeApi().postMessage({error:String(error)});}`;
+      await writeFile(join(directory,"smoke.js"),script);
+      const finished=new Promise<void>((resolve,reject)=>{timer=setTimeout(()=>reject(Error("Read-only webview timed out")),20000);listener=panel.webview.onDidReceiveMessage(message=>{try{strictEqual(message.ok,true,message.error);resolve();}catch(error){reject(error);}});});
+      panel.webview.html=`<!doctype html><html><head><meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src ${panel.webview.cspSource}; style-src ${panel.webview.cspSource}; img-src data:;"><link rel="stylesheet" href="${panel.webview.asWebviewUri(vscode.Uri.joinPath(shared,"readOnlyField.css"))}"></head><body><script src="${panel.webview.asWebviewUri(vscode.Uri.joinPath(shared,"readOnlyField.js"))}"></script><script src="${panel.webview.asWebviewUri(vscode.Uri.file(join(directory,"smoke.js")))}"></script></body></html>`;
+      await finished;
+    }finally{clearTimeout(timer);listener?.dispose();panel.dispose();await rm(directory,{recursive:true,force:true});}
+  }
+},{
   name: "General Link lazy path resolution survives common edits but rejects a changed destination",
   async execute(): Promise<void> {
     const directory=await mkdtemp(join(tmpdir(),"xm-link-path-"));const initial=fixture();const targetId="88888888888888888888888888888888";
@@ -179,7 +249,7 @@ export const itemEditorTests: readonly IntegrationTest[] = [{
         listener=panel.webview.onDidReceiveMessage(message=>{if(message.type==="structuredResult"){try{strictEqual(message.ok,true,message.error);resolve();}catch(error){reject(error);}}});
       });
       const nonce=/nonce="([a-f0-9]+)"/u.exec(panel.webview.html)![1];
-      panel.webview.options={enableScripts:true,localResourceRoots:[vscode.Uri.joinPath(extension.extensionUri,"media","itemEditor"),vscode.Uri.file(directory)]};
+      panel.webview.options={enableScripts:true,localResourceRoots:[vscode.Uri.joinPath(extension.extensionUri,"media","itemEditor"),vscode.Uri.joinPath(extension.extensionUri, "media", "shared"), vscode.Uri.file(directory)]};
       panel.webview.html=panel.webview.html.replace("</body>",`<script nonce="${nonce}" src="${panel.webview.asWebviewUri(vscode.Uri.file(scriptPath))}"></script></body>`);
       await result;
       await (provider as unknown as {flushInputs(document:ItemDocument):Promise<void>}).flushInputs(doc);
@@ -329,7 +399,7 @@ export const itemEditorTests: readonly IntegrationTest[] = [{
         listener = panel.webview.onDidReceiveMessage(message => { if (message.type === "selectionSmoke") { try { strictEqual(message.ok, true, message.error); resolve(); } catch (error) { reject(error); } } });
       });
       const nonce = /nonce="([a-f0-9]+)"/u.exec(panel.webview.html)![1];
-      panel.webview.options = { enableScripts: true, localResourceRoots: [vscode.Uri.joinPath(extension.extensionUri, "media", "itemEditor"), vscode.Uri.file(directory)] };
+      panel.webview.options = { enableScripts: true, localResourceRoots: [vscode.Uri.joinPath(extension.extensionUri, "media", "itemEditor"), vscode.Uri.joinPath(extension.extensionUri, "media", "shared"), vscode.Uri.file(directory)] };
       panel.webview.html = panel.webview.html.replace("</body>", `<script nonce="${nonce}" src="${panel.webview.asWebviewUri(vscode.Uri.file(scriptPath))}"></script></body>`);
       await result;
       await (provider as unknown as { flushInputs(document: ItemDocument): Promise<void> }).flushInputs(doc);
@@ -444,7 +514,7 @@ export const itemEditorTests: readonly IntegrationTest[] = [{
         listener = panel.webview.onDidReceiveMessage(message => { if (message.type === "selectionSmoke") { try { strictEqual(message.ok, true, message.error); resolve(); } catch (error) { reject(error); } } });
       });
       const nonce = /nonce="([a-f0-9]+)"/u.exec(panel.webview.html)![1];
-      panel.webview.options = { enableScripts: true, localResourceRoots: [vscode.Uri.joinPath(extension.extensionUri, "media", "itemEditor"), vscode.Uri.file(directory)] };
+      panel.webview.options = { enableScripts: true, localResourceRoots: [vscode.Uri.joinPath(extension.extensionUri, "media", "itemEditor"), vscode.Uri.joinPath(extension.extensionUri, "media", "shared"), vscode.Uri.file(directory)] };
       panel.webview.html = panel.webview.html.replace("</body>", `<script nonce="${nonce}" src="${panel.webview.asWebviewUri(vscode.Uri.file(scriptPath))}"></script></body>`);
       await result;
       await (provider as unknown as { flushInputs(document: ItemDocument): Promise<void> }).flushInputs(doc);
@@ -735,7 +805,7 @@ export const itemEditorTests: readonly IntegrationTest[] = [{
         });
       });
       const nonce = /nonce="([a-f0-9]+)"/u.exec(panel.webview.html)![1];
-      panel.webview.options = { enableScripts: true, localResourceRoots: [vscode.Uri.joinPath(extension.extensionUri, "media", "itemEditor"), vscode.Uri.file(directory)] };
+      panel.webview.options = { enableScripts: true, localResourceRoots: [vscode.Uri.joinPath(extension.extensionUri, "media", "itemEditor"), vscode.Uri.joinPath(extension.extensionUri, "media", "shared"), vscode.Uri.file(directory)] };
       panel.webview.html = panel.webview.html.replace("</body>", `<script nonce="${nonce}" src="${panel.webview.asWebviewUri(vscode.Uri.file(scriptPath))}"></script></body>`);
       await result;
       await (provider as unknown as { flushInputs(document: ItemDocument): Promise<void> }).flushInputs(doc);

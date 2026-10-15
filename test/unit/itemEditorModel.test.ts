@@ -143,3 +143,16 @@ test("editor restores section identities while accepting older snapshots", () =>
     throws(() => parseEditorState(JSON.stringify({ ...original, base: { ...item(), fields: [{ ...field(), sectionId }] } })));
   }
 });
+
+
+test("unsupported values remain byte-for-byte untouched when another field changes", () => {
+  const values = [field("Image", '<image dam-id="opaque" custom="a&amp;b" src="https://tenant.stylelabs.cloud/api/public/content/a" />'), field("File", '<file mediaid="{11111111-1111-1111-1111-111111111111}" />'), field("Rich Text", '<p onclick="alert(1)">Hello &amp; <b>world</b></p>'), field("Custom", " \r\n<unknown/>")];
+  for (const unsupported of values) {
+    const extra = {...unsupported,fieldId:"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",name:"Other"};
+    const initial = state(); const base = {...initial.base,fields:[...initial.base.fields,extra]};
+    const changes = planChanges({...initial,base});
+    strictEqual(changes.length,1); strictEqual(changes[0].fieldId,fieldId);
+    strictEqual(base.fields[1].value,unsupported.value);
+    strictEqual(parseEditorState(JSON.stringify({...initial,base})).base.fields[1].value,unsupported.value);
+  }
+});

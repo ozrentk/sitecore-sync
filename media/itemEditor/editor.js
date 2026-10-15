@@ -8,6 +8,8 @@ let selectionRequestId = 0;
 let activePicker;
 let cancelDrag;
 const linkOpen = new Map();
+const assetRequests = new Map();
+let assetRequestId = 0;
 document.addEventListener("keydown", event => { if (event.key === "Escape") { cancelDrag?.(); activePicker?.close(); } });
 document.addEventListener("keydown", event => {
   if ((event.ctrlKey || event.metaKey) && !event.altKey && !event.target.matches("input, textarea") && ["z", "y"].includes(event.key.toLowerCase())) {
@@ -24,6 +26,11 @@ const send = (type, extra = {}) => api.postMessage({ type, revision, ...extra })
 for (const action of ["save", "revert", "reconcile", "locale"]) document.getElementById(action).addEventListener("click", () => send(action));
 window.addEventListener("message", event => {
   const state = event.data;
+  if (state.type === "assetPreview") {
+    const pending = assetRequests.get(state.id);
+    if (pending && pending.request === state.request && state.revision === revision) { assetRequests.delete(state.id); pending.receive(state); }
+    return;
+  }
   if (state.type === "draftValidation") {
     if (state.revision !== revision) return;
     const stored = [...document.querySelectorAll("[data-field-id]")].find(control => control.dataset.fieldId === state.id);
@@ -80,6 +87,7 @@ window.addEventListener("message", event => {
   cancelDrag?.();
   activePicker?.close(false);
   selectionRequests.clear();
+  assetRequests.clear();
   revision = state.revision;
   blocked = state.busy || state.pending;
   document.getElementById("title").textContent = state.item.name;
@@ -118,15 +126,17 @@ window.addEventListener("message", event => {
     row.append(label);
     renderFieldInfo(row, field, meta);
     if (field.reason) {
-      const reason = document.createElement("p"); reason.className = "meta"; reason.textContent = `Read-only: ${field.reason}`;
-      const value = document.createElement("pre"); value.textContent = field.raw;
+      const value = renderReadOnlyField(field, {
+        requestAsset: receive => { const request = ++assetRequestId; assetRequests.set(field.id, {request, receive}); send("previewAsset", {id:field.id,request}); },
+        openAsset: () => send("openAsset", {id:field.id,request:assetRequestId})
+      });
       if (field.kind === "generallink") {
         const kind = document.createElement("p"); kind.className = "meta link-type-readonly";
         const token = /\blinktype\s*=\s*["']([^"']*)["']/i.exec(field.raw)?.[1];
         kind.textContent = `Link type: ${token || "unrecognized"} (read-only)`; row.append(kind);
       }
       if (field.selectionKind && !["checklist", "multilist", "treelist", "treelistex"].includes(field.selectionKind)) row.append(selectionLabel(field));
-      row.append(reason, value);
+      row.append(value);
     } else if (field.kind === "namevalues") {
       renderNameValues(row, field);
     } else if (field.kind === "generallink") {

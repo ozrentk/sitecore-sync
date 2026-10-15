@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.44.0
+
+- Make unsupported editor fields inspectable: Image/File metadata, on-demand safe asset previews/reference resolution, inert Rich Text formatting with original HTML, and explicit empty/unavailable/raw states.
+- Keep asset failures visible without losing metadata; scope requests to the captured connection and cancel obsolete results. Preserve unsupported values when saving other fields.
+- Show matching Image/File metadata and Rich Text/source presentation in Item Details without changing comparison or transfer behavior.
+
 ## 0.43.1
 
 - Inset expanded General Link properties with surrounding spacing to visually group them within their field.

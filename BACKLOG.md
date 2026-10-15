@@ -154,3 +154,10 @@ Use this file as the single backlog inventory. Add newly agreed work here, prese
 - Replaced the type dropdown with compact keyboard-accessible radios and inline expandable properties. Collapsed fields show a destination and non-default summary; errors expand the field, while protected/unsupported variants keep their type identification and guards.
 - Type-specific alternatives survive switching, native Undo/Redo and backup/reload. The host writes only the valid active type and removes inapplicable attributes on conversion. Save/Clear/Revert discard temporary alternatives; no-content-change Save performs no Sitecore mutation.
 - Existing Source-aware picking, exact-locale/fallback protection and custom XML/DAM metadata preservation remain intact. No media/DAM selection, Rich Text or publishing scope was added. Automated/browser checks use isolated fixtures; no live Sitecore writes.
+
+
+### B24/B25 display gap closed before B27 — 0.44.0
+
+- Unsupported editing no longer means uninspectable content: Image/File metadata and bounded on-demand asset checks, read-only sanitized Rich Text with unchanged HTML source, and explicit raw/empty/unavailable states. Item Details shares metadata/source/Rich Text display.
+- Media Library references without URLs resolve names/paths only. SVG/private/custom-CDN previews remain unavailable with retained evidence; no URL guessing, uploads, asset selection, Content Hub credentials, Rich Text editor or publishing expansion.
+- Read-only Dev evidence verified Content Hub mappings and a public JPEG. Isolated tests cover security boundaries, stale results, connection changes, raw preservation and failed previews. No Sitecore mutations. B27 remains separate.

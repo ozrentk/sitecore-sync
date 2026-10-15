@@ -1,4 +1,5 @@
 import type { XmCloudConnection } from "../connections/connection";
+import { fieldAssetUrl, readFieldImage } from "./fieldPresentation";
 import { buildFallbackProbes, collectFallbackDiagnostic, serializeFallbackDiagnostic } from "./fallbackDiagnostics";
 import { randomUUID } from "node:crypto";
 import { print } from "graphql";
@@ -1203,6 +1204,22 @@ export class AuthoringContentClient {
         : "";
       return [normalizeGuid(template.itemId), configuredIcon || undefined];
     }));
+  }
+
+  async loadFieldAsset(connection: XmCloudConnection, clientSecret: string, source: string, image: boolean, signal: AbortSignal): Promise<{ url: string; dataUri?: string }> {
+    const destination = fieldAssetUrl(connection.serverUrl, source);
+    if (!destination) throw new Error("Unsupported asset destination.");
+    const token = destination.authenticated ? await this.getAccessToken(connection, clientSecret, signal) : undefined;
+    signal.throwIfAborted();
+    const response = await this.http.request(destination.url, {
+      method: image ? "GET" : "HEAD", redirect: "error", credentials: "omit",
+      headers: token ? { authorization: `Bearer ${token}` } : {},
+    }, { name: "Field asset preview", signal, retryable: false });
+    if (image) return { url: destination.url.href, dataUri: await readFieldImage(response, signal) };
+    const type = response.headers.get("content-type")?.split(";")[0].trim().toLowerCase();
+    await response.body?.cancel(); signal.throwIfAborted();
+    if (!response.ok || response.redirected || !type || !["application/pdf", "application/octet-stream", "application/zip", "text/plain", "image/png", "image/jpeg", "image/gif", "image/webp", "video/mp4", "audio/mpeg"].includes(type)) throw new Error("File reference unavailable or unsupported.");
+    return { url: destination.url.href };
   }
 
   async loadItemIcon(

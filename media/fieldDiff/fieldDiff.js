@@ -272,8 +272,9 @@ function createFieldCell(field, pair, details) {
   if (sourceHint) metadata.textContent += ` · ${sourceHint.label}`;
   metadata.title = `Field ID: ${field.fieldId}${field.sectionName ? `\nSection: ${field.sectionName}` : ""}`;
   if (sourceHint) metadata.title += `\n${sourceHint.tooltip}`;
-  const value = document.createElement("pre");
-  value.textContent = field.value || "(empty)";
+  const structured = ["image", "file", "rich text"].includes(field.type.toLowerCase());
+  const value = structured ? renderReadOnlyField(field) : document.createElement("pre");
+  if (!structured) value.textContent = typeof field.value !== "string" ? "Value unavailable" : field.value === "" ? "(empty)" : field.value;
   cell.append(heading, metadata, value);
   if (pair.flags.length && (pair.left?.textual || pair.right?.textual)) {
     cell.classList.add("diff-launch");
