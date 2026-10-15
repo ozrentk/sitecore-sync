@@ -1,3 +1,4 @@
+const richTextStyleNonce = document.currentScript?.nonce || "";
 /* Shared read-only display. Raw values never become editor inputs. */
 globalThis.renderReadOnlyField = function (field, options = {}) {
   const box = document.createElement("div"); box.className = "readonly-field";
@@ -26,12 +27,17 @@ globalThis.renderReadOnlyField = function (field, options = {}) {
     information.append(list);
   }
   if (presentation.kind === "richtext") {
-    const preview = document.createElement("div"); preview.className = "richtext-preview";
+    const preview = document.createElement("iframe"); preview.className = "richtext-preview";
+    preview.title = "Read-only Rich Text preview";
+    preview.setAttribute("sandbox", "");
+    preview.referrerPolicy = "no-referrer";
     preview.setAttribute("aria-label", "Read-only Rich Text preview");
-    // Template contents are inert: no network, scripts, custom elements or active DOM.
-    // Rebuild a small formatting-only tree; never attach parsed nodes or attributes.
+    // Parse inertly, then rebuild static content in an opaque-origin sandbox.
+    // Never allow navigation, scripts, forms or resource attributes into the frame.
     if (raw.length <= 262144) {
       const template = document.createElement("template"); template.innerHTML = raw;
+      const content = document.createElement("div");
+      const styles = ["body{margin:16px;font:14px system-ui;overflow-wrap:anywhere} table{border-collapse:collapse} td,th{border:1px solid #888;padding:4px} pre{white-space:pre-wrap}"];
       const allowed = new Set("p br strong b em i u s del ins sub sup h1 h2 h3 h4 h5 h6 ul ol li blockquote pre code table thead tbody tfoot tr th td hr div span".split(" "));
       const discard = new Set("script style iframe object embed svg math form input button textarea select link meta base template noscript".split(" "));
       let count = 0; let truncated = false;
@@ -40,17 +46,31 @@ globalThis.renderReadOnlyField = function (field, options = {}) {
         if (from.nodeType === Node.TEXT_NODE) { to.append(document.createTextNode(from.textContent)); return; }
         if (from.nodeType !== Node.ELEMENT_NODE) return;
         const tag = from.localName;
+        if (tag === "style") { styles.push(from.textContent); return; }
         if (discard.has(tag)) return;
         if (tag === "img") { const placeholder = document.createElement("span"); placeholder.textContent = `[Image: ${from.getAttribute("alt") || "embedded asset"}]`; to.append(placeholder); return; }
         const target = allowed.has(tag) ? document.createElement(tag) : document.createElement("span");
+        for (const key of ["class", "id", "dir", "lang", "colspan", "rowspan"]) {
+          if (from.hasAttribute(key)) target.setAttribute(key, from.getAttribute(key));
+        }
+        if (from.hasAttribute("style")) {
+          const marker = `rt-${count}`; target.setAttribute("data-preview-style", marker);
+          const sheet = new CSSStyleSheet();
+          sheet.replaceSync(`x{${from.getAttribute("style")}}`);
+          const declaration = sheet.cssRules[0]?.style?.cssText || "";
+          styles.push(`[data-preview-style="${marker}"]{${declaration}}`);
+        }
         for (const child of from.childNodes) copy(child, target, depth + 1);
         to.append(target);
       };
-      for (const child of template.content.childNodes) copy(child, preview, 0);
+      for (const child of template.content.childNodes) copy(child, content, 0);
+      const policy = `default-src 'none'; script-src 'none'; style-src 'nonce-${richTextStyleNonce}'; img-src 'none'; font-src 'none'; connect-src 'none'; frame-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none';`;
+      const html = `<!doctype html><html><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="${policy}"><style nonce="${richTextStyleNonce}">${styles.join("\n").replace(/</gu, "\\3c ")}</style></head><body>${content.innerHTML}</body></html>`;
+      preview.src = `data:text/html;charset=utf-8,${encodeURIComponent(html)}`;
       box.append(preview);
-      if (!preview.textContent.trim()) note("The stored HTML is populated but has no displayable text in this preview.");
+      if (!content.textContent.trim()) note("The stored HTML is populated but has no displayable text in this preview.");
       if (truncated) note("Preview limited to bounded content; the complete original HTML is available below.");
-      note("Formatting-only preview. Links, embedded media, scripts and styles are inactive; original HTML is available below.");
+      note("Isolated preview. Scripts, links and external resources are blocked; original HTML is available below.");
     } else note("Preview unavailable: HTML exceeds the preview size limit. Original HTML is available below.");
   }
   if (["image", "file"].includes(presentation.kind) && (presentation.source || presentation.mediaId)) {

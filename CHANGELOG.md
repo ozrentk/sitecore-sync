@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.45.0
+
+- Isolate Rich Text previews in sandboxed frames, preserving inline formatting and embedded CSS while blocking scripts, navigation and external requests.
+
 ## 0.44.1
 
 - Preview ordinary SVG logos using a bounded shape-only allowlist; reject scripts, external references, styles and unsupported markup.
