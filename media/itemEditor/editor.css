@@ -63,7 +63,7 @@ select { font:inherit; color:var(--vscode-input-foreground); background:var(--vs
 .name-value-row { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 2fr) auto; gap: 6px; }
 .name-value-row input { min-width: 0; width: 100%; box-sizing: border-box; }
 .structured-error:empty { display: none; }
-.link-form { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px 12px; margin-top: 8px; }
+.link-form { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px 12px; margin: 12px 12px 16px; }
 .link-property { display: flex; flex-direction: column; gap: 4px; min-width: 0; font-size: 12px; font-weight: normal; color: var(--vscode-descriptionForeground); }
 .link-property input { width: 100%; min-width: 0; font-size: var(--vscode-font-size); }
 @media (max-width: 500px) { .link-form { grid-template-columns: minmax(0, 1fr); } }
