@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.44.1
+
+- Preview ordinary SVG logos using a bounded shape-only allowlist; reject scripts, external references, styles and unsupported markup.
+- Move Image/File attributes and stored XML into field information, keep the main field compact, and distinguish certificate and unsupported-SVG failures.
+
 ## 0.44.0
 
 - Make unsupported editor fields inspectable: Image/File metadata, on-demand safe asset previews/reference resolution, inert Rich Text formatting with original HTML, and explicit empty/unavailable/raw states.
