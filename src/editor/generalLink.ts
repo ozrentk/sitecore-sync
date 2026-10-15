@@ -79,9 +79,10 @@ export function validateLinkValues(values: LinkValues): void {
 export function generalLinkInput(raw: string): string { return JSON.stringify({ _xml: raw, ...parseGeneralLink(raw).values }); }
 export function serializeGeneralLink(raw: string, input: string): string {
   const current = parseGeneralLink(raw); const parsed: unknown = JSON.parse(input);
-  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed) || Object.keys(parsed).length !== linkKeys.length + 1
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed) || Object.keys(parsed).some(key => ![...linkKeys, "_xml", "_alternatives"].includes(key))
     || typeof (parsed as { _xml?: unknown })._xml !== "string"
     || linkKeys.some(key => !Object.hasOwn(parsed, key) || typeof (parsed as LinkValues)[key] !== "string")) throw new EditorValidationError("Invalid General Link draft.");
+  validateLinkAlternatives((parsed as { _alternatives?: unknown })._alternatives);
   const template = parseGeneralLink((parsed as { _xml: string })._xml);
   const customAttributes = (document: LinkDocument) => document.attributes.filter(a => !linkKeys.includes(a.name as LinkKey)).map(a => document.raw.slice(a.start, a.end));
   if (raw && JSON.stringify(customAttributes(current)) !== JSON.stringify(customAttributes(template))) throw new EditorValidationError("Custom link attributes cannot be added, changed or removed by a field edit.");
@@ -95,7 +96,7 @@ export function serializeGeneralLink(raw: string, input: string): string {
   if (document.custom && modified.some(key => !["text", "title", "target", "class"].includes(key))) throw new EditorValidationError("Custom link metadata is preserved. Only link text, title, target and CSS class may be edited on this link.");
   if (linkKeys.every(key => values[key] === template.values[key])) return template.raw;
   // Only applicable destination attributes may change. Existing extra ordinary attributes remain untouched.
-  const applicable = ["linktype", "text", "title", "target", "class", "anchor", ...(values.linktype === "internal" ? ["id", "querystring"] : ["url"])];
+  const applicable = ["linktype", "text", "title", "target", "class", ...(values.linktype !== "mailto" ? ["anchor"] : []), ...(values.linktype === "internal" ? ["id", "querystring"] : ["url"])];
   for (const key of modified) if (!applicable.includes(key) && values[key] !== "") throw new EditorValidationError("This property does not apply to the selected link kind.");
   let result = document.raw || "<link />"; const insert = document.raw ? document.insert : 5;
   const present = new Set(document.attributes.map(attribute => attribute.name));
@@ -104,9 +105,22 @@ export function serializeGeneralLink(raw: string, input: string): string {
   result = result.slice(0, insert) + added + result.slice(insert);
   for (const attribute of [...document.attributes].reverse()) {
     const key = attribute.name as LinkKey;
-    if (modified.includes(key)) result = result.slice(0, attribute.start) + ` ${key}="${encodeXml(values[key])}"` + result.slice(attribute.end);
+    if (values.linktype !== previous.linktype && linkKeys.includes(key) && !applicable.includes(key)) result = result.slice(0, attribute.start) + result.slice(attribute.end);
+    else if (modified.includes(key)) result = result.slice(0, attribute.start) + ` ${key}="${encodeXml(values[key])}"` + result.slice(attribute.end);
   }
   return result;
+}
+
+/** Alternatives are local draft data only. Invalid intermediate destinations are allowed here,
+ * but each bounded entry must have the exact shape produced by the editor. */
+export function validateLinkAlternatives(value: unknown): void {
+  if (value === undefined) return; // Backups from 0.42.0 have only the active link.
+  if (!value || typeof value !== "object" || Array.isArray(value)) throw new EditorValidationError("Invalid link alternatives.");
+  const keys = ["id", "url", "anchor", "querystring"];
+  for (const [kind, entry] of Object.entries(value)) {
+    if (!["internal", "external", "mailto", "anchor"].includes(kind) || !entry || typeof entry !== "object" || Array.isArray(entry)
+      || Object.keys(entry).length !== keys.length || keys.some(key => !Object.hasOwn(entry, key) || typeof (entry as Record<string, unknown>)[key] !== "string" || (entry as Record<string, string>)[key].length > 65536)) throw new EditorValidationError("Invalid link alternative properties.");
+  }
 }
 /** Changed destinations are resolved on the pinned connection; retained unresolved IDs are not replaced. */
 export async function validateLinkTarget(field: AuthoringItemField, value: string, io: SelectionIO): Promise<void> {

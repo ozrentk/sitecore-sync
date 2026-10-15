@@ -572,3 +572,12 @@ Primary references:
 - [Sitecore query-string parameter encoding](https://archive.doc.sitecore.com/xp/en/SdnArchive/upload/sitecore6/64/presentation_component_reference-usletter.pdf)
 - [Sitecore General Link properties](https://doc.sitecore.com/xp/en/developers/105/sitecore-experience-manager/access-general-link-fields.html)
 - [Content Hub public links and mapped attributes](https://doc.sitecore.com/xp/en/developers/connect-for-ch/52/connect-for-content-hub/manage-public-links-to-a-dam-asset.html)
+
+
+## Compact General Link and recoverable alternatives (0.43.0)
+
+Use a single-choice radio group styled like Item Details Hidden/All: Sitecore item, External URL, Email, Anchor. One active type, roving tab stop, Arrow/Home/End and Space/Enter keyboard operation. Collapsed fields show the type group, one destination (item path/URL/email/anchor), separate Clear, properties chevron and a concise non-default property summary. Destination focus/click and type changes expand inline properties. Moving focus inside the field does not collapse; validation failures force expansion, including restored invalid drafts. Only the existing source picker is a popover. No link execution or automatic save.
+
+Keep common text/title/target/class values across type switches. Store bounded per-type id/url/anchor/querystring alternatives inside the existing field draft input; invalid intermediate destinations are allowed while inactive. The host validates the active link and alternative shape, and serializes no alternative data. Conversion removes inapplicable ordinary XML attributes. Preserve original XML for unchanged values and existing custom metadata; protected custom/DAM links show only their current type, with destination/type conversion blocked. Unsupported kinds show a read-only type identifier. Source/context/fallback guards remain unchanged.
+
+Native edit events, dirty state, Undo/Redo and backup/reload include alternatives. Successful Save clears all temporary alternatives, even when the active serialized content is unchanged and no mutation is needed. Explicit Clear clears them too. Revert reloads the saved link, clears alternatives and ends prior edit history. Undo after Save restores local history and requires another explicit Save to change Sitecore. Invalid active data blocks Save but never blocks switching back. Keep open/closed properties state independent of dirty content; it may remain expanded after a host refresh.
