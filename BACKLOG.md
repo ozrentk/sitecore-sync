@@ -147,3 +147,10 @@ Use this file as the single backlog inventory. Add newly agreed work here, prese
 - Added Name Value List rows with lossless unchanged encoding, independent retained duplicates, explicit add/remove/empty/clear and host validation. New duplicate/empty keys and malformed representations are blocked; no consumer-side duplicate semantics are claimed.
 - Added ordinary General Link internal/HTTP(S)/email/anchor forms, Source-aware bounded internal item picking and changed-target validation. XML and custom/DAM attributes survive unrelated edits and native Undo after Save/Clear. Custom metadata restricts destination/kind edits; unsupported connector/media/JavaScript/search variants remain read-only. No link execution or preview.
 - Both retain editor identity, exact-locale/fallback guards, shared/unversioned warnings, changed-only Save, conflicts, backups, native undo, non-retried writes and readback. Read-only Dev examples verified internal/external XML and Source metadata; no live writes. Rich Text/media/fallback-source/page editing and editor publishing remain separate stages.
+
+
+### B24/B25 delivery update — compact General Link (0.43.0)
+
+- Replaced the type dropdown with compact keyboard-accessible radios and inline expandable properties. Collapsed fields show a destination and non-default summary; errors expand the field, while protected/unsupported variants keep their type identification and guards.
+- Type-specific alternatives survive switching, native Undo/Redo and backup/reload. The host writes only the valid active type and removes inapplicable attributes on conversion. Save/Clear/Revert discard temporary alternatives; no-content-change Save performs no Sitecore mutation.
+- Existing Source-aware picking, exact-locale/fallback protection and custom XML/DAM metadata preservation remain intact. No media/DAM selection, Rich Text or publishing scope was added. Automated/browser checks use isolated fixtures; no live Sitecore writes.

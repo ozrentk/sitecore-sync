@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { deepStrictEqual, strictEqual, rejects } from "node:assert/strict";
 import { mock } from "node:test";
 import { ItemEditorProvider, type ItemDocument } from "../../src/editor/itemEditorProvider";
-import { editorKey, normalizeId, parseEditorState, planChanges, type EditorState } from "../../src/editor/itemEditorModel";
+import { editorKey, fieldInput, normalizeId, parseEditorState, planChanges, type EditorState } from "../../src/editor/itemEditorModel";
 import type { ConnectionStore } from "../../src/connections/connectionStore";
 import type { AuthoringContentClient, AuthoringItemDetails, UpdateAuthoringItemInput } from "../../src/sitecore/authoringClient";
 import type { IntegrationTest } from "./testSupport";
@@ -20,6 +20,58 @@ function fixture(): EditorState {
 }
 
 export const itemEditorTests: readonly IntegrationTest[] = [{
+  name: "General Link lazy path resolution survives common edits but rejects a changed destination",
+  async execute(): Promise<void> {
+    const directory=await mkdtemp(join(tmpdir(),"xm-link-path-"));const initial=fixture();const targetId="88888888888888888888888888888888";
+    const field={...initial.base.fields[0],type:"General Link",value:`<link linktype="internal" id="${targetId}" text="Old"/>`,selectionSource:""};
+    let finish!:()=>void;let started!:()=>void;let gate:Promise<void>;
+    const provider=new ItemEditorProvider({globalStorageUri:vscode.Uri.file(directory)} as vscode.ExtensionContext,
+      {get:()=>({id:"test",serverUrl:"https://example.test"}),getClientSecret:async()=>"secret"} as unknown as ConnectionStore,
+      {loadSelectionItem:async()=>{started();await gate;return {itemId:targetId,name:"Page",displayName:"Page",path:"/sitecore/content/Page",hasChildren:false};}} as unknown as AuthoringContentClient);
+    const messages:Record<string,unknown>[]=[];let doc:ItemDocument|undefined;
+    try {
+      await vscode.workspace.fs.createDirectory(provider.directory);const uri=vscode.Uri.joinPath(provider.directory,`${editorKey(initial.target)}.xmitem`);
+      await vscode.workspace.fs.writeFile(uri,Buffer.from(JSON.stringify({...initial,base:{...initial.base,fields:[field]}})));
+      doc=await provider.openCustomDocument(uri,{backupId:undefined,untitledDocumentData:undefined});
+      doc.panels.add({webview:{postMessage:async(message:Record<string,unknown>)=>{messages.push(message);return true;}}} as unknown as vscode.WebviewPanel);
+      const harness=provider as unknown as {resolveLabels(doc:ItemDocument,revision:number,controller:AbortController):Promise<void>};
+      for(const changedTarget of [false,true]) {
+        doc.state={...doc.state,drafts:{}};messages.length=0;
+        const began=new Promise<void>(resolve=>{started=resolve;});gate=new Promise<void>(resolve=>{finish=resolve;});
+        const controller=new AbortController();doc.labelRequest=controller;const pending=harness.resolveLabels(doc,doc.revision,controller);await began;
+        const values={...JSON.parse(fieldInput(field)),text:"Edited while loading",...(changedTarget?{id:"99999999999999999999999999999999"}:{})};
+        doc.state={...doc.state,drafts:{[fieldId]:{input:JSON.stringify(values),clear:false}}};finish();await pending;
+        strictEqual(messages.filter(message=>message.type==="selectionLabel").length,changedTarget?0:1);
+      }
+    } finally {finish?.();doc?.dispose();provider.dispose();await rm(directory,{recursive:true,force:true});}
+  }
+},{
+  name: "General Link alternatives survive native undo and backup; Save and Revert clear temporary alternatives",
+  async execute(): Promise<void> {
+    const directory=await mkdtemp(join(tmpdir(),"xm-link-alternatives-"));const initial=fixture();
+    const field={...initial.base.fields[0],type:"General Link",value:'<link linktype="external" url="https://example.test" text="Saved" />',selectionSource:""};
+    const state={...initial,base:{...initial.base,fields:[field]}};
+    const provider=new ItemEditorProvider({globalStorageUri:vscode.Uri.file(directory)} as vscode.ExtensionContext,{get:()=>undefined} as unknown as ConnectionStore,{} as AuthoringContentClient);
+    const edits:vscode.CustomDocumentEditEvent<ItemDocument>[]=[];const subscription=provider.onDidChangeCustomDocument(edit=>edits.push(edit));
+    const harness=provider as unknown as {message(doc:ItemDocument,message:unknown):Promise<void>;io:()=>{read:()=>Promise<AuthoringItemDetails>}};
+    harness.io=()=>({read:async()=>state.base}); // Isolated readback; no remote calls.
+    let doc:ItemDocument|undefined;const cancellation=new vscode.CancellationTokenSource();const current=()=>doc!.state.drafts[fieldId];
+    try {
+      await vscode.workspace.fs.createDirectory(provider.directory);const uri=vscode.Uri.joinPath(provider.directory,`${editorKey(state.target)}.xmitem`);
+      await vscode.workspace.fs.writeFile(uri,Buffer.from(JSON.stringify(state)));doc=await provider.openCustomDocument(uri,{backupId:undefined,untitledDocumentData:undefined});
+      const input=JSON.stringify({...JSON.parse(fieldInput(field)),_alternatives:{mailto:{id:"",url:"incomplete",anchor:"",querystring:""},internal:{id:"",url:"",anchor:"section",querystring:"draft-only=1"}}});
+      const change=()=>harness.message(doc!,{type:"change",id:fieldId,input,clear:false,revision:doc!.revision});await change();
+      strictEqual(edits.length,1);strictEqual(planChanges(doc.state).length,0);await edits[0].undo();strictEqual(current(),undefined);await edits[0].redo();strictEqual(current().input,input);
+      const backup=await provider.backupCustomDocument(doc,{destination:vscode.Uri.file(join(directory,"backup"))});
+      const recovered=await provider.openCustomDocument(uri,{backupId:backup.id,untitledDocumentData:undefined});
+      strictEqual(recovered.state.drafts[fieldId].input,input);recovered.dispose();
+      await provider.saveCustomDocument(doc,cancellation.token);deepStrictEqual(doc.state.drafts,{});strictEqual(doc.state.base.fields[0].value,field.value);
+      await edits[0].undo();await edits[0].redo();strictEqual(current().input,input);
+      await provider.revertCustomDocument(doc,cancellation.token);deepStrictEqual(doc.state.drafts,{});strictEqual(doc.state.base.fields[0].value,field.value);
+      await rejects(async()=>await edits[0].redo(),/cannot be restored/);await backup.delete();
+    } finally {cancellation.dispose();subscription.dispose();doc?.dispose();provider.dispose();await rm(directory,{recursive:true,force:true});}
+  }
+},{
   name: "structured editor native undo restores encoded rows and custom XML after saved clear and backup",
   async execute(): Promise<void> {
     const directory=await mkdtemp(join(tmpdir(),"xm-structured-history-"));const initial=fixture();
@@ -87,18 +139,33 @@ export const itemEditorTests: readonly IntegrationTest[] = [{
           const last=nv.querySelector(".name-value-row:last-child");if(document.activeElement!==last.querySelector("input"))throw Error("Add row lost focus");
           last.querySelector("button").click();
           if(!nv.contains(document.activeElement))throw Error("Remove row lost focus");
-          const text=link.querySelector('[data-link-property="text"]');text.value="New & text";text.dispatchEvent(new Event("input"));
-          const kind=link.querySelector("select");kind.value="mailto";kind.dispatchEvent(new Event("change"));
+          if(!link.querySelector(".link-form").hidden||!link.querySelector(".link-summary").textContent.includes("Text: Old"))throw Error("Initial link should be compact with summary");
+          link.querySelector('[data-link-property="url"]').focus();
+          if(link.querySelector(".link-form").hidden)throw Error("Destination focus must expand inline");
+          const text=link.querySelector('[data-link-property="text"]');text.focus();if(link.querySelector(".link-form").hidden)throw Error("Property focus must not collapse");text.value="New & text";text.dispatchEvent(new Event("input"));
+          const choose=kind=>[...link.querySelectorAll("[data-link-type]")].find(b=>b.dataset.linkType===kind).click();choose("mailto");
           const url=link.querySelector('[data-link-property="url"]');url.value="name@example.test";url.dispatchEvent(new Event("input"));
           if(JSON.parse(link.querySelector("[data-field-id]").value).url!=="mailto:name@example.test")throw Error("Email representation wrong");
-          kind.value="anchor";kind.dispatchEvent(new Event("change"));url.value="section";url.dispatchEvent(new Event("input"));
+          choose("external");if(url.value!=="https://example.test"||text.value!=="New & text")throw Error("Type switch lost destination/common properties");
+          choose("mailto");if(url.value!=="name@example.test")throw Error("Email alternative lost");
+          url.value="invalid";url.dispatchEvent(new Event("input"));
+          await until(()=>link.querySelector(".structured-error").textContent);
+          link.querySelector(".link-expand").click();if(link.querySelector(".link-form").hidden)throw Error("Invalid active link must remain expanded");
+          choose("external"); // Invalid alternative must not trap navigation or save.
+          await until(()=>!link.querySelector(".structured-error").textContent);
+          link.querySelector(".link-expand").click();if(!link.querySelector(".link-form").hidden)throw Error("Valid properties must collapse");
+          const radio=link.querySelector('[data-link-type="external"]');radio.focus();radio.dispatchEvent(new KeyboardEvent("keydown",{key:"ArrowRight",bubbles:true}));
+          if(link.querySelector('[aria-checked="true"]').dataset.linkType!=="mailto"||document.activeElement.dataset.linkType!=="mailto")throw Error("Radio keyboard selection/focus failed");
+          choose("external");
+
+          choose("anchor");url.value="section";url.dispatchEvent(new Event("input"));
           if(JSON.parse(link.querySelector("[data-field-id]").value).url!=="section")throw Error("Anchor must use documented URL representation");
-          kind.value="internal";kind.dispatchEvent(new Event("change"));
+          choose("internal");
           link.querySelector(".selection-trigger").click();await until(()=>link.querySelectorAll(".picker-choice").length===2);
           [...link.querySelectorAll(".picker-choice")].find(b=>b.textContent.includes("Target page")).click();
-          if(!link.querySelector(".selection-popup").hidden||link.querySelector(".selection-trigger").value!=="Target page")throw Error("Internal target selection failed");
+          if(!link.querySelector(".selection-popup").hidden||link.querySelector(".selection-trigger").value!=="/sitecore/content/Page")throw Error("Internal target selection failed");
           const damText=dam.querySelector('[data-link-property="text"]');damText.value="Metadata kept";damText.dispatchEvent(new Event("input"));
-          if(!dam.querySelector("select").disabled||!dam.querySelector('[data-link-property="url"]').disabled)throw Error("Custom destination must be protected");
+          if(dam.querySelectorAll("[role=radio]").length!==1||!dam.querySelector('[data-link-property="url"]').disabled)throw Error("Custom destination must be protected");
           if(named("Unsupported").querySelector("[data-field-id]")||document.querySelector("a[href]"))throw Error("Unsupported link became editable or executable");
           const stored=nv.querySelector("[data-field-id]");
           window.dispatchEvent(new MessageEvent("message",{data:{type:"draftValidation",revision:event.data.revision-1,id:stored.dataset.fieldId,input:stored.value,error:"STALE"}}));

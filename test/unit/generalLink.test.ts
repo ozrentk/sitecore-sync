@@ -8,6 +8,26 @@ const external = '<link text="Home" linktype="external" url="https://example.tes
 const edit = (raw: string, patch: Record<string, string | undefined>) => JSON.stringify({ ...JSON.parse(generalLinkInput(raw)), ...patch });
 const field = (value = external, selectionSource: string | undefined = ""): AuthoringItemField => ({ fieldId:id,name:"Link",label:"Link",type:"General Link",typeKey:"general link",value,scope:"VERSIONED",sortOrder:0,sectionSortOrder:0,sectionName:"Content",isStandardTemplate:false,containsFallbackValue:false,containsInheritedValue:false,containsStandardValue:false,textual:false,selectionSource });
 
+test("link alternatives are bounded recoverable drafts and never serialized or validated as the active destination", () => {
+  const input={...JSON.parse(generalLinkInput(external)),_alternatives:{mailto:{id:"",url:"not an email",anchor:"",querystring:""},internal:{id:"invalid",url:"",anchor:"kept",querystring:"hidden=1"}}};
+  strictEqual(serializeGeneralLink(external,JSON.stringify(input)),external);
+  input.text="New";const value=serializeGeneralLink(external,JSON.stringify(input));
+  strictEqual(value.includes("hidden"),false);strictEqual(value.includes("not an email"),false);
+  strictEqual(parseGeneralLink(value).values.text,"New");
+  for(const bad of [null,[],{javascript:{id:"",url:"x",anchor:"",querystring:""}},{external:{url:"x"}},{external:{id:"",url:1,anchor:"",querystring:""}}])throws(()=>serializeGeneralLink(external,JSON.stringify({...input,_alternatives:bad})));
+  throws(()=>serializeGeneralLink(external,JSON.stringify({...input,linktype:"mailto",url:"invalid"})),/email/);
+});
+
+test("link conversion removes inactive attributes but keeps compatible common properties", () => {
+  const raw='<link linktype="internal" id="'+id+'" url="/old" querystring="old=1" anchor="old" text="Explore" title="Title" target="_blank" class="cta" />';
+  const data={...JSON.parse(generalLinkInput(raw)),linktype:"mailto",id:"",url:"mailto:name@example.test",anchor:"",querystring:"",_alternatives:{internal:{id,url:"/old",anchor:"old",querystring:"old=1"}}};
+  const result=serializeGeneralLink(raw,JSON.stringify(data));
+  strictEqual(/\s(?:id|anchor|querystring)=/u.test(result),false);
+  const parsed=parseGeneralLink(result).values;strictEqual(parsed.text,"Explore");strictEqual(parsed.title,"Title");strictEqual(parsed.target,"_blank");strictEqual(parsed.class,"cta");
+  const custom=raw.replace(' />',' dam-id="asset" />');
+  throws(()=>serializeGeneralLink(custom,JSON.stringify({...data,_xml:custom})),/Custom/);
+});
+
 test("General Link ordinary variants round-trip and edit XML text without normalizing untouched attributes", () => {
   const variants = [external, `<link text='Home' anchor='' linktype='internal' class='' title='' target='_blank' querystring='' id='{11111111-1111-1111-1111-111111111111}' />`,
     '<link linktype="mailto" url="mailto:name@example.test"></link>', '<link linktype="anchor" url="section" />', '<link linktype="anchor" anchor="section" />'];

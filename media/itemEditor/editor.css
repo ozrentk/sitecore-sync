@@ -67,3 +67,14 @@ select { font:inherit; color:var(--vscode-input-foreground); background:var(--vs
 .link-property { display: flex; flex-direction: column; gap: 4px; min-width: 0; font-size: 12px; font-weight: normal; color: var(--vscode-descriptionForeground); }
 .link-property input { width: 100%; min-width: 0; font-size: var(--vscode-font-size); }
 @media (max-width: 500px) { .link-form { grid-template-columns: minmax(0, 1fr); } }
+.link-header { display:flex; align-items:center; gap:8px; margin-top:6px; flex-wrap:wrap; }
+.link-types { display:inline-flex; border:1px solid var(--vscode-panel-border); border-radius:3px; overflow:hidden; }
+.link-types button { margin:0; padding:4px 7px; border:0; border-right:1px solid var(--vscode-panel-border); background:transparent; color:var(--vscode-foreground); font-size:11px; }
+.link-types button:last-child { border-right:0; }
+.link-types button:hover { background:var(--vscode-toolbar-hoverBackground); }
+.link-types button[aria-checked=true] { background:var(--vscode-button-background); color:var(--vscode-button-foreground); }
+.link-types button:focus-visible { outline-offset:-1px; }
+.link-destination { display:flex; align-items:flex-end; gap:6px; margin-top:6px; }
+.link-destination .link-property, .link-destination .selection-trigger { flex:1; min-width:0; width:100%; }
+.link-expand { flex:none; padding:5px; margin:0 0 1px; background:transparent; color:var(--vscode-foreground); }
+.link-summary { white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }

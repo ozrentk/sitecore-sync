@@ -7,6 +7,7 @@ const selectionRequests = new Map();
 let selectionRequestId = 0;
 let activePicker;
 let cancelDrag;
+const linkOpen = new Map();
 document.addEventListener("keydown", event => { if (event.key === "Escape") { cancelDrag?.(); activePicker?.close(); } });
 document.addEventListener("keydown", event => {
   if ((event.ctrlKey || event.metaKey) && !event.altKey && !event.target.matches("input, textarea") && ["z", "y"].includes(event.key.toLowerCase())) {
@@ -26,7 +27,7 @@ window.addEventListener("message", event => {
   if (state.type === "draftValidation") {
     if (state.revision !== revision) return;
     const stored = [...document.querySelectorAll("[data-field-id]")].find(control => control.dataset.fieldId === state.id);
-    if (stored?.value === state.input) { const error = stored.closest(".field").querySelector(".structured-error"); if (error) error.textContent = state.error; }
+    if (stored?.value === state.input) { const error = stored.closest(".field").querySelector(".structured-error"); if (error) { error.textContent = state.error; stored.closest(".field").dispatchEvent(new Event("structuredValidation")); } }
     return;
   }
   if (state.type === "fieldTitles") {
@@ -119,6 +120,11 @@ window.addEventListener("message", event => {
     if (field.reason) {
       const reason = document.createElement("p"); reason.className = "meta"; reason.textContent = `Read-only: ${field.reason}`;
       const value = document.createElement("pre"); value.textContent = field.raw;
+      if (field.kind === "generallink") {
+        const kind = document.createElement("p"); kind.className = "meta link-type-readonly";
+        const token = /\blinktype\s*=\s*["']([^"']*)["']/i.exec(field.raw)?.[1];
+        kind.textContent = `Link type: ${token || "unrecognized"} (read-only)`; row.append(kind);
+      }
       if (field.selectionKind && !["checklist", "multilist", "treelist", "treelistex"].includes(field.selectionKind)) row.append(selectionLabel(field));
       row.append(reason, value);
     } else if (field.kind === "namevalues") {
@@ -221,62 +227,109 @@ function renderGeneralLink(row, field) {
   const empty = () => ({_xml:field.raw,linktype:"external",id:"",url:"",text:"",title:"",target:"",class:"",anchor:"",querystring:""});
   const draft = structuredDraft(row, field, empty()); let values = draft.data;
   if (!values || Object.keys(empty()).some(key => typeof values[key] !== "string")) { draft.error.textContent = "Invalid retained link draft. Revert to reload saved values."; return; }
-  let anchorAttributeOnly = values.linktype === "anchor" && !values.url && Boolean(values.anchor);
-  let mirroredAnchor = values.linktype === "anchor" && Boolean(values.url) && values.url === values.anchor;
-  const form = document.createElement("div"); form.className = "link-form";
-  const kind = document.createElement("select"); kind.id = field.id; kind.disabled = blocked || field.linkCustom; kind.setAttribute("aria-label", `${field.label} link kind`);
-  for (const [value, name] of [["external","External URL"],["internal","Sitecore item"],["mailto","Email"],["anchor","Anchor"]]) { const option = document.createElement("option"); option.value = value; option.textContent = name; kind.append(option); }
-  kind.value = values.linktype;
-  const clear = document.createElement("button"); clear.textContent = "Clear"; clear.disabled = blocked; clear.title = "Store an explicit empty value, not a reset";
-  const actions = document.createElement("div"); actions.className = "selection-controls"; actions.append(kind, clear); row.append(actions, form);
+  const typeNames = [["internal","Sitecore item"],["external","External URL"],["mailto","Email"],["anchor","Anchor"]];
+  const specificKeys = ["id","url","anchor","querystring"];
+  if (values._alternatives !== undefined && (!values._alternatives || typeof values._alternatives !== "object" || Array.isArray(values._alternatives)
+    || Object.entries(values._alternatives).some(([kind,entry]) => !typeNames.some(([type])=>type===kind) || !entry || typeof entry !== "object" || Object.keys(entry).length !== specificKeys.length || specificKeys.some(key=>typeof entry[key]!=="string")))) {
+    draft.error.textContent="Invalid retained link alternatives. Revert to reload saved values.";return;
+  }
+  const snapshot = () => Object.fromEntries(specificKeys.map(key => [key,values[key]]));
+  const remember = () => { values._alternatives = {...values._alternatives,[values.linktype]:snapshot()}; };
+  const names = new Map();
+  const properties = document.createElement("div"); properties.className = "link-form"; properties.id = `${field.id}-properties`;
+  const summary = document.createElement("p"); summary.className = "link-summary meta";
+  const types = document.createElement("div"); types.className = "link-types"; types.id = field.id; types.tabIndex = -1;
+  types.setAttribute("role","radiogroup"); types.setAttribute("aria-label",`${field.label} link type`);
+  const toggle = document.createElement("button"); toggle.className = "link-expand"; toggle.disabled = blocked; toggle.setAttribute("aria-controls",properties.id);
+  let expanded = linkOpen.get(field.id) ?? false;
+  const expand = open => {
+    expanded = Boolean(open || draft.error.textContent); linkOpen.set(field.id,expanded);
+    properties.hidden = !expanded; summary.hidden = expanded || !summary.textContent;
+    toggle.textContent = expanded ? "▴" : "▾"; toggle.setAttribute("aria-expanded",String(expanded));
+    toggle.setAttribute("aria-label",`${expanded ? "Collapse" : "Expand"} ${field.label} properties`);
+  };
+  row.addEventListener("structuredValidation",()=>expand(expanded));
+  const updateSummary = () => {
+    summary.textContent = [values.text && `Text: ${values.text}`, values.title && `Title: ${values.title}`,
+      values.target && (values.target === "_blank" ? "New tab" : values.target !== "_self" && `Target: ${values.target}`),
+      values.class && `Class: ${values.class}`, ["internal","external"].includes(values.linktype) && values.anchor && `Anchor: ${values.anchor}`,
+      values.linktype === "internal" && values.querystring && `Query: ${values.querystring}`].filter(Boolean).join(" · ");
+    summary.title = summary.textContent; summary.hidden = expanded || !summary.textContent;
+  };
+  const changed = () => { remember(); draft.error.textContent = ""; draft.change(values); updateSummary(); };
   const controls = new Map(); const groups = new Map();
-  const add = (key, title) => {
-    const group = document.createElement("label"); group.className = "link-property"; group.textContent = title;
-    const input = document.createElement("input"); input.type = "text"; input.value = key === "url" && values.linktype === "mailto" ? values[key].replace(/^mailto:/i, "") : values[key];
-    input.setAttribute("aria-label", `${field.label} ${title}`); input.dataset.linkProperty = key;
+  const add = (key,title,parent) => {
+    const group = document.createElement("label"); group.className = "link-property";
+    const caption = document.createElement("span"); caption.textContent = title; group.append(caption);
+    const input = document.createElement("input"); input.type = "text"; input.dataset.linkProperty = key;
+    input.setAttribute("aria-label",`${field.label} ${title}`);
     input.disabled = blocked || (field.linkCustom && !["text","title","target","class"].includes(key));
-    input.addEventListener("input", () => {
-      if (key === "url" && values.linktype === "anchor") { if (anchorAttributeOnly) values.anchor = input.value; else { values.url = input.value; if (mirroredAnchor) values.anchor = input.value; } }
-      else values[key] = key === "url" && values.linktype === "mailto" ? `mailto:${input.value}` : input.value;
-      draft.change(values);
+    input.addEventListener("focus",()=>expand(true));
+    input.addEventListener("input",()=>{
+      if (key === "url" && values.linktype === "anchor") {
+        const attributeOnly = !values.url && Boolean(values.anchor);
+        const mirrored = Boolean(values.url) && values.url === values.anchor;
+        if(attributeOnly) values.anchor = input.value; else {values.url=input.value;if(mirrored)values.anchor=input.value;}
+      } else values[key] = key === "url" && values.linktype === "mailto" ? `mailto:${input.value}` : input.value;
+      changed();
     });
-    group.append(input); form.append(group); controls.set(key,input); groups.set(key,group); return input;
+    group.append(input);parent.append(group);controls.set(key,input);groups.set(key,group);return input;
   };
-  const destination = add("url", "Destination");
-  const targetGroup = document.createElement("div"); targetGroup.className = "link-property"; targetGroup.textContent = "Target item";
-  const target = document.createElement("input"); target.type = "text"; target.readOnly = true; target.className = "selection-trigger"; target.id = `${field.id}-target`;
-  target.disabled = blocked || field.linkCustom; target.setAttribute("aria-label", `${field.label} target item`); target.setAttribute("role","combobox"); target.setAttribute("aria-expanded","false");
-  target.dataset.selectionLabel = field.id; target.dataset.value = values.id;
-  const refreshTarget = name => { target.dataset.value = values.id; target.value = name || (values.id ? "Loading selected item…" : "Choose an item…"); };
-  refreshTarget(); targetGroup.append(target); form.append(targetGroup);
-  const picker = createChoicePicker(row, field, target, { multiple:false,tree:true,
-    chosen: choice => values.id.replace(/[{}-]/g,"").toLowerCase() === choice.itemId.replace(/[{}-]/g,"").toLowerCase(),
-    accept: choice => { values.id = choice.value; values.url = ""; refreshTarget(choice.displayName || choice.name); const path = document.getElementById(`${field.id}-path`); if(path){path.textContent=choice.path;path.hidden=false;} draft.change(values); picker.close(); }
+  const line = document.createElement("div"); line.className = "link-destination";
+  const destination = add("url","Destination",line);
+  const target = document.createElement("input"); target.type="text"; target.readOnly=true; target.className="selection-trigger"; target.id=`${field.id}-target`;
+  target.dataset.selectionLabel=field.id;target.dataset.showPath="true";
+  target.disabled=blocked||field.linkCustom;target.setAttribute("aria-label",`${field.label} Sitecore item path`);target.setAttribute("role","combobox");target.setAttribute("aria-expanded","false");
+  line.append(target,toggle);
+  const refreshTarget = () => {target.dataset.value=values.id;target.value=names.get(values.id)|| (values.id ? "Loading selected item…" : "Choose a Sitecore item…");};
+  target.addEventListener("selectionResolved",event=>{names.set(values.id,event.detail.path||event.detail.text);});
+  const picker = createChoicePicker(row,field,target,{multiple:false,tree:true,
+    chosen:choice=>values.id.replace(/[{}-]/g,"").toLowerCase()===choice.itemId.replace(/[{}-]/g,"").toLowerCase(),
+    accept:choice=>{values.id=choice.value;values.url="";names.set(values.id,choice.path);refreshTarget();setSelectionLabel(target,choice.displayName||choice.name,choice.path);changed();picker.close();}
   });
-  row.append(picker.popup); target.addEventListener("click",picker.open);
+  target.addEventListener("focus",()=>expand(true));target.addEventListener("click",picker.open);
   target.addEventListener("keydown",event=>{if(["Enter"," ","ArrowDown"].includes(event.key)){event.preventDefault();picker.open();}});
-  add("text", "Link text"); add("title", "Title"); add("target", "Target"); add("class", "CSS class"); add("anchor", "Anchor"); add("querystring", "Query string");
+  for(const [key,title] of [["text","Link text"],["title","Title"],["target","Target"],["class","CSS class"],["anchor","Anchor"],["querystring","Query string"]])add(key,title,properties);
   const update = () => {
-    kind.value = values.linktype; targetGroup.hidden = values.linktype !== "internal";
-    groups.get("url").hidden = values.linktype === "internal";
-    groups.get("anchor").hidden = ["mailto","anchor"].includes(values.linktype);
-    groups.get("querystring").hidden = values.linktype !== "internal";
-    destination.placeholder = values.linktype === "mailto" ? "name@example.com" : values.linktype === "anchor" ? "Anchor name (without #)" : "https://example.com";
-    for (const [key, input] of controls) input.value = key === "url" && values.linktype === "mailto" ? values[key].replace(/^mailto:/i, "") : values[key];
-    if (values.linktype === "anchor") destination.value = anchorAttributeOnly ? values.anchor : values.url;
+    for(const button of types.children){const selected=button.dataset.linkType===values.linktype;button.setAttribute("aria-checked",String(selected));button.tabIndex=selected?0:-1;}
+    target.hidden=values.linktype!=="internal";groups.get("url").hidden=values.linktype==="internal";
+    groups.get("anchor").hidden=["mailto","anchor"].includes(values.linktype);groups.get("querystring").hidden=values.linktype!=="internal";
+    const title=values.linktype==="mailto"?"Email":values.linktype==="anchor"?"Anchor":"URL";
+    groups.get("url").querySelector("span").textContent=title;destination.setAttribute("aria-label",`${field.label} ${title}`);
+    destination.placeholder=values.linktype==="mailto"?"name@example.com":values.linktype==="anchor"?"Anchor name (without #)":"https://example.com";
+    for(const [key,input] of controls)input.value=key==="url"&&values.linktype==="mailto"?values.url.replace(/^mailto:/i,""):values[key];
+    if(values.linktype==="anchor")destination.value=values.url||values.anchor;
+    refreshTarget();updateSummary();
   };
-  kind.addEventListener("change", () => {
-    picker.close(false); values.linktype = kind.value; values.id = ""; values.url = ""; values.anchor = ""; values.querystring = "";
-    anchorAttributeOnly = false; mirroredAnchor = false;
-    refreshTarget(); update(); draft.change(values);
+  const switchType = kind => {
+    if(blocked||field.linkCustom||kind===values.linktype){expand(true);return;}
+    picker.close(false);remember();values.linktype=kind;
+    const restored=values._alternatives[kind]||{id:"",url:"",anchor:"",querystring:""};
+    for(const key of specificKeys)values[key]=restored[key];
+    changed();update();expand(true);
+  };
+  for(const [kind,name] of typeNames){
+    if(field.linkCustom&&kind!==values.linktype)continue;
+    const button=document.createElement("button");button.type="button";button.textContent=name;button.dataset.linkType=kind;button.disabled=blocked;
+    button.setAttribute("role","radio");button.addEventListener("click",()=>switchType(kind));types.append(button);
+  }
+  types.addEventListener("keydown",event=>{
+    const buttons=[...types.children];const index=buttons.indexOf(document.activeElement);if(index<0||blocked)return;
+    let next;if(["ArrowRight","ArrowDown"].includes(event.key))next=(index+1)%buttons.length;else if(["ArrowLeft","ArrowUp"].includes(event.key))next=(index+buttons.length-1)%buttons.length;else if(event.key==="Home")next=0;else if(event.key==="End")next=buttons.length-1;else return;
+    event.preventDefault();buttons[next].focus();buttons[next].click();
   });
-  clear.addEventListener("click", () => { picker.close(false); values = empty(); anchorAttributeOnly = false; mirroredAnchor = false; refreshTarget(); update(); draft.change(values,true); kind.focus(); });
-  if (field.linkCustom) { const note = document.createElement("p"); note.className = "meta"; note.textContent = "Custom link metadata is preserved. Destination and kind are read-only."; row.append(note); }
-  update();
+  toggle.addEventListener("click",()=>expand(!expanded));
+  const clear=document.createElement("button");clear.textContent="Clear";clear.disabled=blocked;clear.title="Store an explicit empty value, not a reset";
+  clear.addEventListener("click",()=>{picker.close(false);const originalKind=values.linktype;values=empty();if(field.linkCustom)values.linktype=originalKind;draft.error.textContent="";draft.change(values,true);update();expand(false);});
+  const header=document.createElement("div");header.className="link-header";header.append(types,clear);
+  row.append(header,line,summary,properties,picker.popup);
+  if(field.linkCustom){const note=document.createElement("p");note.className="meta";note.textContent="Custom link metadata is preserved; destination and type are read-only.";row.append(note);}
+  draft.error.textContent=field.validation||"";update();expand(expanded);
 }
 function setSelectionLabel(control, text, path = "") {
   if (control instanceof HTMLInputElement) {
-    control.value = text;
+    control.value = control.dataset.showPath === "true" ? path || text : text;
+    control.dispatchEvent(new CustomEvent("selectionResolved", {detail:{text,path}}));
     const detail = document.getElementById(`${control.dataset.selectionLabel || control.id}-path`);
     if (detail) { detail.textContent = path; detail.hidden = !path; }
   } else {

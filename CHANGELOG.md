@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.43.0
+
+- Make General Link compact with keyboard-accessible type buttons, one destination, inline expandable properties and a collapsed summary. Validation errors stay expanded.
+- Preserve per-type temporary destinations and properties across switching, Undo/Redo and backup/reload. Save writes only the active type; Save/Clear/Revert discard temporary alternatives.
+- Preserve protected custom/DAM metadata, unsupported type identification and existing Source-aware picking. No automatic save or link execution.
+
 ## 0.42.0
 
 - Add compact Name Value List rows with lossless encoding, explicit add/remove/clear and validation. Preserve existing duplicates and reject new duplicate keys or malformed rows.

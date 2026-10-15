@@ -17,6 +17,19 @@ function localKey(uri: vscode.Uri): string {
   const path = resolve(uri.fsPath);
   return process.platform === "win32" ? path.toLowerCase() : path;
 }
+function draftValidation(field: EditorState["base"]["fields"][number], draft: FieldDraft | undefined): string {
+  if (!draft) return "";
+  try { serializeDraft(field, draft); return ""; }
+  catch (error) { return error instanceof EditorValidationError ? error.message : "Invalid structured field draft."; }
+}
+function hasCustomLinkMetadata(field: EditorState["base"]["fields"][number], draft: FieldDraft | undefined): boolean {
+  if (!isGeneralLink(field)) return false;
+  try {
+    if (parseGeneralLink(field.value).custom) return true;
+    const template = draft && (JSON.parse(draft.input) as { _xml?: unknown })._xml;
+    return typeof template === "string" && parseGeneralLink(template).custom;
+  } catch { return false; }
+}
 export const itemEditorViewType = "xmCloudSync.itemEditor";
 export class ItemDocument implements vscode.CustomDocument {
   labelRequest: AbortController | undefined;
@@ -158,6 +171,17 @@ export class ItemEditorProvider implements vscode.CustomEditorProvider<ItemDocum
         let error = "";
         try { serializeDraft(field, after); } catch (failure) { error = failure instanceof SyntaxError ? "Invalid structured field draft." : (failure as Error).message; }
         await Promise.all([...doc.panels].map(panel => panel.webview.postMessage({ type: "draftValidation", revision: doc.revision, id: message.id, input: after.input, error })));
+        if (isGeneralLink(field)) {
+          try {
+            const previous = JSON.parse(before.input) as { id?: unknown; linktype?: unknown };
+            const next = JSON.parse(after.input) as { id?: unknown; linktype?: unknown };
+            if (next.linktype === "internal" && isGuid(next.id) && (previous.linktype !== next.linktype || previous.id !== next.id)) {
+              const controller = doc.labelRequest && !doc.labelRequest.signal.aborted ? doc.labelRequest : new AbortController();
+              doc.labelRequest = controller;
+              void this.resolveLabels(doc, doc.revision, controller).catch(() => { /* Destination remains unchanged when optional labels fail. */ });
+            }
+          } catch { /* Invalid intermediate drafts remain available for correction. */ }
+        }
       }
     } else if (message.type === "undo" || message.type === "redo") {
       if (!doc.state.attempt && [...doc.panels].some(panel => panel.active)) await vscode.commands.executeCommand(message.type);
@@ -259,7 +283,8 @@ export class ItemEditorProvider implements vscode.CustomEditorProvider<ItemDocum
         scope: field.scope, source: field.containsFallbackValue ? "Fallback (unverified source)" : field.containsInheritedValue ? "Inherited" : field.containsStandardValue ? "Standard Value" : "Exact locale",
         selectionKind: selectionKind(field),
         selectionSource: field.selectionSource,
-        linkCustom: isGeneralLink(field) && !readOnlyReason(doc.state.base, field) ? parseGeneralLink(field.value).custom : false,
+        linkCustom: hasCustomLinkMetadata(field, doc.state.drafts[normalizeId(field.fieldId)]),
+        validation: isGeneralLink(field) ? draftValidation(field, doc.state.drafts[normalizeId(field.fieldId)]) : undefined,
         kind: fieldKind(field), reason: readOnlyReason(doc.state.base, field), input: doc.state.drafts[normalizeId(field.fieldId)]?.input ?? fieldInput(field),
         original: fieldInput(field),
         clear: doc.state.drafts[normalizeId(field.fieldId)]?.clear ?? false, raw: field.value,
@@ -305,7 +330,7 @@ export class ItemEditorProvider implements vscode.CustomEditorProvider<ItemDocum
           values = link.linktype === "internal" && typeof link.id === "string" ? [link.id] : [];
         } else values = multi ? parseMultipleSelection(snapshot) : [snapshot];
       } catch { values = []; }
-      return values.filter(Boolean).map(value => ({ id: normalizeId(field.fieldId), value, snapshot, multi }));
+      return values.filter(Boolean).map(value => ({ id: normalizeId(field.fieldId), value, snapshot, multi, link: isGeneralLink(field) }));
     });
     const connection = this.connections.get(doc.state.target.connectionId);
     const target = doc.state.target;
@@ -335,7 +360,12 @@ export class ItemEditorProvider implements vscode.CustomEditorProvider<ItemDocum
         const draft = doc.state.drafts[field.id];
         const original = doc.state.base.fields.find(f => normalizeId(f.fieldId) === field.id);
         const current = draft?.clear ? "" : draft?.input ?? (original && isGeneralLink(original) ? fieldInput(original) : original?.value);
-        if (field.multi ? !current?.split("|").includes(field.value) : current !== field.snapshot) continue;
+        if (field.link) {
+          try {
+            const active = JSON.parse(current ?? "{}") as { linktype?: unknown; id?: unknown };
+            if (active.linktype !== "internal" || active.id !== field.value) continue;
+          } catch { continue; }
+        } else if (field.multi ? !current?.split("|").includes(field.value) : current !== field.snapshot) continue;
         await Promise.all([...doc.panels].map(panel => panel.webview.postMessage({ type: "selectionLabel", revision, id: field.id, value: field.value, label, name, path })));
       }
     }));
