@@ -127,6 +127,7 @@ window.addEventListener("message", event => {
     renderFieldInfo(row, field, meta);
     if (field.reason) {
       const value = renderReadOnlyField(field, {
+        information: row.querySelector(".field-info-content"),
         requestAsset: receive => { const request = ++assetRequestId; assetRequests.set(field.id, {request, receive}); send("previewAsset", {id:field.id,request}); },
         openAsset: () => send("openAsset", {id:field.id,request:assetRequestId})
       });

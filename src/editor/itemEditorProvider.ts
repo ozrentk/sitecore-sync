@@ -1,5 +1,5 @@
 import { parseMultipleSelection, validateMultipleSelection, validateReorder } from "./multipleSelection";
-import { fieldPresentation, fieldAssetUrl } from "../sitecore/fieldPresentation";
+import { fieldPresentation, fieldAssetUrl, fieldPreviewFailure } from "../sitecore/fieldPresentation";
 import { isMultipleSelection } from "./singleSelection";
 import { orderEditorFields } from "./fieldOrder";
 import { loadSelectionMetadata, selectionIO } from "./selectionClient";
@@ -346,7 +346,7 @@ export class ItemEditorProvider implements vscode.CustomEditorProvider<ItemDocum
       signal.throwIfAborted(); if (!current()) return;
       doc.assets.set(id, { revision, source, url: result.url });
       await reply({ dataUri: result.dataUri, open: true });
-    } catch { if (!controller.signal.aborted) await reply({ error: "Preview unavailable: the asset may be private, missing, redirected, too large or an unsupported format. Metadata and original value remain available." }); }
+    } catch (error) { if (!controller.signal.aborted) await reply({ error: fieldPreviewFailure(error) }); }
     finally { if (doc.assetRequests.get(id) === controller) doc.assetRequests.delete(id); }
   }
 

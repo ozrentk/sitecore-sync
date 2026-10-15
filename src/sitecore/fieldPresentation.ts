@@ -1,3 +1,15 @@
+import { safeSvgPreview } from "./svgPreview";
+class SvgPreviewError extends Error {}
+export function fieldPreviewFailure(error: unknown): string {
+  if (error instanceof SvgPreviewError) return "Preview unavailable: this SVG contains unsupported markup. Its original value is available in field information.";
+  let cause = error;
+  for (let i = 0; i < 4 && cause && typeof cause === "object"; i++) {
+    const details = cause as { code?: unknown; cause?: unknown };
+    if (["SELF_SIGNED_CERT_IN_CHAIN", "DEPTH_ZERO_SELF_SIGNED_CERT", "UNABLE_TO_VERIFY_LEAF_SIGNATURE", "CERT_HAS_EXPIRED"].includes(String(details.code))) return "Preview unavailable: the extension host could not verify the asset server's TLS certificate.";
+    cause = details.cause;
+  }
+  return "Preview unavailable. Check the asset's availability and format; its details remain in field information.";
+}
 /** Read-only interpretation. Never normalize or replace the stored field value. */
 export interface FieldPresentation {
   readonly kind: "image" | "file" | "richtext" | "raw";
@@ -72,7 +84,7 @@ export function fieldAssetUrl(serverUrl: string, source: string): { url: URL; au
 export async function readFieldImage(response: Response, signal: AbortSignal): Promise<string> {
   const maximum = 8 * 1024 * 1024;
   const mime = response.headers.get("content-type")?.split(";")[0].trim().toLowerCase();
-  if (!response.ok || response.redirected || !mime || !["image/png", "image/jpeg", "image/gif", "image/webp"].includes(mime)
+  if (!response.ok || response.redirected || !mime || !["image/png", "image/jpeg", "image/gif", "image/webp", "image/svg+xml"].includes(mime)
     || Number(response.headers.get("content-length") ?? 0) > maximum || !response.body) { await response.body?.cancel(); throw Error("Preview unavailable."); }
   const reader = response.body.getReader(); const chunks: Uint8Array[] = []; let size = 0;
   const cancel = () => { void reader.cancel().catch(() => undefined); };
@@ -84,6 +96,10 @@ export async function readFieldImage(response: Response, signal: AbortSignal): P
     }
     signal.throwIfAborted(); if (!size) throw Error("Empty preview response.");
     const bytes = Buffer.concat(chunks);
+    if (mime === "image/svg+xml") {
+      try { return `data:image/svg+xml;base64,${Buffer.from(safeSvgPreview(bytes.toString("utf8"))).toString("base64")}`; }
+      catch { throw new SvgPreviewError(); }
+    }
     const signature = mime === "image/png" ? bytes.subarray(0, 8).equals(Buffer.from([137,80,78,71,13,10,26,10]))
       : mime === "image/jpeg" ? bytes[0] === 255 && bytes[1] === 216 && bytes[2] === 255
       : mime === "image/gif" ? /^GIF8[79]a$/u.test(bytes.subarray(0, 6).toString("ascii"))

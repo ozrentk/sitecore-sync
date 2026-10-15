@@ -76,6 +76,10 @@ export const itemEditorTests: readonly IntegrationTest[] = [{
           let done;const asset=renderReadOnlyField({raw:'<image src="private" custom="kept"/>',presentation:{kind:"image",status:"populated",source:"private",metadata:[["alt","Example"],["custom","kept"]]}},{requestAsset:receive=>done=receive});document.body.append(asset);
           asset.querySelector("button").click();done({error:"Preview unavailable"});
           if(!asset.textContent.includes("custom")||!asset.textContent.includes("Preview unavailable")||asset.querySelector("pre").textContent!=='<image src="private" custom="kept"/>')throw Error("Failed preview lost evidence");
+          const info=document.createElement("div");document.body.append(info);
+          const compact=renderReadOnlyField({raw:'<image custom="kept"/>',reason:"Editing is not supported.",presentation:{kind:"image",status:"populated",metadata:[["custom","kept"]]}},{information:info});document.body.append(compact);
+          if(compact.querySelector("dl,pre")||!info.querySelector("dl")||info.querySelector("pre").textContent!=='<image custom="kept"/>')throw Error("Asset information is not compact/preserved");
+          if(compact.querySelector(".readonly-note").textContent!=="Read-only")throw Error("Technical editing reason leaked into main field");
           let verified;let opened=false;
           const good=renderReadOnlyField({raw:'<image src="public"/>',presentation:{kind:"image",status:"populated",source:"public",alt:"Verified image"}},{requestAsset:receive=>verified=receive,openAsset:()=>opened=true});document.body.append(good);
           good.querySelector("button").click();verified({dataUri:"data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a2ioAAAAASUVORK5CYII=",open:true});

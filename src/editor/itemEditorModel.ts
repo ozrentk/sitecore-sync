@@ -80,7 +80,7 @@ export function readOnlyReason(item: AuthoringItemDetails, field: AuthoringItemF
   const kind = fieldKind(field);
   if (!kind) return field.type.toLowerCase() === "rich text"
     ? "Rich Text is deferred until visual and HTML source editors can preserve content when switching."
-    : "This field type is read-only in Stage A.";
+    : "Editing is not supported for this field type.";
   if (kind === "multiselection") {
     try { parseMultipleSelection(field.value); } catch (error) { return (error as Error).message; }
     return selectionSourceReason(field.selectionSource, selectionKind(field));

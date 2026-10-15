@@ -3,11 +3,19 @@ globalThis.renderReadOnlyField = function (field, options = {}) {
   const box = document.createElement("div"); box.className = "readonly-field";
   const raw = field.raw ?? field.value;
   const presentation = field.presentation || { kind: "raw", status: typeof raw !== "string" ? "unavailable" : raw === "" ? "empty" : "populated" };
+  const compact = ["image", "file"].includes(presentation.kind) && options.information;
+  const information = compact || box;
   const note = text => { const p = document.createElement("p"); p.className = "readonly-note"; p.textContent = text; box.append(p); return p; };
-  note(`Read-only${field.reason ? `: ${field.reason}` : ""}`);
+  note(compact ? "Read-only" : `Read-only${field.reason ? `: ${field.reason}` : ""}`);
+  if (compact) {
+    compact.querySelector(".field-stored-value")?.remove();
+    const reason = document.createElement("p"); reason.textContent = field.reason || "Editing is not supported for this field type."; compact.append(reason);
+  }
   if (presentation.status === "unavailable") { note("Field value unavailable or unreadable."); return box; }
   if (presentation.status === "empty") { note("Empty value"); return box; }
-  if (presentation.provider) note(presentation.provider);
+  if (presentation.provider) {
+    const provider = document.createElement("p"); provider.textContent = presentation.provider; information.append(provider);
+  }
   if (presentation.notice) note(presentation.notice);
   if (presentation.metadata?.length) {
     const list = document.createElement("dl"); list.className = "asset-metadata";
@@ -15,7 +23,7 @@ globalThis.renderReadOnlyField = function (field, options = {}) {
       const term = document.createElement("dt"); term.textContent = key;
       const detail = document.createElement("dd"); detail.textContent = value || "(empty)"; list.append(term, detail);
     }
-    box.append(list);
+    information.append(list);
   }
   if (presentation.kind === "richtext") {
     const preview = document.createElement("div"); preview.className = "richtext-preview";
@@ -59,7 +67,7 @@ globalThis.renderReadOnlyField = function (field, options = {}) {
           button.hidden = !result.error;
           button.disabled = false;
           if (result.reference) note(result.reference);
-          if (result.dataUri && /^data:image\/(?:png|jpeg|gif|webp);base64,[a-z\d+/]+={0,2}$/iu.test(result.dataUri)) {
+          if (result.dataUri && /^data:image\/(?:png|jpeg|gif|webp|svg\+xml);base64,[a-z\d+/]+={0,2}$/iu.test(result.dataUri)) {
             const image = document.createElement("img"); image.className = "asset-preview"; image.alt = presentation.alt || "Asset preview";
             image.addEventListener("error", () => { image.remove(); status.textContent = "Preview could not be decoded. Metadata and original value remain available."; });
             image.src = result.dataUri; box.insertBefore(image, status);
@@ -76,7 +84,7 @@ globalThis.renderReadOnlyField = function (field, options = {}) {
   source.open = presentation.kind === "raw" || Boolean(presentation.notice);
   const title = document.createElement("summary"); title.textContent = presentation.kind === "richtext" ? "HTML source (unchanged)" : "Stored value (unchanged)";
   const value = document.createElement("pre"); value.textContent = raw;
-  source.append(title, value); box.append(source);
+  source.append(title, value); information.append(source);
   // Inspection controls must not launch the parent field's text-diff action.
   box.addEventListener("click", event => { if (event.target.closest("button, summary")) event.stopPropagation(); });
   return box;

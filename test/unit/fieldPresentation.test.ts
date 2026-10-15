@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import { strictEqual, deepStrictEqual, rejects, throws, match } from "node:assert/strict";
-import { fieldPresentation, mediaAttributes, fieldAssetUrl, readFieldImage } from "../../src/sitecore/fieldPresentation";
+import { fieldPreviewFailure, fieldPresentation, mediaAttributes, fieldAssetUrl, readFieldImage } from "../../src/sitecore/fieldPresentation";
 import { AuthoringContentClient } from "../../src/sitecore/authoringClient";
 import { QueuedHttpRuntime, noOpLogger, testConnection, tokenResponse } from "./sitecoreClientTestHelpers";
 
@@ -30,9 +30,9 @@ test("asset URLs constrain credential routing and reject executable/private dest
   strictEqual(fieldAssetUrl(testConnection.serverUrl, "https://tenant.stylelabs.cloud/api/public/content/a?v=1")?.authenticated, false);
   for (const url of ["javascript:alert(1)", "data:image/png,abc", "file:///x", "command:open", "//evil.test/a", "https://127.0.0.1/a", "https://tenant.stylelabs.cloud.evil.test/api/public/content/a", "https://tenant.stylelabs.cloud/api/gateway/1/thumbnail", "https://user:secret@tenant.stylelabs.cloud/api/public/content/a", "/-/media/%2e%2e/a", "/sitecore/admin", "/-/media/a?access_token=secret", "https://tenant.stylelabs.cloud:8443/api/public/content/a"]) strictEqual(fieldAssetUrl(testConnection.serverUrl, url), undefined, url);
 });
-test("raster previews are bounded, cancellable and never accept SVG/HTML/private responses", async () => {
+test("image previews are bounded, cancellable and reject unsafe SVG/HTML/private responses", async () => {
   match(await readFieldImage(image(), signal), /^data:image\/png;base64,/);
-  for (const response of [new Response("<svg/>", { headers: { "content-type": "image/svg+xml" } }), new Response("login", {status:401}), new Response("html", {headers:{"content-type":"text/html"}}), new Response(png, {headers:{"content-type":"image/png","content-length":"99999999"}})]) await rejects(readFieldImage(response, signal));
+  for (const response of [new Response("<svg onload='alert(1)'/>", { headers: { "content-type": "image/svg+xml" } }), new Response("login", {status:401}), new Response("html", {headers:{"content-type":"text/html"}}), new Response(png, {headers:{"content-type":"image/png","content-length":"99999999"}})]) await rejects(readFieldImage(response, signal));
   const controller = new AbortController(); controller.abort(); await rejects(readFieldImage(image(), controller.signal));
   await rejects(readFieldImage(new Response("<html>fake raster</html>",{headers:{"content-type":"image/png"}}),signal));
   await rejects(readFieldImage(new Response(new Uint8Array(8*1024*1024+1),{headers:{"content-type":"image/png"}}),signal));
@@ -60,4 +60,13 @@ test("File open requires a successful supported HEAD response, no body download"
   strictEqual(runtime.requests[0].init.method,"HEAD"); strictEqual(result.dataUri,undefined);
   const bad = new QueuedHttpRuntime([new Response(null,{headers:{"content-type":"text/html"}})]);
   await rejects(new AuthoringContentClient(noOpLogger,bad).loadFieldAsset(testConnection,"secret","https://tenant.stylelabs.cloud/api/public/content/file",false,signal));
+});
+
+
+test("SVG response is rebuilt and preview failures explain TLS without leaking server errors", async () => {
+ const uri=await readFieldImage(new Response('<svg width="264" height="60"><path d="M0 0L10 10Z"/></svg>',{headers:{"content-type":"image/svg+xml"}}),signal);
+ match(uri,/^data:image\/svg\+xml;base64,/);
+ match(Buffer.from(uri.split(",")[1],"base64").toString(),/xmlns="http:\/\/www.w3.org\/2000\/svg"/);
+ match(fieldPreviewFailure({cause:{code:"SELF_SIGNED_CERT_IN_CHAIN",message:"secret"}}),/TLS certificate/);
+ strictEqual(fieldPreviewFailure(new Error("secret")).includes("secret"),false);
 });
