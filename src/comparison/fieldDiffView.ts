@@ -1,3 +1,4 @@
+import { randomBytes } from "node:crypto";
 import { fieldPresentation } from "../sitecore/fieldPresentation";
 import * as vscode from "vscode";
 import type { ComparisonItemDetails, FieldFallbackMode } from "./fieldFallback";
@@ -164,6 +165,7 @@ export class FieldDiffViewProvider implements vscode.WebviewViewProvider, vscode
   }
 
   private html(webview: vscode.Webview, mediaUri: vscode.Uri): string {
+    const nonce = randomBytes(16).toString("hex");
     const shared = vscode.Uri.joinPath(mediaUri, "..", "shared");
     const styleUri = webview.asWebviewUri(vscode.Uri.joinPath(mediaUri, "fieldDiff.css"));
     const scriptUri = webview.asWebviewUri(vscode.Uri.joinPath(mediaUri, "fieldDiff.js"));
@@ -172,7 +174,7 @@ export class FieldDiffViewProvider implements vscode.WebviewViewProvider, vscode
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src ${webview.cspSource}; script-src ${webview.cspSource};">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; frame-src data:; style-src ${webview.cspSource} 'nonce-${nonce}'; script-src ${webview.cspSource};">
   <link rel="stylesheet" href="${styleUri}">
   <link rel="stylesheet" href="${webview.asWebviewUri(vscode.Uri.joinPath(shared, "readOnlyField.css"))}">
   <title>Field Diff</title>
@@ -207,7 +209,7 @@ export class FieldDiffViewProvider implements vscode.WebviewViewProvider, vscode
     </div>
   </header>
   <main id="content" aria-live="polite"></main>
-  <script src="${webview.asWebviewUri(vscode.Uri.joinPath(shared, "readOnlyField.js"))}"></script>
+  <script nonce="${nonce}" src="${webview.asWebviewUri(vscode.Uri.joinPath(shared, "readOnlyField.js"))}"></script>
   <script src="${scriptUri}"></script>
 </body>
 </html>`;

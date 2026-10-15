@@ -61,13 +61,17 @@ export const itemEditorTests: readonly IntegrationTest[] = [{
       panel.webview.options={enableScripts:true,localResourceRoots:[shared,vscode.Uri.file(directory)]};
       const script=String.raw`
         try {
-          const raw='<p onclick="window.pwned=1">Hello <strong>world</strong><a href="javascript:alert(1)">link</a><img src="https://evil.test/image" onerror="window.pwned=1"><svg onload="window.pwned=1"/><script>window.pwned=1<\/script></p>';
+          const raw='<style>.heading{color:red}</style><p style="text-align:center;background-image:url(https://evil.test/css)" onclick="window.pwned=1">Hello <strong>world</strong><a href="javascript:alert(1)">link</a><img src="https://evil.test/image" onerror="window.pwned=1"><svg onload="window.pwned=1"/><script>window.pwned=1<\/script></p>';
           const parent=document.createElement("div");let diffClicks=0;parent.addEventListener("click",()=>diffClicks++);document.body.append(parent);
           const rich=renderReadOnlyField({raw,presentation:{kind:"richtext",status:"populated"}});parent.append(rich);
           rich.querySelector("summary").click();if(diffClicks)throw Error("Source toggle launched diff");
-          rich.querySelector("strong").click();if(diffClicks!==1)throw Error("Value click no longer opens text diff");
+          const frame=rich.querySelector("iframe");
+          if(!frame || frame.getAttribute("sandbox")!=="" || !frame.src.startsWith("data:text/html"))throw Error("Missing isolated preview");
           if(rich.querySelector("pre").textContent!==raw)throw Error("Source changed");
-          if(!rich.querySelector(".richtext-preview strong")||rich.querySelector(".richtext-preview").querySelector("[href],[src],[onclick],svg,script"))throw Error("Unsafe markup survived");
+          const html=decodeURIComponent(frame.src.split(",").slice(1).join(","));
+          if(!html.includes("<strong>world</strong>") || html.includes("onclick=") || html.includes("href=") || html.includes("<script"))throw Error("Unsafe markup survived");
+          if(!html.includes("text-align: center") || !html.includes(".heading{color:red}") || !html.includes("default-src 'none'") || !html.includes("script-src 'none'") || !html.includes("form-action 'none'"))throw Error("Formatting or frame policy lost");
+          if(frame.contentDocument!==null)throw Error("Frame must have opaque origin");
           if(window.pwned)throw Error("Untrusted markup executed");
           const malformed=renderReadOnlyField({raw:"<broken",presentation:{kind:"image",status:"populated",notice:"Unrecognized"}});document.body.append(malformed);
           if(malformed.querySelector("pre").textContent!=="<broken")throw Error("Malformed content lost");
@@ -89,7 +93,7 @@ export const itemEditorTests: readonly IntegrationTest[] = [{
         }catch(error){acquireVsCodeApi().postMessage({error:String(error)});}`;
       await writeFile(join(directory,"smoke.js"),script);
       const finished=new Promise<void>((resolve,reject)=>{timer=setTimeout(()=>reject(Error("Read-only webview timed out")),20000);listener=panel.webview.onDidReceiveMessage(message=>{try{strictEqual(message.ok,true,message.error);resolve();}catch(error){reject(error);}});});
-      panel.webview.html=`<!doctype html><html><head><meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src ${panel.webview.cspSource}; style-src ${panel.webview.cspSource}; img-src data:;"><link rel="stylesheet" href="${panel.webview.asWebviewUri(vscode.Uri.joinPath(shared,"readOnlyField.css"))}"></head><body><script src="${panel.webview.asWebviewUri(vscode.Uri.joinPath(shared,"readOnlyField.js"))}"></script><script src="${panel.webview.asWebviewUri(vscode.Uri.file(join(directory,"smoke.js")))}"></script></body></html>`;
+      panel.webview.html=`<!doctype html><html><head><meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src ${panel.webview.cspSource}; frame-src data:; style-src ${panel.webview.cspSource} 'nonce-previewtest'; img-src data:;"><link rel="stylesheet" href="${panel.webview.asWebviewUri(vscode.Uri.joinPath(shared,"readOnlyField.css"))}"></head><body><script nonce="previewtest" src="${panel.webview.asWebviewUri(vscode.Uri.joinPath(shared,"readOnlyField.js"))}"></script><script src="${panel.webview.asWebviewUri(vscode.Uri.file(join(directory,"smoke.js")))}"></script></body></html>`;
       await finished;
     }finally{clearTimeout(timer);listener?.dispose();panel.dispose();await rm(directory,{recursive:true,force:true});}
   }
