@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.43.1
+
+- Inset expanded General Link properties with surrounding spacing to visually group them within their field.
+
 ## 0.43.0
 
 - Make General Link compact with keyboard-accessible type buttons, one destination, inline expandable properties and a collapsed summary. Validation errors stay expanded.
