@@ -1,4 +1,5 @@
 import { parseMultipleSelection, validateMultipleSelection, validateReorder } from "./multipleSelection";
+import { fieldPresentation, fieldAssetUrl } from "../sitecore/fieldPresentation";
 import { isMultipleSelection } from "./singleSelection";
 import { orderEditorFields } from "./fieldOrder";
 import { loadSelectionMetadata, selectionIO } from "./selectionClient";
@@ -32,9 +33,11 @@ function hasCustomLinkMetadata(field: EditorState["base"]["fields"][number], dra
 }
 export const itemEditorViewType = "xmCloudSync.itemEditor";
 export class ItemDocument implements vscode.CustomDocument {
+  readonly assets = new Map<string, { revision: number; source: string; url: string }>();
+  readonly assetRequests = new Map<string, AbortController>();
   labelRequest: AbortController | undefined;
   readonly selections = new Map<string, AbortController>();
-  cancelSelections(): void { this.labelRequest?.abort(); for (const request of this.selections.values()) request.abort(); this.selections.clear(); }
+  cancelSelections(): void { this.labelRequest?.abort(); for (const request of this.selections.values()) request.abort(); this.selections.clear(); for (const request of this.assetRequests.values()) request.abort(); this.assetRequests.clear(); this.assets.clear(); }
   readonly panels = new Set<vscode.WebviewPanel>();
   busy = false;
   error: string | undefined;
@@ -126,9 +129,10 @@ export class ItemEditorProvider implements vscode.CustomEditorProvider<ItemDocum
     doc.panels.add(panel);
     panel.title = `${doc.state.base.displayName || doc.state.base.name} · ${doc.state.target.language} v${doc.state.target.version}`;
     const media = vscode.Uri.joinPath(this.context.extensionUri, "media", "itemEditor");
-    panel.webview.options = { enableScripts: true, localResourceRoots: [media] };
+    const shared = vscode.Uri.joinPath(this.context.extensionUri, "media", "shared");
+    panel.webview.options = { enableScripts: true, localResourceRoots: [media, shared] };
     const nonce = randomBytes(16).toString("hex");
-    panel.webview.html = `<!DOCTYPE html><html><head><meta charset="UTF-8"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src ${panel.webview.cspSource}; script-src 'nonce-${nonce}';"><link rel="stylesheet" href="${panel.webview.asWebviewUri(vscode.Uri.joinPath(media, "editor.css"))}"></head><body><header><h1 id="title"></h1><p id="identity"></p><p id="path"></p><button id="save">Save</button> <button id="revert">Revert</button> <button id="reconcile">Check save outcome</button> <button id="locale">Open existing locale/version…</button><p id="status" role="status"></p></header><main id="fields"></main><script nonce="${nonce}" src="${panel.webview.asWebviewUri(vscode.Uri.joinPath(media, "editor.js"))}"></script></body></html>`;
+    panel.webview.html = `<!DOCTYPE html><html><head><meta charset="UTF-8"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src data:; style-src ${panel.webview.cspSource}; script-src 'nonce-${nonce}';"><link rel="stylesheet" href="${panel.webview.asWebviewUri(vscode.Uri.joinPath(media, "editor.css"))}"><link rel="stylesheet" href="${panel.webview.asWebviewUri(vscode.Uri.joinPath(shared, "readOnlyField.css"))}"></head><body><header><h1 id="title"></h1><p id="identity"></p><p id="path"></p><button id="save">Save</button> <button id="revert">Revert</button> <button id="reconcile">Check save outcome</button> <button id="locale">Open existing locale/version…</button><p id="status" role="status"></p></header><main id="fields"></main><script nonce="${nonce}" src="${panel.webview.asWebviewUri(vscode.Uri.joinPath(shared, "readOnlyField.js"))}"></script><script nonce="${nonce}" src="${panel.webview.asWebviewUri(vscode.Uri.joinPath(media, "editor.js"))}"></script></body></html>`;
     const subscription = panel.webview.onDidReceiveMessage(message => {
       void this.message(doc, message).catch(error => {
         if (error instanceof vscode.CancellationError) return;
@@ -151,6 +155,9 @@ export class ItemEditorProvider implements vscode.CustomEditorProvider<ItemDocum
     if (message.type === "frozen" && message.id === doc.flush?.id) { doc.flush?.finish(message.drafts); return; }
     if (message.type === "ready") { await this.render(doc); return; }
     if (doc.busy || message.revision !== doc.revision) return;
+    if (message.type === "previewAsset" || message.type === "openAsset") {
+      await this.asset(doc, message); return;
+    }
     if (message.type === "choices") {
       await this.choices(doc, message);
       return;
@@ -288,6 +295,7 @@ export class ItemEditorProvider implements vscode.CustomEditorProvider<ItemDocum
         kind: fieldKind(field), reason: readOnlyReason(doc.state.base, field), input: doc.state.drafts[normalizeId(field.fieldId)]?.input ?? fieldInput(field),
         original: fieldInput(field),
         clear: doc.state.drafts[normalizeId(field.fieldId)]?.clear ?? false, raw: field.value,
+        presentation: fieldPresentation(field.type, field.value),
       })) };
     await Promise.all([...doc.panels].map(panel => panel.webview.postMessage(payload)));
     doc.labelRequest?.abort();
@@ -296,6 +304,50 @@ export class ItemEditorProvider implements vscode.CustomEditorProvider<ItemDocum
       void this.resolveFieldTitles(doc, doc.revision, controller).catch(() => { /* Internal names remain usable when optional titles fail. */ });
       void this.resolveLabels(doc, doc.revision, controller).catch(() => { /* Labels never affect drafts or save state. */ });
     }
+  }
+
+  private async asset(doc: ItemDocument, message: Record<string, unknown>): Promise<void> {
+    if (typeof message.id !== "string" || !Number.isSafeInteger(message.request)) return;
+    const id = message.id; const revision = doc.revision;
+    const field = doc.state.base.fields.find(f => normalizeId(f.fieldId) === id);
+    if (!field || !["image", "file"].includes(field.type.toLowerCase())) return;
+    const presentation = fieldPresentation(field.type, field.value);
+    const source = presentation.source;
+    const target = doc.state.target; const connection = this.connections.get(target.connectionId);
+    const current = () => doc.revision === revision && !doc.lifetime.signal.aborted
+      && this.connections.get(target.connectionId)?.serverUrl === connection?.serverUrl;
+    if (!connection || new URL(connection.serverUrl).origin !== target.serverUrl) return;
+    if (message.type === "openAsset") {
+      const asset = doc.assets.get(id);
+      if (asset && asset.revision === revision && asset.source === source && fieldAssetUrl(connection.serverUrl, asset.url) && current()) await vscode.env.openExternal(vscode.Uri.parse(asset.url));
+      return;
+    }
+    const reply = async (result: Record<string, unknown>) => {
+      if (current()) await Promise.all([...doc.panels].map(panel => panel.webview.postMessage({ type: "assetPreview", revision, id, request: message.request, ...result })));
+    };
+    if ((!source || !fieldAssetUrl(connection.serverUrl, source)) && !presentation.mediaId) { await reply({ error: "Preview unavailable: the stored URL is absent, private or outside the supported media locations. Metadata and original value remain available." }); return; }
+    if (doc.assetRequests.has(id) || doc.assetRequests.size >= 3) { await reply({ error: "Preview busy. Wait for the current requests, then retry." }); return; }
+    const controller = new AbortController(); doc.assetRequests.set(id, controller);
+    const signal = AbortSignal.any([controller.signal, doc.lifetime.signal, AbortSignal.timeout(20_000)]);
+    try {
+      if (!source || !fieldAssetUrl(connection.serverUrl, source)) {
+        const secret = await this.connections.getClientSecret(connection.id);
+        signal.throwIfAborted(); if (!current()) return;
+        if (!secret || !presentation.mediaId) throw Error("Media credentials unavailable");
+        const reference = await this.client.loadSelectionItem(connection, secret, { itemId: presentation.mediaId }, target.language, signal);
+        signal.throwIfAborted(); if (!current()) return;
+        if (!reference || normalizeId(reference.itemId) !== normalizeId(presentation.mediaId) || !reference.path.toLowerCase().startsWith("/sitecore/media library/")) throw Error("Media reference unavailable");
+        await reply({ reference: `${reference.displayName || reference.name} · ${reference.path}`, error: "Media reference resolved. Preview unavailable: no supported asset URL was returned; no URL has been guessed." }); return;
+      }
+      const secret = fieldAssetUrl(connection.serverUrl, source)?.authenticated ? await this.connections.getClientSecret(connection.id) : "";
+      signal.throwIfAborted(); if (!current()) return;
+      if (secret === undefined) throw Error("Missing credentials");
+      const result = await this.client.loadFieldAsset(connection, secret, source, field.type.toLowerCase() === "image", signal);
+      signal.throwIfAborted(); if (!current()) return;
+      doc.assets.set(id, { revision, source, url: result.url });
+      await reply({ dataUri: result.dataUri, open: true });
+    } catch { if (!controller.signal.aborted) await reply({ error: "Preview unavailable: the asset may be private, missing, redirected, too large or an unsupported format. Metadata and original value remain available." }); }
+    finally { if (doc.assetRequests.get(id) === controller) doc.assetRequests.delete(id); }
   }
 
   private async resolveFieldTitles(doc: ItemDocument, revision: number, controller: AbortController): Promise<void> {

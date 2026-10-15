@@ -17,7 +17,7 @@ export const fallbackWebviewTests: readonly IntegrationTest[] = [{
       for (const kind of ["comparison", "fieldDiff"] as const) {
         const media = vscode.Uri.joinPath(extension.extensionUri, "media", kind);
         const panel = vscode.window.createWebviewPanel("fallbackSmoke", "Fallback smoke", vscode.ViewColumn.Active,
-          { enableScripts: true, localResourceRoots: [media, vscode.Uri.file(directory)] });
+          { enableScripts: true, localResourceRoots: [media, vscode.Uri.joinPath(media, "..", "shared"), vscode.Uri.file(directory)] });
         const script = kind === "comparison" ? `
           const receive = data => window.dispatchEvent(new MessageEvent("message", { data }));
           const selection = { leftConnectionId: "left", rightConnectionId: "right", leftLanguage: "en-NZ", rightLanguage: "en-AU" };

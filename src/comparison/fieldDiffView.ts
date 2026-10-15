@@ -1,3 +1,4 @@
+import { fieldPresentation } from "../sitecore/fieldPresentation";
 import * as vscode from "vscode";
 import type { ComparisonItemDetails, FieldFallbackMode } from "./fieldFallback";
 
@@ -67,7 +68,7 @@ export class FieldDiffViewProvider implements vscode.WebviewViewProvider, vscode
     const mediaUri = vscode.Uri.joinPath(this.extensionUri, "media", "fieldDiff");
     view.webview.options = {
       enableScripts: true,
-      localResourceRoots: [mediaUri],
+      localResourceRoots: [mediaUri, vscode.Uri.joinPath(this.extensionUri, "media", "shared")],
     };
     view.webview.html = this.html(view.webview, mediaUri);
     this.disposables.push(
@@ -134,7 +135,9 @@ export class FieldDiffViewProvider implements vscode.WebviewViewProvider, vscode
   async showSnapshot(snapshot: FieldDiffSnapshot): Promise<void> {
     this.snapshot = snapshot;
     this.setMode(snapshot.mode ?? "compare");
-    await this.post({ type: "snapshot", snapshot });
+    const present = (details: ComparisonItemDetails | undefined) => details && ({ ...details,
+      fields: details.fields.map(field => ({ ...field, presentation: fieldPresentation(field.type, field.value) })) });
+    await this.post({ type: "snapshot", snapshot: { ...snapshot, leftDetails: present(snapshot.leftDetails), rightDetails: present(snapshot.rightDetails) } });
   }
 
   async showError(message: string): Promise<void> {
@@ -161,6 +164,7 @@ export class FieldDiffViewProvider implements vscode.WebviewViewProvider, vscode
   }
 
   private html(webview: vscode.Webview, mediaUri: vscode.Uri): string {
+    const shared = vscode.Uri.joinPath(mediaUri, "..", "shared");
     const styleUri = webview.asWebviewUri(vscode.Uri.joinPath(mediaUri, "fieldDiff.css"));
     const scriptUri = webview.asWebviewUri(vscode.Uri.joinPath(mediaUri, "fieldDiff.js"));
     return `<!DOCTYPE html>
@@ -170,6 +174,7 @@ export class FieldDiffViewProvider implements vscode.WebviewViewProvider, vscode
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src ${webview.cspSource}; script-src ${webview.cspSource};">
   <link rel="stylesheet" href="${styleUri}">
+  <link rel="stylesheet" href="${webview.asWebviewUri(vscode.Uri.joinPath(shared, "readOnlyField.css"))}">
   <title>Field Diff</title>
 </head>
 <body>
@@ -202,6 +207,7 @@ export class FieldDiffViewProvider implements vscode.WebviewViewProvider, vscode
     </div>
   </header>
   <main id="content" aria-live="polite"></main>
+  <script src="${webview.asWebviewUri(vscode.Uri.joinPath(shared, "readOnlyField.js"))}"></script>
   <script src="${scriptUri}"></script>
 </body>
 </html>`;
