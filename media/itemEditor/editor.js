@@ -233,8 +233,18 @@ function renderHtmlSource(row, field) {
     button.addEventListener("mousedown", event => event.preventDefault());
     button.addEventListener("click", () => { if (!blocked) visualSources.get(field.id)?.command(name); }); tools.append(button);
   }
+  const tableMenu = document.createElement("details"); tableMenu.className = "richtext-table-tools";
+  const tableTitle = document.createElement("summary"); tableTitle.textContent = "Table"; tableMenu.append(tableTitle);
+  for (const [name, label] of [["caption", "Add / edit caption"], ["rowBefore", "Insert row above"], ["rowAfter", "Insert row below"],
+    ["columnBefore", "Insert column before"], ["columnAfter", "Insert column after"], ["deleteRow", "Delete empty rows"],
+    ["deleteColumn", "Delete empty columns"], ["mergeCells", "Merge selected cells"], ["splitCell", "Split cell"]]) {
+    const button = document.createElement("button"); button.type = "button"; button.textContent = label; button.disabled = blocked;
+    button.addEventListener("mousedown", event => event.preventDefault());
+    button.addEventListener("click", () => { if (!blocked) visualSources.get(field.id)?.command(name); }); tableMenu.append(button);
+  }
+  tools.append(tableMenu);
   const hint = document.createElement("p"); hint.className = "meta";
-  hint.textContent = "Basic formatting and safe text alignment. Other stored styling appears in Preview. Plain-text paste only.";
+  hint.textContent = "Formatting, alignment and bounded table editing. Select cells by dragging across them. Table sections are separate grids; stored styling appears in Preview. Plain-text paste only.";
   const clear = document.createElement("button"); clear.textContent = "Clear"; clear.type = "button";
   clear.title = "Store an explicit empty value; does not reset to inherited or Standard Values";
   const control = document.createElement("textarea"); control.id = field.id; control.className = "html-source";

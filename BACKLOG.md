@@ -178,6 +178,12 @@ Use this file as the single backlog inventory. Add newly agreed work here, prese
 - Media Library references without URLs resolve names/paths only. SVG/private/custom-CDN previews remain unavailable with retained evidence; no URL guessing, uploads, asset selection, Content Hub credentials, Rich Text editor or publishing expansion.
 - Read-only Dev evidence verified Content Hub mappings and a public JPEG. Isolated tests cover security boundaries, stale results, connection changes, raw preservation and failed previews. No Sitecore mutations. B27 remains separate.
 
+### Rich Text table increment — 3B (0.49.0)
+
+- Bounded production tables now support caption/cell typing, row/column insertion, empty row/column deletion, multi-cell merge/split, retained explicit sections/colgroups and overflow wrappers. See [the table profile and command restrictions](docs/item-editor.md#tables-0490).
+- Metadata-bearing row/cell structural edits, column changes across sections/colgroups, populated-cell merges/deletions, nested/ragged/implicit-section tables and section/column-definition editing remain HTML-only. These are explicit preservation policies, not blanket table support.
+- B24/B25 remain partial. 3C managed links and 3D broader styled-container/media editing are separate next increments; formatted paste, native IME/accessibility and live save acceptance remain outstanding.
+
 ### Rich Text nested-span increment (0.48.0)
 
 - The supplied centered finance-content example now fits the bounded Visual profile. Recursive inline span nodes preserve nesting, classes and original style tokens through text/formatting edits; heading levels, spacing and the blank paragraph are retained.

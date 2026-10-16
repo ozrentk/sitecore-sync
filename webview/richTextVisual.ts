@@ -2,6 +2,10 @@ import { Editor, Node, Mark, Extension, type JSONContent } from "@tiptap/core";
 import { Plugin, TextSelection } from "@tiptap/pm/state";
 import { baseKeymap, toggleMark } from "@tiptap/pm/commands";
 import { keymap } from "@tiptap/pm/keymap";
+import type { Transaction } from "@tiptap/pm/state";
+import { CellSelection } from "@tiptap/pm/tables";
+import { tableExtensions } from "./richTextTables";
+import { tableCommand } from "../src/editor/richTextTableCommands";
 import { admitVisual, exportVisual, htmlSignature, protectedAttributes } from "../src/editor/richTextAdmission";
 
 interface Callbacks { change(raw: string): void; history(action: string): void; error(message: string): void }
@@ -28,9 +32,9 @@ const marks = [["bold", "strong"], ["italic", "em"], ["underline", "u"]].map(([n
 
 export function createVisual(element: HTMLElement, initial: string, callbacks: Callbacks) {
   const admission = admitVisual(initial);
-  if (initial && !admission.document.content?.some(node => ["paragraph", "heading"].includes(node.type ?? "")))
-    throw new Error("No editable paragraph or heading is present. Use HTML.");
-  const protectedOriginal = protectedAttributes(initial);
+  if (initial && !admission.document.content?.some(node => ["paragraph", "heading", "tableShell", "tableWrapper"].includes(node.type ?? "")))
+    throw new Error("No editable paragraph, heading or table is present. Use HTML.");
+  let authorizedTableTransaction: Transaction | undefined;
   let current = initial; let destroyed = false; let composing = false;
   const reject = (message: string): false => { callbacks.error(message); return false; };
   const guard = Extension.create({ name: "sourceGuard", priority: 1000,
@@ -40,10 +44,11 @@ export function createVisual(element: HTMLElement, initial: string, callbacks: C
         try {
           const raw = exportVisual(transaction.doc.toJSON() as JSONContent);
           const next = admitVisual(raw);
-          if (JSON.stringify(next.opaque) !== JSON.stringify(admission.opaque) || protectedAttributes(raw) !== protectedOriginal)
+          const structural = transaction === authorizedTableTransaction;
+          if (JSON.stringify(next.opaque) !== JSON.stringify(admission.opaque) || protectedAttributes(raw, structural) !== protectedAttributes(current, structural))
             return reject("This operation would change protected metadata or opaque content. Use HTML.");
           return true;
-        } catch { return reject("This operation is outside the basic visual profile. Use HTML."); }
+        } catch (error) { return reject(error instanceof Error ? error.message : "This operation is outside the visual profile. Use HTML."); }
       },
       props: {
         handlePaste(view, event) {
@@ -76,7 +81,7 @@ export function createVisual(element: HTMLElement, initial: string, callbacks: C
       ...baseKeymap,
     })]; },
   });
-  const editor = new Editor({ element, extensions: [...nodes, ...marks, guard], content: initial === "" ? { type: "doc", content: [{ type: "paragraph" }] } : admission.document,
+  const editor = new Editor({ element, extensions: [...nodes, ...marks, ...tableExtensions, guard], content: initial === "" ? { type: "doc", content: [{ type: "paragraph" }] } : admission.document,
     enableInputRules: false, enablePasteRules: false, injectCSS: false,
     editorProps: { attributes: { role: "textbox", "aria-label": "Rich Text visual editor", "aria-multiline": "true", spellcheck: "false" } },
     onUpdate: ({ editor: active }) => {
@@ -93,12 +98,19 @@ export function createVisual(element: HTMLElement, initial: string, callbacks: C
     read: () => current,
     command(name: string) { if (editor.isEditable && ["bold", "italic", "underline"].includes(name)) {
       editor.view.focus(); toggleMark(editor.schema.marks[name])(editor.state, editor.view.dispatch);
+    } else if (editor.isEditable) {
+      try { authorizedTableTransaction = tableCommand(editor.state, name); editor.view.dispatch(authorizedTableTransaction); editor.view.focus(); }
+      catch (error) { callbacks.error(error instanceof Error ? error.message : "Table operation unavailable."); }
+      finally { authorizedTableTransaction = undefined; }
     } },
     focus() { editor.commands.focus(); },
-    selection() { return { from: editor.state.selection.from, to: editor.state.selection.to }; },
-    restore(selection: { from: number; to: number }) {
+    selection() { const selection = editor.state.selection; return { from: selection.from, to: selection.to,
+      ...(selection instanceof CellSelection ? { anchorCell: selection.$anchorCell.pos, headCell: selection.$headCell.pos } : {}) }; },
+    restore(selection: { from: number; to: number; anchorCell?: number; headCell?: number }) {
       const max = editor.state.doc.content.size;
-      editor.view.dispatch(editor.state.tr.setSelection(TextSelection.create(editor.state.doc, Math.min(selection.from, max), Math.min(selection.to, max))));
+      let restored;
+      try { restored = selection.anchorCell !== undefined && selection.headCell !== undefined ? CellSelection.create(editor.state.doc, selection.anchorCell, selection.headCell) : undefined; } catch { /* Stale host selection falls back to bounded text selection. */ }
+      editor.view.dispatch(editor.state.tr.setSelection(restored ?? TextSelection.create(editor.state.doc, Math.min(selection.from, max), Math.min(selection.to, max))));
       editor.view.focus();
     },
     async freeze() {

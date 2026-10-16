@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.49.0 — 2026-10-16
+
+- Add bounded table Visual editing: preserved overflow wrappers, captions, explicit table sections, column definitions, header/cell metadata and spans.
+- Add row/column insertion, empty-row/column deletion, guarded cell merge/split and caption controls. Refuse structural changes involving protected cell metadata, populated-cell loss, cross-section merges or incompatible column definitions.
+- Keep raw HTML authoritative, no-op switches exact, unsupported tables HTML-editable, and table drafts integrated with ordinary Save, native history and backups. Stored CSS/IDs remain inert in the trusted editor.
+- Managed links, arbitrary styled-container/media editing and formatted paste remain separate work. No new B31 release exception is introduced.
+
 ## 0.48.0 — 2026-10-16
 
 - Extend Visual editing to nested inline spans without flattening their wrappers, classes or style attributes; preserve heading levels, text spacing and blank paragraphs.

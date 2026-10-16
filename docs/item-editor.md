@@ -37,13 +37,28 @@ Save synchronizes pending edits and composition input with the current panel/rev
 
 Visual supports explicit paragraphs, existing headings, nested inline spans, bold/italic/underline and line breaks. Span wrappers, classes and style attributes survive text edits and formatting across boundaries. Type, select text and use **Bold**, **Italic**, **Underline** or Ctrl/Cmd+B/I/U; Enter splits ordinary paragraphs and Shift+Enter inserts a line break. Operations that would split, flatten or remove protected spans/attributes are refused; use HTML for structural changes. Ctrl/Cmd+Z and redo use the same VS Code draft history as HTML mode. There is no separate visual undo stack.
 
-Original source tokens are checked before admission. Parser repairs, duplicate attributes, comments, links, identity/managed-reference attributes, directly repeated same-type formatting, lists and tables remain HTML-only with a reason. Some other structures may also be refused when the visual representation would alter them. HTML remains available; rejection does not clear or repair the draft.
+Original source tokens are checked before admission. Parser repairs, duplicate attributes, comments, links, identity/managed-reference attributes outside the table profile, directly repeated same-type formatting and lists remain HTML-only with a reason. Some other structures may also be refused when the visual representation would alter them. HTML remains available; rejection does not clear or repair the draft.
 
 Original CSS and classes are retained but not applied to the visual surface. On paragraphs, headings and spans, a style containing only a literal `text-align: left`, `right`, `center`, `justify`, `start` or `end` declaration is projected through bundled CSS rules scoped to the editor. Other styles, including combined declarations, remain inert in Visual; use Preview for stored styling. Website classes such as `theme-primary` survive in HTML without loading the website stylesheet or promising its appearance. Stylesheets and images/DAM content appear as inert placeholders. Visual operations that remove/change opaque content, span nesting or protected attributes are rejected, including ambiguous joins/splits of attributed blocks. Edit those structures in HTML. There is no media or link editor.
 
 Unchanged Visual/HTML/Preview switches preserve exact raw HTML. After a real visual edit, text entity spelling and text-node line endings may be canonicalized, and formatting wrappers may be split or merged by the requested operation. Original element attribute syntax and opaque fragments remain retained. Undo to the entry state restores its exact original source. Use HTML when lexical fidelity through edits is required.
 
 Plain-text paste is supported. Formatted clipboard HTML and drag/drop are rejected as a whole; use plain-text paste or HTML mode. Visual admission is limited to 262,144 characters, 5,000 nodes and 40 levels. These bounds do not truncate the HTML draft. Visual has basic document formatting, not website-identical rendering.
+
+### Tables (0.49.0)
+
+Visual mode supports rectangular tables with explicit `thead`, `tbody` and/or `tfoot` sections, an optional leading caption, column definitions and an optional top-level `div` containing only the table. Each section appears as a separate grid in the editing surface. Original wrapper/section tags, IDs, classes, styles, dimensions, header/scope metadata and spans are retained in exported HTML; original styles and IDs are not applied to editor chrome. Use Preview to inspect stored styling.
+
+Place the cursor in a cell and open **Table** for row/column insertion, empty-row/column deletion, merge/split and **Add / edit caption**. Drag across cells to select them. Captions and cell text support ordinary typing and formatting. The commands have deliberate limits:
+
+- Structural edits require rows and cells without attributes other than row/column spans. Cells with IDs, `headers`, `scope`, styles or other metadata remain text-editable, but structural changes require HTML.
+- Merge requires cells of the same header/data type, within one section, with at most one populated cell. Populated content is never silently discarded or combined.
+- Delete accepts only empty cells and cannot remove an entire section. Clear or move content explicitly first; deleting an entire section/table requires HTML.
+- Column changes require a single section and no `colgroup`. Column definitions are retained, but edited in HTML. Row operations remain available where their metadata policy permits.
+- Spans cannot cross section boundaries. Each section is limited to 100 rows and 100 columns. Ragged, nested or parser-repaired tables (including omitted `tbody`) stay HTML-only.
+- Originally inline cell content remains inline. Use Shift+Enter for a line break; Enter is refused if it would invent paragraph wrappers. Cells with existing explicit paragraphs can retain that structure.
+
+Unchanged mode switches preserve exact raw HTML. Structural commands intentionally change the selected grid and may change its indentation/span attribute spelling. Formatted paste/drop, arbitrary container editing, managed links and visual media editing remain outside this profile. Save, native host undo/redo and backups use the same ordinary-item workflow.
 
 ## Basic values and clearing
 
