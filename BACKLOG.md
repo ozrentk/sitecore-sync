@@ -230,3 +230,8 @@ Use this file as the single backlog inventory. Add newly agreed work here, prese
 - [Matched-schema comparison](docs/research/prosemirror-compatibility-spike.md): custom attribute/span adapters improve preservation, but direct ProseMirror and Tiptap with the same schema/serializer produce identical results across 15 synthetic and four live read-only cases.
 - Switching libraries alone does not solve HTML preservation. Characterized old-link-URL retention, duplicated IDs after paragraph splitting and flattened nested spans; adapter commands need explicit metadata policies.
 - Keep the exact raw-draft architecture and compatibility gate. No production editor changes, mutations or release were made.
+
+
+### Rich Text formatting/search/history increment (0.54.0)
+
+Implemented horizontal rule, strikethrough, subscript/superscript; two toolbar rows; field-scoped inline literal Find/Replace in Visual and authoritative HTML with transient highlights and atomic guarded replacements; explicit native Undo/Redo. See [behavior and limits](docs/item-editor.md#formatting-findreplace-and-history-0540). Broader arbitrary HTML, formatted paste, native IME/accessibility and live-save acceptance are not closed by this increment. B31 remains independent.

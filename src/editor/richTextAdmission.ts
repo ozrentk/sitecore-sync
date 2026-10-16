@@ -1,3 +1,4 @@
+import { richMarkTags, richMarkType } from "./richTextMarks";
 import { parseFragment, type DefaultTreeAdapterTypes as P } from "parse5";
 import type { JSONContent } from "@tiptap/core";
 import { inspectRichLink } from "./richTextLinks";
@@ -52,7 +53,7 @@ export function admitVisual(raw: string): VisualAdmission {
         identities.add(identity);
       }
       const loc = child.sourceCodeLocation!;
-      if (!loc.startTag || (!["img", "br", "col"].includes(tag) && !loc.endTag)) throw new Error("Explicit opening and closing tags are required for Visual (including table sections). Use HTML.");
+      if (!loc.startTag || (!["img", "br", "col", "hr"].includes(tag) && !loc.endTag)) throw new Error("Explicit opening and closing tags are required for Visual (including table sections). Use HTML.");
       const attrs = { open: raw.slice(loc.startOffset, loc.startTag.endOffset), close: loc.endTag ? raw.slice(loc.endTag.startOffset, loc.endOffset) : "", tag,
         align: safeTextAlignment(child.attrs.find(attribute => attribute.name === "style")?.value ?? "") };
       if (!inline && ["ul", "ol", "li", "blockquote"].includes(tag)) {
@@ -120,12 +121,13 @@ export function admitVisual(raw: string): VisualAdmission {
         inspectRichLink(attrs.open);
         result.push({ type: "richLink", attrs, marks,
           content: children(child, loc.startTag.endOffset, loc.endTag!.startOffset, true, [], depth + 1) });
-      } else if (tag === "br" && inline) result.push({ type: "hardBreak", attrs, marks });
+      } else if (tag === "hr" && !inline && !("tagName" in parent)) result.push({ type: "horizontalRule", attrs });
+      else if (tag === "br" && inline) result.push({ type: "hardBreak", attrs, marks });
       else if (tag === "span" && inline) {
         result.push({ type: "span", attrs, marks,
           content: children(child, loc.startTag.endOffset, loc.endTag!.startOffset, true, [], depth + 1) });
-      } else if (["strong", "b", "em", "i", "u"].includes(tag) && inline) {
-        const type = ["strong", "b"].includes(tag) ? "bold" : ["em", "i"].includes(tag) ? "italic" : "underline";
+      } else if (richMarkType(tag) && inline) {
+        const type = richMarkType(tag)!;
         if (marks.some(mark => mark.type === type)) throw new Error("Repeated nested formatting is HTML-only.");
         result.push(...children(child, loc.startTag.endOffset, loc.endTag!.startOffset, true, [...marks, { type, attrs }], depth + 1));
       } else if (!inline && (tag === "p" || /^h[1-6]$/u.test(tag))) {
@@ -202,7 +204,7 @@ export function exportVisual(node: JSONContent): string {
   else if (["gap", "stylesheet", "inlineImage", "blockImage"].includes(node.type ?? "")) value = String(node.attrs?.raw ?? "");
   else {
     const tableTypes: Record<string, string> = { tableWrapper: "div", tableShell: "table", tableGrid: "tbody", tableRow: "tr", tableCell: "td", tableHeader: "th", caption: "caption", colgroup: "colgroup", col: "col", bulletList: "ul", orderedList: "ol", listItem: "li", blockquote: "blockquote" };
-    const tag = tableTypes[node.type ?? ""] ? String(node.attrs?.tag || tableTypes[node.type!]) : node.type === "heading" ? String(node.attrs?.tag ?? "h2") : node.type === "hardBreak" ? "br" : node.type === "span" ? "span" : node.type === "richLink" ? "a" : "p";
+    const tag = tableTypes[node.type ?? ""] ? String(node.attrs?.tag || tableTypes[node.type!]) : node.type === "heading" ? String(node.attrs?.tag ?? "h2") : node.type === "horizontalRule" ? "hr" : node.type === "hardBreak" ? "br" : node.type === "span" ? "span" : node.type === "richLink" ? "a" : "p";
     let open = String(node.attrs?.open || `<${tag}>`);
     if (node.type === "tableCell" || node.type === "tableHeader") {
       for (const key of ["colspan", "rowspan"]) {
@@ -212,19 +214,19 @@ export function exportVisual(node: JSONContent): string {
         if (old !== next) { open = open.replace(pattern, ""); if (next !== 1) open = open.replace(/>$/u, ` ${key}="${next}">`); }
       }
     }
-    value = String(node.attrs?.before ?? "") + open + content() + String(node.attrs?.tail ?? "") + String(node.attrs?.close || (["br", "col"].includes(tag) ? "" : `</${tag}>`));
+    value = String(node.attrs?.before ?? "") + open + content() + String(node.attrs?.tail ?? "") + String(node.attrs?.close || (["br", "col", "hr"].includes(tag) ? "" : `</${tag}>`));
   }
   return value;
 }
 // Adjacent text with the same mark shares one wrapper, as in the model's DOM serializer.
 function exportChildren(nodes: JSONContent[]): string {
   let result = ""; let active: JSONContent[] = [];
-  const close = (mark: JSONContent): string => String(mark.attrs?.close || `</${mark.type === "bold" ? "strong" : mark.type === "italic" ? "em" : "u"}>`);
+  const close = (mark: JSONContent): string => String(mark.attrs?.close || `</${richMarkTags[mark.type ?? ""]}>`);
   for (const node of nodes) {
     const next = node.marks ?? []; let common = 0;
     while (common < active.length && common < next.length && JSON.stringify(active[common]) === JSON.stringify(next[common])) common++;
     for (let i = active.length - 1; i >= common; i--) result += close(active[i]);
-    for (const mark of next.slice(common)) result += String(mark.attrs?.open || `<${mark.type === "bold" ? "strong" : mark.type === "italic" ? "em" : "u"}>`);
+    for (const mark of next.slice(common)) result += String(mark.attrs?.open || `<${richMarkTags[mark.type ?? ""]}>`);
     active = next; result += exportVisual(node);
   }
   for (const mark of [...active].reverse()) result += close(mark);

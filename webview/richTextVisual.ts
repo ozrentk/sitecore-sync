@@ -1,3 +1,7 @@
+import { findVisual, replaceVisual, visualMatches } from "../src/editor/richTextSearch";
+import { Decoration, DecorationSet } from "@tiptap/pm/view";
+import { literalMatches, type SearchInput, type ReplaceInput } from "../src/editor/richTextSearchInput";
+import { richMarkTags } from "../src/editor/richTextMarks";
 import { Editor, Node, Mark, Extension, type JSONContent } from "@tiptap/core";
 import { Plugin, TextSelection } from "@tiptap/pm/state";
 import { baseKeymap } from "@tiptap/pm/commands";
@@ -27,18 +31,19 @@ const nodes = [
     renderHTML: ({ node }) => ["span", alignment(node.attrs.align), 0] }),
   Node.create({ name: "richLink", group: "inline", inline: true, content: "inline*", defining: true, addAttributes: attributes,
     renderHTML: () => ["span", { class: "rt-link", "data-rich-link": "true" }, 0] }),
+  Node.create({ name: "horizontalRule", group: "block", atom: true, addAttributes: attributes, renderHTML: () => ["hr"] }),
   Node.create({ name: "hardBreak", group: "inline", inline: true, selectable: false, addAttributes: attributes, renderHTML: () => ["br"] }),
   ...opaqueNames.map(name => Node.create({ name, group: name === "inlineImage" ? "inline" : "block", inline: name === "inlineImage", atom: true,
     selectable: false, draggable: false, addAttributes: () => ({ raw: { default: "" } }),
     renderHTML: () => [name === "inlineImage" ? "span" : "div", { "data-opaque": name, contenteditable: "false" },
       name === "gap" ? "" : name === "stylesheet" ? "[Stylesheet — edit in HTML]" : "[Image — edit in HTML]"] })),
 ];
-const marks = [["bold", "strong"], ["italic", "em"], ["underline", "u"]].map(([name, tag]) =>
+const marks = Object.entries(richMarkTags).map(([name, tag]) =>
   Mark.create({ name, addAttributes: attributes, renderHTML: () => [tag, 0] }));
 
 export function createVisual(element: HTMLElement, initial: string, callbacks: Callbacks, extraExtensions: Extension[] = []) {
   const admission = admitVisual(initial);
-  if (initial && !admission.document.content?.some(node => ["paragraph", "heading", "tableShell", "tableWrapper", "bulletList", "orderedList", "blockquote"].includes(node.type ?? "")))
+  if (initial && !admission.document.content?.some(node => ["paragraph", "heading", "horizontalRule", "tableShell", "tableWrapper", "bulletList", "orderedList", "blockquote"].includes(node.type ?? "")))
     throw new Error("No editable paragraph, heading or table is present. Use HTML.");
   let authorizedTableTransaction: Transaction | undefined;
   let authorizedLinkTransaction: Transaction | undefined;
@@ -51,6 +56,7 @@ export function createVisual(element: HTMLElement, initial: string, callbacks: C
   let validatedDoc: unknown;
   let validatedOpaque: readonly string[] = admission.opaque;
   let current = initial; let destroyed = false; let composing = false;
+  let searchInput: SearchInput | undefined;
   const reject = (message: string): false => { callbacks.error(message); return false; };
   const guard = Extension.create({ name: "sourceGuard", priority: 1000,
     addProseMirrorPlugins() { return [new Plugin({
@@ -69,6 +75,13 @@ export function createVisual(element: HTMLElement, initial: string, callbacks: C
         } catch (error) { return reject(error instanceof Error ? error.message : "This operation is outside the visual profile. Use HTML."); }
       },
       props: {
+        decorations(state) {
+          if (!searchInput) return DecorationSet.empty;
+          try {
+            return DecorationSet.create(state.doc, visualMatches(state.doc, searchInput).flatMap(match => match.parts.map(part =>
+              Decoration.inline(part.from, part.to, { class: match.from === state.selection.from && match.to === state.selection.to ? "rt-search-current" : "rt-search-match" }))));
+          } catch { return DecorationSet.empty; }
+        },
         handlePaste(view, event) {
           const html = event.clipboardData?.getData("text/html");
           if (html) { reject("Formatted paste is not supported in Visual yet. Paste HTML in HTML mode, or use plain-text paste."); return true; }
@@ -141,6 +154,22 @@ export function createVisual(element: HTMLElement, initial: string, callbacks: C
   const statuses = new Map<string, { enabled: boolean; active: boolean; reason: string }>();
   return {
     read: () => current,
+    clearSearch() { searchInput = undefined; if (!destroyed) editor.view.dispatch(editor.state.tr); },
+    highlightSearch(input: SearchInput) {
+      const matches = visualMatches(editor.state.doc, input); searchInput = input;
+      editor.view.dispatch(editor.state.tr);
+      return { count: matches.length, index: matches.findIndex(match => match.from === editor.state.selection.from && match.to === editor.state.selection.to) + 1, replaced: 0 };
+    },
+    search(input: SearchInput) {
+      if (destroyed || composing || editor.view.composing) throw new Error("Finish composing before searching.");
+      const found = findVisual(editor.state, input); searchInput = input; editor.view.dispatch(found.transaction); return found.result;
+    },
+    replaceSearch(input: ReplaceInput) {
+      if (destroyed || !editor.isEditable || composing || editor.view.composing) throw new Error("Finish composing and wait for editing to resume before replacing.");
+      const replaced = replaceVisual(editor.state, input); editor.view.dispatch(replaced.transaction);
+      if (!editor.state.doc.eq(replaced.transaction.doc)) throw new Error("Replacement was refused by the preservation guard.");
+      return replaced.result;
+    },
     beginLink() {
       linkSession = beginRichLink(editor.state);
       return { ...linkSession.info, existing: Boolean(linkSession.node) };
@@ -199,4 +228,4 @@ export function createVisual(element: HTMLElement, initial: string, callbacks: C
   };
 }
 
-Object.assign(globalThis, { createRichTextVisual: createVisual });
+Object.assign(globalThis, { createRichTextVisual: createVisual, richTextSearchTools: { literalMatches } });

@@ -1,3 +1,5 @@
+import { findVisual, replaceVisual, visualMatches } from "../../src/editor/richTextSearch";
+import { literalMatches, validSearchInput } from "../../src/editor/richTextSearchInput";
 import { test } from "node:test";
 import { strictEqual, throws, match } from "node:assert/strict";
 import { Schema } from "@tiptap/pm/model";
@@ -13,8 +15,10 @@ const schema = new Schema({ nodes: {
   bulletList: { group: "block", content: "listItem+", attrs: blockAttrs("ul") }, orderedList: { group: "block", content: "listItem+", attrs: { ...blockAttrs("ol"), order: { default: 1 }, reversed: { default: false } } },
   listItem: { content: "(paragraph | heading | listText) (bulletList | orderedList)*", attrs: blockAttrs("li") }, listText: { content: "inline*", attrs: blockAttrs("") },
   blockquote: { group: "block", content: "(paragraph | heading | bulletList | orderedList | blockquote)+", attrs: blockAttrs("blockquote") },
+  horizontalRule: { group: "block", atom: true, attrs },
+  hardBreak: { group: "inline", inline: true, attrs },
   gap: { group: "block", atom: true, attrs: { raw: { default: "" } } },
-}, marks: { bold: { attrs }, italic: { attrs }, underline: { attrs } } });
+}, marks: { bold: { attrs }, italic: { attrs }, underline: { attrs }, strike: { attrs }, subscript: { attrs }, superscript: { attrs } } });
 function state(raw: string, text: string, offset = 0, length = 0): EditorState {
   const doc = schema.nodeFromJSON(admitVisual(raw).document); let position = -1;
   doc.descendants((node, pos) => { if (position < 0 && node.isText && node.text!.includes(text)) position = pos + node.text!.indexOf(text) + offset; });
@@ -101,4 +105,47 @@ test("mixed alignment has no active value and applying alignment updates every s
   const updated = run(selected, 'alignLeft');
   strictEqual(raw(updated), '<p style="text-align: left;">One</p><p style="text-align: left;">Two</p>');
   strictEqual(activeRichCommand(updated, 'alignLeft'), true);
+});
+
+
+test("new formatting retains tags, supports toggles and inserts a top-level rule", () => {
+  throws(() => admitVisual('<p><constructor>Not a mark</constructor></p>'), /outside/);
+  const html = '<p><strike class="keep">Old</strike><sub>2</sub><sup>3</sup></p><hr class="line" />';
+  strictEqual(raw(state(html, 'Old')), html);
+  for (const [command, tag] of [['strike', 's'], ['subscript', 'sub'], ['superscript', 'sup']]) {
+    let value = run(state('<p>Text</p>', 'Text', 0, 4), command);
+    strictEqual(raw(value), `<p><${tag}>Text</${tag}></p>`);
+    value = run(value, command); strictEqual(raw(value), '<p>Text</p>');
+  }
+  strictEqual(raw(run(state('<p><sub>Text</sub></p>', 'Text', 0, 4), 'superscript')), '<p><sup>Text</sup></p>');
+  strictEqual(raw(run(state('<p>Text</p>', 'Text'), 'horizontalRule')), '<p>Text</p><hr><p></p>');
+  throws(() => run(state('<p>Text</p>', 'Text', 0, 2), 'horizontalRule'));
+  throws(() => run(state('<p><sub class="keep">Text</sub></p>', 'Text', 0, 4), 'superscript'), /protected/);
+});
+const find = { query: 'one', matchCase: false, direction: 'next' as const };
+test("literal search preserves offsets, limits input and wraps in both directions", () => {
+  strictEqual(literalMatches('a.*b .*', { ...find, query: '.*' }).length, 2);
+  strictEqual(literalMatches('😀 ONE one', find)[0].from, 3);
+  strictEqual(validSearchInput({ ...find, query: '' }), false);
+  throws(() => literalMatches('one '.repeat(1001), find), /1,000/);
+  let value = state('<p>one ONE</p>', 'one');
+  const first = findVisual(value, find); strictEqual(first.result.index, 1); value = value.apply(first.transaction);
+  const next = findVisual(value, find); strictEqual(next.result.index, 2); value = value.apply(next.transaction);
+  strictEqual(findVisual(value, find).result.index, 1);
+  strictEqual(findVisual(value, { ...find, direction: 'previous' }).result.index, 1);
+  strictEqual(visualMatches(value.doc, { ...find, matchCase: true }).length, 1);
+});
+test("replacement is atomic, retains wrappers and rejects crossing structures or metadata loss", () => {
+  let value = state('<p class="keep"><span title="x">one one</span></p>', 'one');
+  const replaced = replaceVisual(value, { ...find, replacement: 'two', all: true });
+  strictEqual(replaced.result.replaced, 2);
+  strictEqual(raw(value.apply(replaced.transaction)), '<p class="keep"><span title="x">two two</span></p>');
+  throws(() => replaceVisual(value, { ...find, replacement: 'two', all: false }), /Find a match/);
+  value = state('<p>one</p><p>o<span>ne</span></p>', 'one');
+  throws(() => replaceVisual(value, { ...find, replacement: 'two', all: true }), /boundary/);
+  strictEqual(raw(value), '<p>one</p><p>o<span>ne</span></p>');
+  value = state('<p><strong title="keep">one</strong></p>', 'one');
+  throws(() => replaceVisual(value, { ...find, replacement: '', all: true }), /protected/);
+  strictEqual(visualMatches(state('<p>o<br>ne</p>', 'o').doc, find).length, 0);
+  strictEqual(visualMatches(state('<p>o</p><p>ne</p>', 'o').doc, find).length, 0);
 });

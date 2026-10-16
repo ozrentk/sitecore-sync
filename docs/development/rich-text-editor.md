@@ -1,6 +1,6 @@
 # Rich Text editor development guide for agents
 
-Status: implementation guidance, reviewed 2026-10-16. **0.46.0 adds HTML source editing; 0.47.0 adds the guarded basic visual profile; 0.48.0 extends it to nested spans and safe alignment; 0.49.0 adds bounded table editing; 0.50.0 adds managed links; 0.51.0 adds bounded formatting/list/quote commands; 0.52.0 adds isolated styled editing; 0.53.0 adds the compact toolbar and shared action icons.** The latest published release, 0.45.0, is read-only. Experiments demonstrate bounded feasibility, not authorization to widen the implemented visual profile.
+Status: implementation guidance, reviewed 2026-10-17. **0.46.0 adds HTML source editing; 0.47.0 adds the guarded basic visual profile; 0.48.0 extends it to nested spans and safe alignment; 0.49.0 adds bounded table editing; 0.50.0 adds managed links; 0.51.0 adds bounded formatting/list/quote commands; 0.52.0 adds isolated styled editing; 0.53.0 adds the compact toolbar and shared action icons; 0.54.0 adds formatting, two toolbar rows and inline Find/Replace/native history controls.** The latest published release, 0.45.0, is read-only. Experiments demonstrate bounded feasibility, not authorization to widen the implemented visual profile.
 
 Read this document before changing Rich Text rendering, editing, serialization, mode switching or save integration. Follow repository `AGENTS.md` and the current user's scope. This guide does not authorize releases, remote pushes, Sitecore mutations or new features outside the assigned task.
 
@@ -40,7 +40,7 @@ Read the [command profile and limits](../item-editor.md#formatting-commands-list
 
 Only an explicit structural command may move whitespace-only opaque gaps into container tokens. The controller updates its retained opaque inventory after the accepted document change; ordinary subsequent edits must match that inventory exactly. Stylesheets and images are never exempted. Test pretty-printed paragraph wrapping followed by typing, not just initial serialization. Structural indentation may move; raw/no-op switching remains exact.
 
-Availability uses cached editor-state results and a disposable text-compacted projection to avoid parsing large text repeatedly. It must never replace the real command document or authoritative draft: execution rechecks full text and admission. Test active/mixed states, disabled reasons, actual keyboard/pointer interactions and large fields. Clear formatting is plain B/I/U only; arbitrary CSS, attributed mark loss and partial inherited-wrapper changes remain refused. Do not silently interpret Clear as deleting links or styles.
+Availability uses cached editor-state results and a disposable text-compacted projection to avoid parsing large text repeatedly. It must never replace the real command document or authoritative draft: execution rechecks full text and admission. Test active/mixed states, disabled reasons, actual keyboard/pointer interactions and large fields. Clear formatting is plain B/I/U/strike/sub/sup only; arbitrary CSS, attributed mark loss and partial inherited-wrapper changes remain refused. Do not silently interpret Clear as deleting links or styles.
 
 The new regression tests live in `test/unit/richTextCommands.test.ts`, the real Rich Text webview suite and the existing provider Save/backup fixture. Keep host history, freeze/composition, stale link sessions, exact locale and conflict protections intact. Broader styling/media (3D), formatted paste and native IME/accessibility/live-save acceptance remain separate work.
 
@@ -219,3 +219,12 @@ Evidence:
 - [Initial Tiptap/CodeMirror experiment](../research/richtext-compatibility-spike.md) — stock behavior and source/draft integration findings.
 
 This guide supplies development constraints, not a claim that planned functionality has shipped.
+
+
+## Search and extended formatting rules (0.54.0)
+
+Read the [user contract](../item-editor.md#formatting-findreplace-and-history-0540). `richTextMarks.ts` is the shared supported-mark registry. Rules require schema/admission/export/commands, not toolbar-only aliases. Keep imported attributes/tokens protected and sub/sup exclusion deliberate. Horizontal rules are top-level atoms; insertion requires a collapsed selection in a top-level paragraph/heading.
+
+`richTextSearchInput.ts` owns bounded literal matching and bridge validation. `richTextSearch.ts` maps visible text to actual document positions without searching opaque content or joining blocks/breaks. All replacement plans are constructed on an immutable transaction; reject wrapper crossings and compare independent protected/opaque inventories before dispatch. Replace all must fail as a whole. Ordinary transaction guards still apply; search does not gain a guard bypass.
+
+Highlights are transient ProseMirror decorations or an escaped textarea mirror. Never serialize them or treat a selection-only transaction as a draft change. HTML matching/replacement must use `source.read()` and raw offsets; convert offsets only for display. Keep `source.replace()` as the sole raw mutation boundary. Reuse the existing native history notification; do not add ProseMirror history. Frame operations stay authenticated, validated, ordered and lifetime-bound. The inline bar must recheck its field/editor lifetime after asynchronous replies; freeze blocks mutations. Preserve two distinct toolbar rows, keyboard behavior and focus on close.

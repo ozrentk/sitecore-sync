@@ -1,3 +1,4 @@
+import { literalMatches, validSearchResult, type SearchInput, type ReplaceInput, type SearchResult } from "../src/editor/richTextSearchInput";
 import type { createVisual } from "./richTextVisual";
 import type { RichLinkDestination } from "../src/editor/richTextLinks";
 import { frameState, frameLinkInfo } from "../src/editor/richTextFrameProtocol";
@@ -5,7 +6,7 @@ import { frameState, frameLinkInfo } from "../src/editor/richTextFrameProtocol";
 declare const __RICH_TEXT_FRAME_SCRIPT__: string;
 const parentNonce = document.currentScript?.nonce ?? "";
 type Core = ReturnType<typeof createVisual>;
-type Callbacks = Parameters<typeof createVisual>[2] & { escape?(): void; save?(): void };
+type Callbacks = Parameters<typeof createVisual>[2] & { escape?(): void; save?(): void; find?(replace: boolean): void };
 type Status = ReturnType<Core["status"]>;
 function createFrame(element: HTMLElement, initial: string, callbacks: Callbacks) {
   const session = Array.from(crypto.getRandomValues(new Uint8Array(24)), byte => byte.toString(16).padStart(2, "0")).join("");
@@ -33,6 +34,7 @@ function createFrame(element: HTMLElement, initial: string, callbacks: Callbacks
     else if (message.type === "state") update(message.state);
     else if (message.type === "history" && ["undo", "redo"].includes(message.action)) callbacks.history(message.action);
     else if (message.type === "escape") callbacks.escape?.();
+    else if (message.type === "find" && typeof message.replace === "boolean") callbacks.find?.(message.replace);
     else if (message.type === "save") callbacks.save?.();
     else if (message.type === "error" && typeof message.error === "string" && message.error.length <= 1024) callbacks.error(message.error);
     else if (message.type === "reply" && Number.isSafeInteger(message.id)) {
@@ -55,7 +57,7 @@ function createFrame(element: HTMLElement, initial: string, callbacks: Callbacks
     });
   };
   const policy = `default-src 'none'; script-src 'nonce-${nonce}'; style-src 'nonce-${nonce}'; img-src 'none'; font-src 'none'; connect-src 'none'; frame-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none';`;
-  const css = "@layer rt-defaults,rt-stored,rt-inline;@layer rt-defaults{html{color-scheme:light dark}body{font:14px system-ui;margin:12px}#editor{min-height:120px}.tiptap{outline:none;min-height:120px}.rt-cell-text,.rt-list-text{display:inline}table{border-collapse:collapse}td,th{border:1px solid GrayText;min-width:40px;padding:4px}.selectedCell{outline:2px solid Highlight}.rt-link{text-decoration:underline}[data-opaque]{font-size:12px;color:GrayText}[data-opaque=gap]{display:none}}@media(forced-colors:active){.tiptap{color:CanvasText;background:Canvas}}";
+  const css = "@layer rt-defaults,rt-stored,rt-inline;@layer rt-defaults{html{color-scheme:light dark}body{font:14px system-ui;margin:12px}#editor{min-height:120px}.tiptap{outline:none;min-height:120px}.rt-cell-text,.rt-list-text{display:inline}table{border-collapse:collapse}td,th{border:1px solid GrayText;min-width:40px;padding:4px}.selectedCell{outline:2px solid Highlight}.rt-link{text-decoration:underline}[data-opaque]{font-size:12px;color:GrayText}[data-opaque=gap]{display:none}}.rt-search-match{background:Mark;color:MarkText}.rt-search-current{background:Highlight;color:HighlightText;outline:2px solid Highlight}@media(forced-colors:active){.tiptap{color:CanvasText;background:Canvas}}";
   // No stored HTML/CSS is interpolated into the frame document. It arrives only after authentication.
   const html = `<!doctype html><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="${policy}"><style nonce="${nonce}">${css}</style><main id="editor"></main><script nonce="${nonce}">const frameSession=${JSON.stringify(session)};${__RICH_TEXT_FRAME_SCRIPT__.replace(/<\/script/giu, "<\\/script")}</script>`;
   frame.src = `data:text/html;charset=utf-8,${encodeURIComponent(html)}`; element.append(frame);
@@ -71,6 +73,10 @@ function createFrame(element: HTMLElement, initial: string, callbacks: Callbacks
   themes.observe(document.documentElement, { attributes: true, attributeFilter: ["class", "style"] });
   return {
     read: () => current,
+    clearSearch: () => action("clearSearch"),
+    highlightSearch: async (value: SearchInput): Promise<SearchResult> => { await initialized; const result = await request("highlightSearch", value); if (!validSearchResult(result)) throw new Error("Invalid search response."); return result; },
+    search: async (value: SearchInput): Promise<SearchResult> => { await initialized; const result = await request("search", value); if (!validSearchResult(result)) throw new Error("Invalid search response."); return result; },
+    replaceSearch: async (value: ReplaceInput): Promise<SearchResult> => { await initialized; const result = await request("replaceSearch", value); if (!validSearchResult(result)) throw new Error("Invalid replacement response."); return result; },
     command: (name: string) => action("command", name),
     tableMenu: (open: boolean) => action("tableMenu", open),
     status: (name: string): Status => statuses[name] ?? { enabled: false, active: false, reason: "Visual editor is loading." },
@@ -95,4 +101,4 @@ function createFrame(element: HTMLElement, initial: string, callbacks: Callbacks
     },
   };
 }
-Object.assign(globalThis, { createRichTextFrame: createFrame });
+Object.assign(globalThis, { createRichTextFrame: createFrame, richTextSearchTools: { literalMatches } });
