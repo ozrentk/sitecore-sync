@@ -489,3 +489,7 @@ Item Details uses the same Image/File metadata, raw-value and Rich Text display;
 References: [Sitecore image fields](https://doc.sitecore.com/xp/en/developers/92/sitecore-experience-manager/access-image-fields.html), [Content Hub attribute mappings](https://doc.sitecore.com/xp/en/developers/connect-for-ch/51/connect-for-content-hub/change-the-image-tag-attribute-mapping-in-sitecore.html), [Content Hub public links](https://doc.sitecore.com/ch/en/developers/cloud-dev/public-links.html).
 
 Image/File attributes and original XML are kept in the editor’s existing information box. The main field shows a short read-only label, preview controls and the preview/result. A white preview backdrop keeps dark logos visible across themes. TLS certificate failures and unsupported SVG markup receive distinct, redacted messages.
+
+### Rich Text compatibility research
+
+The opt-in [Rich Text compatibility spike](docs/richtext-compatibility-spike.md) records Tiptap/CodeMirror round-trip findings, pinned dependencies and reproduction commands. It is evaluation tooling only; Rich Text remains read-only in the extension.

@@ -161,3 +161,9 @@ Use this file as the single backlog inventory. Add newly agreed work here, prese
 - Unsupported editing no longer means uninspectable content: Image/File metadata and bounded on-demand asset checks, read-only sanitized Rich Text with unchanged HTML source, and explicit raw/empty/unavailable states. Item Details shares metadata/source/Rich Text display.
 - Media Library references without URLs resolve names/paths only. SVG/private/custom-CDN previews remain unavailable with retained evidence; no URL guessing, uploads, asset selection, Content Hub credentials, Rich Text editor or publishing expansion.
 - Read-only Dev evidence verified Content Hub mappings and a public JPEG. Isolated tests cover security boundaries, stale results, connection changes, raw preservation and failed previews. No Sitecore mutations. B27 remains separate.
+
+### Rich Text editing compatibility spike (2026-10-16)
+
+- [Evidence and proposed implementation split](docs/richtext-compatibility-spike.md): conditional go for MIT Tiptap + CodeMirror with exact raw HTML drafts and HTML-only fallback; no-go for unrestricted stock HTML round-tripping.
+- Four read-only live Dev samples and 14 synthetic fixtures expose custom-attribute loss, table/CSS changes, link defaults, strict-CSP alignment loss and default source newline normalization. No content writes or editing capability delivered.
+- Implement draft/history/freeze/backup integration and the compatibility gate before enabling visual editing; Sitecore references, DAM, tables and arbitrary CSS need separate preservation boundaries.
