@@ -4,6 +4,8 @@
 
 2026-10-16. Evaluation only; no Rich Text editing has been enabled, no Sitecore content was changed, and no release was produced.
 
+Latest evidence: [custom Rich Text editing compatibility](custom-richtext-compatibility-spike.md) tests extensions and editing commands beyond these stock defaults; use its decision matrix for the current recommendation.
+
 Follow-up: the [direct ProseMirror spike](prosemirror-compatibility-spike.md) tests custom preservation adapters and a matched Tiptap schema. It demonstrates that these adapters improve both candidates equally; the stock-extension findings below are not a hard limit on Tiptap customization.
 
 ## Recommendation
