@@ -56,3 +56,9 @@ Implemented the [bounded table profile](../item-editor.md#tables-0490) using cus
 - The local 0.49.0 VSIX was installed in a disposable VS Code profile. Activation, registered commands and actual merge/split/row insertion through the **installed** browser bundle passed. Packaged assets/notices were present, source-only tooling was excluded and the pinned package secret scan passed.
 
 All fixtures are synthetic. No live Sitecore reads, writes, publishing, remote pushes or release tags were required. Native OS IME, screen-reader/high-contrast, site-specific table samples and live save acceptance remain unverified. This bounded acceptance does not establish arbitrary table/CSS fidelity or fix the independently intermittent B31 issue. No new dependencies or licensing terms were introduced.
+
+## Missing table creation correction (0.49.1)
+
+The 0.49.0 controls operated only on existing tables; there was no creation action. Added **Insert table (2 × 2)** after the current top-level block with a first-cell text selection. Existing content is preserved, nonempty selections are refused, and insertion from a cell creates a sibling table rather than a nested one. Existing-table errors now point to the creation action.
+
+Verification: **447 unit tests and 111 integration tests passed**, including insertion in empty documents, protected-paragraph preservation, nested-table prevention, the visible toolbar click, immediate first-cell typing, subsequent row insertion, exact mode switches and host undo/redo state restoration. Isolated Edge mouse/keyboard checks exercised the actual menu and buttons and the screenshot was inspected. No live Sitecore writes were performed; the existing native IME/accessibility/live-save gaps remain.

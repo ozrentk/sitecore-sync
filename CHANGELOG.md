@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.49.1 — 2026-10-16
+
+- Add the missing **Table → Insert table (2 × 2)** action. Insert after the current block without replacing content or nesting tables, and focus the first cell so typing and row/column commands work immediately.
+- Explain how to create a table when an existing-table command is used outside a table. Retain all metadata, raw-draft and structural-edit protections.
+
 ## 0.49.0 — 2026-10-16
 
 - Add bounded table Visual editing: preserved overflow wrappers, captions, explicit table sections, column definitions, header/cell metadata and spans.

@@ -9,7 +9,7 @@ import { simpleTableHtml } from "../fixtures/richTextTables";
 
 const attrs = { open: { default: "" }, close: { default: "" }, tag: { default: "" }, before: { default: "" }, tail: { default: "" } };
 const schema = new Schema({ nodes: {
-  doc: { content: "tableShell+" }, text: {}, cellText: { content: "text*" }, caption: { content: "text*", attrs },
+  doc: { content: "(tableShell | paragraph)*" }, text: {}, paragraph: { content: "text*", attrs }, cellText: { content: "text*" }, caption: { content: "text*", attrs },
   tableShell: { content: "caption? tableGrid+", attrs },
   tableGrid: { content: "tableRow+", tableRole: "table", attrs },
   tableRow: { content: "(tableCell | tableHeader)+", tableRole: "row", attrs },
@@ -22,6 +22,25 @@ function state(raw = simpleTableHtml): EditorState {
 }
 function apply(current: EditorState, name: string): EditorState { return current.apply(tableCommand(current, name)); }
 const raw = (current: EditorState): string => exportVisual(current.doc.toJSON());
+
+test("insert table preserves the current paragraph, places the cursor in the first cell and enables row commands", () => {
+  const html = '<p class="keep">Before</p><p>After</p>';
+  const doc = schema.nodeFromJSON(admitVisual(html).document);
+  const current = EditorState.create({ doc, selection: TextSelection.create(doc, 3) });
+  const inserted = apply(current, "insertTable");
+  const emptyTable = simpleTableHtml.replace('>A<', '><');
+  strictEqual(raw(inserted), '<p class="keep">Before</p>' + emptyTable + '<p>After</p>');
+  strictEqual(inserted.selection.$from.parent.type.name, "cellText");
+  strictEqual((raw(apply(inserted, "rowAfter")).match(/<tr>/gu) ?? []).length, 3);
+  strictEqual(current.doc.textContent, "BeforeAfter", "Insertion does not mutate the previous state");
+  throws(() => tableCommand(current.apply(current.tr.setSelection(TextSelection.create(doc, 1, 4))), "insertTable"), /without selecting/);
+});
+
+test("insert table works in an empty document and never nests inside an existing table", () => {
+  const empty = EditorState.create({ schema });
+  strictEqual(raw(apply(empty, "insertTable")), simpleTableHtml.replace('>A<', '><'));
+  strictEqual(raw(apply(state(), "insertTable")), simpleTableHtml + simpleTableHtml.replace('>A<', '><'));
+});
 
 test("table commands insert rows and columns without changing populated content; delete rejects populated cells", () => {
   let current = state();

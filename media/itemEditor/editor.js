@@ -235,7 +235,7 @@ function renderHtmlSource(row, field) {
   }
   const tableMenu = document.createElement("details"); tableMenu.className = "richtext-table-tools";
   const tableTitle = document.createElement("summary"); tableTitle.textContent = "Table"; tableMenu.append(tableTitle);
-  for (const [name, label] of [["caption", "Add / edit caption"], ["rowBefore", "Insert row above"], ["rowAfter", "Insert row below"],
+  for (const [name, label] of [["insertTable", "Insert table (2 × 2)"], ["caption", "Add / edit caption"], ["rowBefore", "Insert row above"], ["rowAfter", "Insert row below"],
     ["columnBefore", "Insert column before"], ["columnAfter", "Insert column after"], ["deleteRow", "Delete empty rows"],
     ["deleteColumn", "Delete empty columns"], ["mergeCells", "Merge selected cells"], ["splitCell", "Split cell"]]) {
     const button = document.createElement("button"); button.type = "button"; button.textContent = label; button.disabled = blocked;

@@ -16,9 +16,20 @@ const nonemptyCells = (grid: PMNode): string[] => {
 
 /** Build one preflighted transaction; the caller authorizes only this exact object. */
 export function tableCommand(state: EditorState, name: string): Transaction {
+  if (name === "insertTable") {
+    if (!state.selection.empty) throw new Error("Place the cursor without selecting content before inserting a table. Existing content will be preserved.");
+    const nodes = state.schema.nodes;
+    const cell = () => nodes.tableCell.create(null, nodes.cellText.create());
+    const row = () => nodes.tableRow.create(null, [cell(), cell()]);
+    const table = nodes.tableShell.create(null, nodes.tableGrid.create(null, [row(), row()]));
+    // Insert after the containing top-level block; never split a protected wrapper or nest a table.
+    const position = state.selection.$from.depth ? state.selection.$from.after(1) : state.selection.from;
+    const transaction = state.tr.insert(position, table);
+    return transaction.setSelection(TextSelection.near(transaction.doc.resolve(position + 1))).scrollIntoView();
+  }
   let shellDepth = state.selection.$from.depth;
   while (shellDepth > 0 && state.selection.$from.node(shellDepth).type.name !== "tableShell") shellDepth--;
-  if (!shellDepth) throw new Error("Place the cursor in a table first.");
+  if (!shellDepth) throw new Error("Choose Insert table to create a table, or place the cursor inside an existing table first.");
   const shell = state.selection.$from.node(shellDepth);
   if (name === "caption") {
     const position = state.selection.$from.start(shellDepth);
