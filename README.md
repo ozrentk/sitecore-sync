@@ -493,3 +493,5 @@ Image/File attributes and original XML are kept in the editor’s existing infor
 ### Rich Text compatibility research
 
 The opt-in [Rich Text compatibility spike](docs/richtext-compatibility-spike.md) records Tiptap/CodeMirror round-trip findings, pinned dependencies and reproduction commands. It is evaluation tooling only; Rich Text remains read-only in the extension.
+
+The [direct ProseMirror follow-up](docs/prosemirror-compatibility-spike.md) compares standard and custom schemas, including a matched Tiptap control, and records preservation limits and adapter pitfalls. Its isolated reproduction commands are included in the report.

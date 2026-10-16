@@ -167,3 +167,9 @@ Use this file as the single backlog inventory. Add newly agreed work here, prese
 - [Evidence and proposed implementation split](docs/richtext-compatibility-spike.md): conditional go for MIT Tiptap + CodeMirror with exact raw HTML drafts and HTML-only fallback; no-go for unrestricted stock HTML round-tripping.
 - Four read-only live Dev samples and 14 synthetic fixtures expose custom-attribute loss, table/CSS changes, link defaults, strict-CSP alignment loss and default source newline normalization. No content writes or editing capability delivered.
 - Implement draft/history/freeze/backup integration and the compatibility gate before enabling visual editing; Sitecore references, DAM, tables and arbitrary CSS need separate preservation boundaries.
+
+### Direct ProseMirror follow-up (2026-10-16)
+
+- [Matched-schema comparison](docs/prosemirror-compatibility-spike.md): custom attribute/span adapters improve preservation, but direct ProseMirror and Tiptap with the same schema/serializer produce identical results across 15 synthetic and four live read-only cases.
+- Switching libraries alone does not solve HTML preservation. Characterized old-link-URL retention, duplicated IDs after paragraph splitting and flattened nested spans; adapter commands need explicit metadata policies.
+- Keep the exact raw-draft architecture and compatibility gate. No production editor changes, mutations or release were made.
