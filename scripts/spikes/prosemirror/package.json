@@ -2,7 +2,10 @@
   "name": "xm-sync-prosemirror-compatibility-spike",
   "private": true,
   "type": "module",
-  "scripts": { "test": "node --test compatibility.test.mjs" },
+  "scripts": {
+    "test": "node --test compatibility.test.mjs",
+    "test:custom": "node --test custom.test.mjs"
+  },
   "dependencies": {
     "prosemirror-model": "1.25.12",
     "prosemirror-state": "1.4.4",

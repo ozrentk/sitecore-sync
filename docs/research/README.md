@@ -7,6 +7,7 @@ These reports contain experiments, dated observations, unresolved questions and 
 - [Fallback investigation](fallback-spike.md)
 - [Tiptap/CodeMirror compatibility](richtext-compatibility-spike.md)
 - [Direct ProseMirror comparison](prosemirror-compatibility-spike.md)
+- [Custom Rich Text editing compatibility and decision](custom-richtext-compatibility-spike.md)
 - [Browse acceptance evidence](browse-acceptance.md)
 - [Item-editor verification evidence](editor-verification.md)
 

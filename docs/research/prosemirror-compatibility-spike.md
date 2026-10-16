@@ -4,6 +4,8 @@
 
 2026-10-16. Follow-up to [the Tiptap/CodeMirror spike](richtext-compatibility-spike.md). Research only: no production changes, Sitecore writes, release or VSIX.
 
+Follow-up: [custom editing adapters](custom-richtext-compatibility-spike.md) close the tested wrapper, caption, nested-span and stylesheet-preservation gaps in both engines and test actual edits. The limitations below describe this earlier adapter, not the new experiment or a library ceiling.
+
 ## Decision
 
 **Direct ProseMirror is viable, but switching to it does not solve arbitrary-HTML preservation.** The standard schemas lose much of the same content. Small custom adapters improve preservation substantially, but a matched Tiptap control using those same schema rules and export serializer produced **identical output in all 19 cases**. The improvement comes from owning the schema, not from bypassing Tiptap.
