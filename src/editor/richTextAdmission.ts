@@ -18,6 +18,7 @@ export function admitVisual(raw: string): VisualAdmission {
   if (errors.length) throw new Error("HTML requires parser repairs or has duplicate/invalid attributes. Use HTML.");
   let count = 0;
   const opaque: string[] = [];
+  const identities = new Set<string>();
   function children(parent: P.ParentNode, start: number, end: number, inline: boolean, marks: NonNullable<JSONContent["marks"]> = [], depth = 0): JSONContent[] {
     if (depth > 40) throw new Error("Markup is too deeply nested for Visual. Use HTML.");
     let cursor = start;
@@ -31,21 +32,59 @@ export function admitVisual(raw: string): VisualAdmission {
         const text = (child as P.TextNode).value;
         if (inline) { if (text) result.push({ type: "text", text, marks }); }
         else if (/^\s*$/u.test(text)) {
-          const original = raw.slice(location.startOffset, location.endOffset); opaque.push(original);
+          const original = raw.slice(location.startOffset, location.endOffset);
+          if (!("tagName" in parent) || !["div", "table", "thead", "tbody", "tfoot", "tr", "colgroup"].includes(parent.tagName)) opaque.push(original);
           result.push({ type: "gap", attrs: { raw: original } });
         } else throw new Error("Top-level text needs an explicit paragraph. Use HTML.");
         continue;
       }
       if (!("tagName" in child)) throw new Error("Comments and declarations are HTML-only in this visual profile.");
       const tag = child.tagName;
+      const tableTags = ["table", "caption", "thead", "tbody", "tfoot", "tr", "td", "th", "colgroup", "col"];
+      const tableElement = tableTags.includes(tag) || tag === "div";
       if (child.namespaceURI !== "http://www.w3.org/1999/xhtml") throw new Error("Foreign markup is HTML-only.");
-      if (child.attrs.some(a => /^(?:id|name|data-sc-.+|data-item-.+|on.+|srcdoc)$/iu.test(a.name)))
+      if (child.attrs.some(a => /^(?:name|data-sc-.+|data-item-.+|on.+|srcdoc)$/iu.test(a.name) || (a.name === "id" && !tableElement)))
         throw new Error("Identity, managed references or active attributes require HTML editing.");
+      const identity = child.attrs.find(a => a.name === "id")?.value;
+      if (identity !== undefined) {
+        if (!identity || identities.has(identity)) throw new Error("Table identities must be nonempty and unique. Use HTML.");
+        identities.add(identity);
+      }
       const loc = child.sourceCodeLocation!;
-      if (!loc.startTag || (!["img", "br"].includes(tag) && !loc.endTag)) throw new Error("Explicit opening and closing tags are required for Visual.");
+      if (!loc.startTag || (!["img", "br", "col"].includes(tag) && !loc.endTag)) throw new Error("Explicit opening and closing tags are required for Visual (including table sections). Use HTML.");
       const attrs = { open: raw.slice(loc.startOffset, loc.startTag.endOffset), close: loc.endTag ? raw.slice(loc.endTag.startOffset, loc.endOffset) : "", tag,
         align: safeTextAlignment(child.attrs.find(attribute => attribute.name === "style")?.value ?? "") };
-      if (tag === "img" || (tag === "style" && !inline)) {
+      if (!inline && tableElement) {
+        const parentTag = "tagName" in parent ? parent.tagName : "";
+        const allowed: Record<string, string[]> = { table: ["caption", "colgroup", "thead", "tbody", "tfoot"], thead: ["tr"], tbody: ["tr"], tfoot: ["tr"], tr: ["td", "th"], colgroup: ["col"], div: ["table"] };
+        if (tableTags.includes(tag) && tag !== "table" && !allowed[parentTag]?.includes(tag)) throw new Error(`Unexpected table element <${tag}>. Use HTML.`);
+        if (tag === "table" && !["", "div"].includes(parentTag)) throw new Error("Nested tables are HTML-only.");
+        if (tag === "div" && (parentTag !== "" || child.childNodes.filter(n => n.nodeName !== "#text").some(n => !("tagName" in n) || n.tagName !== "table")))
+          throw new Error("Only a top-level wrapper containing one table is supported. Use HTML.");
+        const cell = tag === "td" || tag === "th";
+        const inlineCell = cell && !child.childNodes.some(n => "tagName" in n && ["p", "h1", "h2", "h3", "h4", "h5", "h6"].includes(n.tagName));
+        const type = tag === "div" ? "tableWrapper" : tag === "table" ? "tableShell" : ["thead", "tbody", "tfoot"].includes(tag) ? "tableGrid" : tag === "tr" ? "tableRow" : cell ? tag === "th" ? "tableHeader" : "tableCell" : tag;
+        let content = tag === "col" ? [] : children(child, loc.startTag.endOffset, loc.endTag!.startOffset, inlineCell || tag === "caption", [], depth + 1);
+        const extra: Record<string, unknown> = {};
+        if (cell) {
+          for (const key of ["colspan", "rowspan"]) {
+            const value = child.attrs.find(a => a.name === key)?.value ?? "1";
+            if (!/^[1-9]\d*$/u.test(value) || Number(value) > 100) throw new Error("Table spans must be between 1 and 100. Use HTML.");
+            extra[key] = Number(value);
+          }
+          if (inlineCell) content = [{ type: "cellText", content }];
+        } else if (tag !== "caption" && tag !== "col") {
+          let prefix = "";
+          content = content.filter(node => {
+            if (node.type === "gap") { prefix += String(node.attrs?.raw ?? ""); return false; }
+            node.attrs = { ...node.attrs, before: prefix }; prefix = ""; return true;
+          });
+          extra.tail = prefix;
+          if (content.some(node => !allowed[tag]?.includes(String(node.attrs?.tag)))) throw new Error(`Unsupported content inside <${tag}>. Use HTML.`);
+          if (tag === "div" && content.length !== 1) throw new Error("A table wrapper must contain exactly one table. Use HTML.");
+        }
+        result.push({ type, attrs: { ...attrs, ...extra }, content });
+      } else if (tag === "img" || (tag === "style" && !inline)) {
         const original = raw.slice(loc.startOffset, loc.endOffset); opaque.push(original);
         result.push({ type: tag === "style" ? "stylesheet" : inline ? "inlineImage" : "blockImage", attrs: { raw: original }, marks });
       } else if (tag === "br" && inline) result.push({ type: "hardBreak", attrs, marks });
@@ -65,7 +104,32 @@ export function admitVisual(raw: string): VisualAdmission {
     return result;
   }
   const document: JSONContent = { type: "doc", content: children(root, 0, raw.length, false) };
+  validateTableGrids(document);
   return { document, signature: htmlSignature(raw), opaque };
+}
+
+function validateTableGrids(node: JSONContent): void {
+  if (node.type === "tableGrid") {
+    const rows = node.content ?? []; const occupied: boolean[][] = rows.map(() => []);
+    if (!rows.length || rows.length > 100) throw new Error("Table sections require 1–100 rows. Use HTML.");
+    rows.forEach((row, y) => {
+      let x = 0;
+      for (const cell of row.content ?? []) {
+        while (occupied[y][x]) x++;
+        const width = Number(cell.attrs?.colspan ?? 1); const height = Number(cell.attrs?.rowspan ?? 1);
+        if (x + width > 100 || y + height > rows.length) throw new Error("Table spans cross a section boundary or exceed the grid limit. Use HTML.");
+        for (let dy = 0; dy < height; dy++) for (let dx = 0; dx < width; dx++) {
+          if (occupied[y + dy][x + dx]) throw new Error("Overlapping table cells are HTML-only.");
+          occupied[y + dy][x + dx] = true;
+        }
+        x += width;
+      }
+    });
+    const width = occupied[0].length;
+    if (!width || occupied.some(row => row.length !== width || Array.from({ length: width }, (_, x) => row[x]).some(value => !value)))
+      throw new Error("Ragged table sections are HTML-only; no cells were repaired.");
+  }
+  node.content?.forEach(validateTableGrids);
 }
 
 /** Compare actual HTML structure independently of the visual model. */
@@ -78,14 +142,15 @@ export function htmlSignature(raw: string): string {
   return JSON.stringify(parseFragment(raw).childNodes.map(describe));
 }
 
-export function protectedAttributes(raw: string): string {
+export function protectedAttributes(raw: string, structuralTableEdit = false): string {
   const attributes: unknown[] = [];
   function visit(node: P.ChildNode, spanParents: unknown[] = []): void {
     if (!("tagName" in node)) return;
-    const descriptor = [node.tagName, node.attrs.map(a => [a.name, a.value])];
+    const retained = node.attrs.filter(a => !(structuralTableEdit && ["td", "th"].includes(node.tagName) && ["colspan", "rowspan"].includes(a.name)));
+    const descriptor = [node.tagName, retained.map(a => [a.name, a.value])];
     // Even an unstyled span is meaningful structure. Preserve nesting through commands.
     if (node.tagName === "span") attributes.push([descriptor, spanParents]);
-    else if (node.attrs.length) attributes.push(descriptor);
+    else if (retained.length || (!structuralTableEdit && ["table", "caption", "thead", "tbody", "tfoot", "tr", "td", "th", "colgroup", "col"].includes(node.tagName))) attributes.push(descriptor);
     node.childNodes.forEach(child => visit(child, node.tagName === "span" ? [...spanParents, descriptor] : spanParents));
   }
   parseFragment(raw).childNodes.forEach(node => visit(node));
@@ -93,14 +158,27 @@ export function protectedAttributes(raw: string): string {
 }
 
 export function exportVisual(node: JSONContent): string {
+  if (["tableCell", "tableHeader"].includes(node.type ?? "") && node.content?.some(child => child.type === "cellText") && node.content.length !== 1)
+    throw new Error("Splitting originally inline cell content would invent paragraph wrappers. Use Shift+Enter for a line break, or edit HTML.");
   let value: string;
   const content = (): string => exportChildren(node.content ?? []);
   if (node.type === "doc") return content();
+  if (node.type === "cellText") return content();
   if (node.type === "text") value = escapeText(node.text ?? "");
   else if (["gap", "stylesheet", "inlineImage", "blockImage"].includes(node.type ?? "")) value = String(node.attrs?.raw ?? "");
   else {
-    const tag = node.type === "heading" ? String(node.attrs?.tag ?? "h2") : node.type === "hardBreak" ? "br" : node.type === "span" ? "span" : "p";
-    value = String(node.attrs?.open || `<${tag}>`) + content() + String(node.attrs?.close || (tag === "br" ? "" : `</${tag}>`));
+    const tableTypes: Record<string, string> = { tableWrapper: "div", tableShell: "table", tableGrid: "tbody", tableRow: "tr", tableCell: "td", tableHeader: "th", caption: "caption", colgroup: "colgroup", col: "col" };
+    const tag = tableTypes[node.type ?? ""] ? String(node.attrs?.tag || tableTypes[node.type!]) : node.type === "heading" ? String(node.attrs?.tag ?? "h2") : node.type === "hardBreak" ? "br" : node.type === "span" ? "span" : "p";
+    let open = String(node.attrs?.open || `<${tag}>`);
+    if (node.type === "tableCell" || node.type === "tableHeader") {
+      for (const key of ["colspan", "rowspan"]) {
+        const pattern = new RegExp(`\\s${key}\\s*=\\s*(?:"([^"]*)"|'([^']*)'|([^\\s>]+))`, "iu");
+        const match = pattern.exec(open); const old = match ? Number(match[1] ?? match[2] ?? match[3]) : 1;
+        const next = Number(node.attrs?.[key] ?? 1);
+        if (old !== next) { open = open.replace(pattern, ""); if (next !== 1) open = open.replace(/>$/u, ` ${key}="${next}">`); }
+      }
+    }
+    value = String(node.attrs?.before ?? "") + open + content() + String(node.attrs?.tail ?? "") + String(node.attrs?.close || (["br", "col"].includes(tag) ? "" : `</${tag}>`));
   }
   return value;
 }

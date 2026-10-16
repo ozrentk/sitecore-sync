@@ -1,6 +1,6 @@
 # Rich Text editor development guide for agents
 
-Status: implementation guidance, reviewed 2026-10-16. **0.46.0 adds HTML source editing; 0.47.0 adds the guarded basic visual profile; 0.48.0 extends it to nested spans and safe alignment.** The latest published release, 0.45.0, is read-only. Experiments demonstrate bounded feasibility, not authorization to widen the implemented visual profile.
+Status: implementation guidance, reviewed 2026-10-16. **0.46.0 adds HTML source editing; 0.47.0 adds the guarded basic visual profile; 0.48.0 extends it to nested spans and safe alignment; 0.49.0 adds bounded table editing.** The latest published release, 0.45.0, is read-only. Experiments demonstrate bounded feasibility, not authorization to widen the implemented visual profile.
 
 Read this document before changing Rich Text rendering, editing, serialization, mode switching or save integration. Follow repository `AGENTS.md` and the current user's scope. This guide does not authorize releases, remote pushes, Sitecore mutations or new features outside the assigned task.
 
@@ -13,6 +13,16 @@ Read this document before changing Rich Text rendering, editing, serialization, 
 5. Reuse the ordinary item editor's draft, undo, backup, conflict, journal and save flow. Do not create a separate Rich Text mutation path.
 
 ## Architectural decision and evidence
+
+### Table increment — 3B (0.49.0)
+
+Read the [supported table profile and refusal policies](../item-editor.md#tables-0490) before changing table behavior. `webview/richTextTables.ts` defines locally bundled custom Tiptap nodes and the required `tableRole` metadata. A preserved table shell contains a caption, retained column definitions and separate ProseMirror grids for explicit sections; the exporter reconstructs the original single HTML table. It must never silently flatten section boundaries. Structural whitespace is retained as prefix/tail tokens. Synthetic `cellText` nodes export inline without invented paragraphs; refuse splits that would lose their block boundary.
+
+`src/editor/richTextTableCommands.ts` preflights structural commands. Only the exact resulting transaction is authorized to alter table structure. All other transactions retain strict structure/metadata inventories. Structural authorization still checks nonstructural attributes and opaque content, re-admits the exported grid, rejects populated-cell loss/reordering and refuses metadata-bearing cell/row edits. Do not replace this with a reusable boolean bypass or accept unvalidated transaction metadata. Native host history still owns Undo/Redo; no ProseMirror history plugin is added. Cell selections are retained across host rerenders when valid.
+
+The table identity policy is retention, not reconciliation: table-family IDs are allowed only if nonempty and unique, stay out of trusted DOM, and prevent structural edits to their rows/cells. There is no generic clone/deduplicate-ID policy. Column definitions are preserved and structurally protected; changing them or changing columns across sections is HTML-only. Table structural operations may change indentation and span-token spelling, but ordinary no-op mode switching remains raw-exact.
+
+Regression fixtures are synthetic in `test/fixtures/richTextTables.ts`. Test real cell/caption typing, table command metadata, populated/empty deletion, header conflicts, span split, multi-cell selections, paste, host history, mode switching and provider Save/backup. Assert independent expected HTML rather than merely comparing two uses of the same adapter. The earlier research table support is not a substitute for these production policies. 3C managed links and 3D broader styling/media are not implemented by this increment.
 
 ### Nested-span increment (0.48.0)
 
@@ -45,7 +55,7 @@ The latest spike proved these capabilities in both engines:
 
 These are bounded results, not blanket support. The old spikes intentionally characterize failures of earlier configurations. Their failing behaviors must not be presented as unavoidable library limitations.
 
-The following remain unresolved: ambiguous ID joins and references, mixed-content wrappers/lists, repeated same-type marks, richer table sections/colgroups and commands, managed link target reconciliation, media editing, and production iframe/host integration. Images and stylesheet nodes were opaque in the spike; preservation is **not** proof of full visual editing.
+The following remain unresolved: ambiguous ID joins and references, mixed-content wrappers/lists, repeated same-type marks, table structural edits beyond the bounded 0.49.0 profile, managed link target reconciliation, media editing, and production iframe/host integration. Images and stylesheet nodes were opaque in the spike; preservation is **not** proof of full visual editing.
 
 ## Non-negotiable draft and fidelity rules
 
@@ -121,6 +131,7 @@ Inspect these current locations before changing behavior; follow renamed symbols
 | `media/itemEditor/editor.js` and `editor.css` | Field controls, message handling, focus, freeze/unfreeze, rendering |
 | `media/itemEditor/htmlSource.js` | Raw source controller, normalized textarea projection, exact clipboard splicing, composition synchronization |
 | `src/editor/richTextAdmission.ts` and `webview/richTextVisual.ts` | Token-aware basic-profile admission, inert custom schema/export, transaction guards and host history routing |
+| `src/editor/richTextTableCommands.ts` and `webview/richTextTables.ts` | Bounded table command preflight, section grids, Tiptap table roles and metadata-preserving structure |
 | `src/comparison/fieldDiffView.ts` and `media/fieldDiff/` | Read-only Item Details/Field Diff integration; do not accidentally enable writes here |
 | `scripts/spikes/richtext/` and `scripts/spikes/prosemirror/` | Isolated research fixtures, not production adapters |
 

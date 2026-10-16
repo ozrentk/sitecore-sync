@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { strictEqual } from "node:assert/strict";
 import type { IntegrationTest } from "./testSupport";
 import { financeHtml } from "../fixtures/richTextSpans";
+import { richTableHtml, simpleTableHtml } from "../fixtures/richTextTables";
 
 export const richTextVisualTests: readonly IntegrationTest[] = [{
   name: "basic visual webview edits, rejects metadata loss, freezes and returns to exact raw HTML through host history",
@@ -95,12 +96,40 @@ export const richTextVisualTests: readonly IntegrationTest[] = [{
           show('<p><strong>AA<span class="x">BB</span>CC</strong></p>');await wait();
           visualSources.get("html").restore({from:1,to:9});visualSources.get("html").command("bold");await wait();
           assert(htmlSources.get("html").read()==='<p>AA<span class="x">BB</span>CC</p>',"Remove inherited formatting across span boundary");
+          const table=${JSON.stringify(simpleTableHtml)}; const richTable=${JSON.stringify(richTableHtml)};
+          show(richTable);await wait();assert(visualSources.has("html")&&htmlSources.get("html").read()===richTable,"Caption/sections/columns/wrapper import is exact");
+          assert(document.querySelectorAll('.tiptap table').length===3,"Each section has an isolated grid");
+          assert(!document.querySelector('.tiptap #prices,.tiptap [style],.tiptap #size'),"Table identity and CSS do not enter trusted DOM");
+          const selectText=(text,offset)=>{const walker=document.createTreeWalker(document.querySelector('.tiptap'),NodeFilter.SHOW_TEXT);let node;while(node=walker.nextNode()){if(node.textContent===text){document.querySelector('.tiptap').focus();const range=document.createRange();range.setStart(node,offset);range.collapse(true);const selection=getSelection();selection.removeAllRanges();selection.addRange(range);return;}}throw Error('Text missing '+text);};
+          selectText('Prices & sizes',0);await wait();document.execCommand('insertText',false,'New ');await wait();
+          assert(htmlSources.get('html').read()===richTable.replace('Prices &amp;','New Prices &amp;'),"Caption edit preserves every other token");
+          selectText('Large',5);await wait();document.execCommand('insertText',false,' XL');await wait();
+          const tableEdit=htmlSources.get('html').read();assert(tableEdit.includes('>Large XL</td>'),"Cell text editable with metadata");
+          visualSources.get('html').command('rowAfter');await wait();assert(htmlSources.get('html').read()===tableEdit,"Metadata-bearing structural edit refused");
+          assert(document.querySelector('.visual-error').textContent.includes('metadata'),"Specific table policy reason");
+          button('HTML').click();await wait();button('Visual').click();await wait();assert(htmlSources.get('html').read()===tableEdit,"Edited table mode switch exact");
+          show(table);await wait();visualSources.get('html').restore({from:5,to:5});visualSources.get('html').command('rowAfter');await wait();
+          assert((htmlSources.get('html').read().match(/<tr>/g)||[]).length===3,"Insert row through real controller");
+          visualSources.get('html').command('columnAfter');await wait();assert((htmlSources.get('html').read().match(/<td>/g)||[]).length===9,"Insert column through real controller");
+          show(table);await wait();visualSources.get('html').restore({from:3,to:8,anchorCell:3,headCell:8});visualSources.get('html').command('mergeCells');await wait();
+          assert(htmlSources.get('html').read().includes('<td colspan="2">A</td>'),"Multi-cell merge retains content");
+          visualSources.get('html').command('splitCell');await wait();assert(htmlSources.get('html').read()===table,"Split restores original grid");
+          visualSources.get('html').restore({from:5,to:5});visualSources.get('html').command('deleteRow');await wait();assert(htmlSources.get('html').read()===table,"Populated row deletion refused");
+          visualSources.get('html').command('caption');await wait();document.execCommand('insertText',false,'Caption');await wait();
+          assert(htmlSources.get('html').read().includes('<caption>Caption</caption>'),"New caption typing");
+          show(table);await wait();visualSources.get('html').restore({from:5,to:5});
+          const tablePaste=new DataTransfer();tablePaste.setData('text/plain','X');document.querySelector('.tiptap').dispatchEvent(new ClipboardEvent('paste',{clipboardData:tablePaste,bubbles:true,cancelable:true}));await wait();
+          assert(htmlSources.get('html').read()===table.replace('>A<','>XA<'),"Plain cell paste retains grid");
+          const pastedTable=htmlSources.get('html').read();tablePaste.setData('text/html','<table><tr><td>bad</td></tr></table>');document.querySelector('.tiptap').dispatchEvent(new ClipboardEvent('paste',{clipboardData:tablePaste,bubbles:true,cancelable:true}));await wait();
+          assert(htmlSources.get('html').read()===pastedTable,"Formatted table paste rejected atomically");
+          show(table,{id:'html'});await wait();assert(htmlSources.get('html').read()===table,"Host table undo restores raw");
+          show(pastedTable,{id:'html'});await wait();assert(htmlSources.get('html').read()===pastedTable,"Host table redo restores edited raw");
           api.postMessage({type:"visual-test",ok:true,edited});
         })().catch(error=>api.postMessage({type:"visual-test",error:String(error)}));
       `);
       let frozen: { drafts: Record<string, { input: string }> } | undefined; let undoRequests = 0; let redoRequests = 0;
       const complete = new Promise<void>((resolve, reject) => {
-        timer = setTimeout(() => reject(Error("Visual webview timed out")), 25000);
+        timer = setTimeout(() => reject(Error("Visual webview timed out")), 35000);
         listener = panel.webview.onDidReceiveMessage(message => {
           if (message.type === "undo") undoRequests++;
           if (message.type === "redo") redoRequests++;

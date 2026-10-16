@@ -94,3 +94,13 @@ select { font:inherit; color:var(--vscode-input-foreground); background:var(--vs
 .richtext-visual [data-rt-align="justify"] { text-align: justify; }
 .richtext-visual [data-rt-align="start"] { text-align: start; }
 .richtext-visual [data-rt-align="end"] { text-align: end; }
+.richtext-visual .rt-table-wrapper { overflow-x: auto; }
+.richtext-visual .rt-table-shell { margin: 12px 0; }
+.richtext-visual .rt-table-shell table { border-collapse: collapse; width: 100%; margin: 4px 0; table-layout: fixed; }
+.richtext-visual .rt-table-shell td, .richtext-visual .rt-table-shell th { border: 1px solid var(--vscode-panel-border); padding: 6px; min-width: 24px; vertical-align: top; position: relative; }
+.richtext-visual .rt-table-caption { font-weight: 600; padding: 6px; min-height: 1.4em; }
+.richtext-visual .rt-table-columns { color: var(--vscode-descriptionForeground); font-size: .9em; }
+.richtext-visual .selectedCell::after { content: ''; position: absolute; inset: 0; background: var(--vscode-editor-selectionBackground); opacity: .5; pointer-events: none; }
+.richtext-table-tools { display: inline-block; padding: 4px; }
+.richtext-table-tools summary { cursor: pointer; }
+.richtext-table-tools[open] { border: 1px solid var(--vscode-panel-border); }
