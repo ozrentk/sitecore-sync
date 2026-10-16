@@ -1,5 +1,10 @@
 # XM Cloud Sync backlog
 
+### Bounded styled Rich Text surface (0.52.0)
+
+- The styled-editing portion of 3D now uses an isolated Visual frame and bounded stored CSS projection, preserving original HTML/CSS, host escape, native history and revision-pinned freeze/Save. Unsupported styling remains in source; no external resources execute or load.
+- Media/DAM selection, arbitrary mixed containers, formatted paste and universal website fidelity remain separate. B24/B25 still cover broader item-editor work. Native IME, assistive-technology and live-save acceptance are not claimed. B32 toolbar/application icons are tracked separately below.
+
 ### Rich Text command completeness (0.51.0)
 
 - Added guarded paragraph/heading and alignment controls, B/I/U active states, bullet/numbered lists, list indent/outdent, quotes and plain-mark clearing. Keyboard and toolbar paths share the same preservation checks; see [the supported profile](docs/item-editor.md#formatting-commands-lists-and-quotes-0510).

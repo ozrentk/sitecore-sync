@@ -1,5 +1,14 @@
 # Rich Text source and basic visual implementation acceptance
 
+## Isolated styled surface (0.52.0)
+
+The current Visual surface runs the guarded editor inside an opaque script-sandboxed frame. Supported CSS is a bounded display projection; original source remains authoritative. The [development guide](../development/rich-text-editor.md#isolated-styled-visual-surface-0520) records the bridge, security, lifetime and CSS limits. Images remain opaque; arbitrary HTML/CSS and media selection are not claimed.
+
+- **465 unit tests passed**, including CSS property/selector/resource limits and strict snapshot/selection/link validation. Full extension/test/webview type checks passed.
+- **114 extension-host tests passed**, including the actual frame under the outer CSP, raw no-op fidelity, command/link edits, freeze, disposal cancellation, rejected initialization with HTML escape, production HTML/Visual/Preview transitions and child/host message separation. Earlier source filtering rejected four real-host editor tests because VS Code deletes `window.parent`; local VS Code transport code established the cause, and the corrected origin/nested-source check passed the full suite. No assertion was bypassed.
+- Isolated Edge checks verified computed inline alignment and embedded color/font size, actual typing with exact retained CSS/metadata, no external HTTP requests (without interception), Escape/Save routing, freeze, production mode transitions and revision-pinned snapshots. CSS imports/background/image URLs remained unfetched. Theme synchronization and forced-colors media passed; synthetic composition caused freeze rejection and recovered after composition ended.
+- No dependencies or license changes. Native OS IME, assistive-technology operation and live Sitecore Save remain unverified. Synthetic composition is not native IME acceptance. No live content was changed. Application icons and the compact toolbar are the following B32 stage, not completed by this increment.
+
 Reviewed 2026-10-16. This records local implementation evidence, not a GitHub release or blanket support for arbitrary HTML. Follow the [development guide](../development/rich-text-editor.md) and [user-facing support contract](../item-editor.md#rich-text-basic-visual-mode).
 
 ## Delivered scope

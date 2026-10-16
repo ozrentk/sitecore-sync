@@ -1,6 +1,7 @@
 import { itemEditorTests } from "./itemEditorTests";
 import { htmlSourceTests } from "./htmlSourceTests";
 import { richTextVisualTests } from "./richTextVisualTests";
+import { richTextFrameTests } from "./richTextFrameTests";
 import { strictEqual } from "node:assert/strict";
 import * as vscode from "vscode";
 import { connectionStoreTests } from "./connectionStoreTests";
@@ -39,6 +40,7 @@ const integrationTests: readonly IntegrationTest[] = [
   ...itemEditorTests,
   ...htmlSourceTests,
   ...richTextVisualTests,
+  ...richTextFrameTests,
   {
     name: "exposes the unified dashboard on connection context menus",
     async execute(): Promise<void> {
