@@ -98,7 +98,7 @@ export const htmlSourceTests: readonly IntegrationTest[] = [{
           assert(frame && frame.getAttribute("sandbox")==="","Isolated preview");
           assert(!document.querySelector("#fields script") && !window.pwned,"Host remains inert");
           assert(htmlSources.get("html").read()===raw,"Preview must not serialize raw");
-          button("HTML").click(); assert(!document.querySelector("iframe"),"Preview disposed");
+          button("HTML").click(); await wait(); assert(!document.querySelector("iframe"),"Preview disposed");
           control.setSelectionRange(6,7);
           const clipboardData=new DataTransfer(); clipboardData.setData("text/plain","X\r\nY\nZ\r");
           control.dispatchEvent(new ClipboardEvent("paste",{clipboardData,bubbles:true,cancelable:true}));
@@ -119,11 +119,13 @@ export const htmlSourceTests: readonly IntegrationTest[] = [{
           control.dispatchEvent(new ClipboardEvent("paste",{clipboardData:tooLarge,bubbles:true,cancelable:true}));
           assert(htmlSources.get("html").read()===expected+"FINISH","Oversize edit preserves prior draft");
           control.focus(); control.dispatchEvent(new CompositionEvent("compositionstart"));
-          control.addEventListener("blur",()=>{
+          const nativeBlur=control.blur;
+          control.blur=()=>{
             control.dispatchEvent(new CompositionEvent("compositionend"));
             setTimeout(()=>{control.value+="LATE";control.dispatchEvent(new InputEvent("input"));},0);
-          },{once:true});
+          };
           assert(await htmlSources.get("html").finishComposition()===expected+"FINISHLATE","Blur must await final input after synchronous compositionend");
+          control.blur=nativeBlur;
           button("Clear").click(); assert(htmlSources.get("html").read()==="" && control.dataset.explicitClear==="true","Explicit empty");
           api.postMessage({type:"html-test",ok:true,expected:expected+"FINISH"});
         })().catch(error=>api.postMessage({type:"html-test",error:String(error)}));

@@ -13,10 +13,12 @@ let assetRequestId = 0;
 const htmlSources = new Map();
 const htmlModes = new Map();
 const htmlSelections = new Map();
+const visualSources = new Map();
+const visualSelections = new Map();
 let freezeGeneration = 0;
 document.addEventListener("keydown", event => { if (event.key === "Escape") { cancelDrag?.(); activePicker?.close(); } });
 document.addEventListener("keydown", event => {
-  if ((event.ctrlKey || event.metaKey) && !event.altKey && !event.target.matches("input, textarea") && ["z", "y"].includes(event.key.toLowerCase())) {
+  if (!event.defaultPrevented && (event.ctrlKey || event.metaKey) && !event.altKey && !event.target.matches("input, textarea") && ["z", "y"].includes(event.key.toLowerCase())) {
     event.preventDefault(); send(event.shiftKey || event.key.toLowerCase() === "y" ? "redo" : "undo");
   }
 });
@@ -69,6 +71,7 @@ window.addEventListener("message", event => {
     freezeGeneration++;
     revision = state.revision; blocked = false;
     for (const [control, disabled] of frozenControls) control.disabled = disabled;
+    for (const source of visualSources.values()) source.editable(true);
     frozenControls = [];
     for (const [id, source] of htmlSources) {
       const control = document.getElementById(id);
@@ -83,6 +86,8 @@ window.addEventListener("message", event => {
   }
   if (state.type !== "state") return;
   freezeGeneration++;
+  for (const [id, source] of visualSources) { visualSelections.set(id, source.selection()); source.dispose(); }
+  visualSources.clear();
   for (const [id, source] of htmlSources) {
     const control = document.getElementById(id);
     if (control) htmlSelections.set(id, { start: control.selectionStart, end: control.selectionEnd, scroll: control.scrollTop });
@@ -184,6 +189,8 @@ window.addEventListener("message", event => {
     }
   }
   if (state.focus) {
+    const visual = visualSources.get(state.focus.id);
+    if (visual) { const selection = visualSelections.get(state.focus.id); if (selection) visual.restore(selection); else visual.focus(); return; }
     const handle = [...document.querySelectorAll("[data-reorder-field]")].find(control => control.dataset.reorderField === state.focus.id && control.dataset.reorderValue === state.focus.value);
     (handle || document.getElementById(state.focus.id))?.focus();
     const source = document.getElementById(state.focus.id);
@@ -198,6 +205,7 @@ async function freezeInputs(state) {
   cancelDrag?.(); activePicker?.close(false); blocked = true;
   try {
     // Blur commits IME when supported. Otherwise wait, and refuse Save if it does not finish.
+    await Promise.all([...visualSources.values()].map(source => source.freeze()));
     await Promise.all([...htmlSources.values()].map(source => source.finishComposition()));
     if (generation !== freezeGeneration) return;
     const drafts = {};
@@ -217,46 +225,77 @@ function renderHtmlSource(row, field) {
   const actions = document.createElement("div"); actions.className = "html-source-actions";
   const html = document.createElement("button"); html.textContent = "HTML"; html.type = "button";
   const preview = document.createElement("button"); preview.textContent = "Preview"; preview.type = "button";
+  const visual = document.createElement("button"); visual.textContent = "Visual"; visual.type = "button";
+  const visualArea = document.createElement("div"); visualArea.className = "richtext-visual";
+  const tools = document.createElement("div"); tools.className = "richtext-tools";
+  for (const [name, label] of [["bold", "Bold"], ["italic", "Italic"], ["underline", "Underline"]]) {
+    const button = document.createElement("button"); button.type = "button"; button.textContent = label; button.disabled = blocked;
+    button.addEventListener("mousedown", event => event.preventDefault());
+    button.addEventListener("click", () => { if (!blocked) visualSources.get(field.id)?.command(name); }); tools.append(button);
+  }
+  const hint = document.createElement("p"); hint.className = "meta";
+  hint.textContent = "Basic visual formatting. Stored CSS is preserved but shown only in Preview. Use plain-text paste; edit other markup in HTML.";
   const clear = document.createElement("button"); clear.textContent = "Clear"; clear.type = "button";
   clear.title = "Store an explicit empty value; does not reset to inherited or Standard Values";
   const control = document.createElement("textarea"); control.id = field.id; control.className = "html-source";
   control.spellcheck = false; control.wrap = "off"; control.setAttribute("aria-label", field.label + " HTML source");
   control.dataset.fieldId = field.id; control.dataset.original = field.original; control.dataset.explicitClear = String(field.clear);
   const error = document.createElement("p"); error.className = "meta"; error.setAttribute("role", "status");
+  const visualError = document.createElement("p"); visualError.className = "meta visual-error"; visualError.setAttribute("role", "status");
   const display = document.createElement("div"); display.className = "html-source-preview";
   const source = createHtmlSource(control, field.clear ? "" : field.input, {
     error: message => { error.textContent = message; },
     change: input => {
+      visualError.textContent = "";
       control.dataset.explicitClear = "false";
       send("change", { id: field.id, input, clear: false }); document.getElementById("status").textContent = "Unsaved changes";
     },
     history: action => { if (!blocked) send(action); },
   });
   htmlSources.set(field.id, source);
+  let modeRequest = 0;
   const mode = value => {
+    visualError.textContent = "";
+    visualSources.get(field.id)?.dispose(); visualSources.delete(field.id); visualArea.replaceChildren();
+    if (value === "visual") {
+      try {
+        const editor = createRichTextVisual(visualArea, source.read(), {
+          change: raw => source.replace(raw), history: action => { if (!blocked) send(action); }, error: message => { visualError.textContent = message; },
+        });
+        editor.editable(!blocked); visualSources.set(field.id, editor); error.textContent = "";
+      } catch (failure) { value = "html"; visualError.textContent = `Visual unavailable: ${failure.message}`; }
+    }
     source.read(); htmlModes.set(field.id, value);
+    visualArea.hidden = tools.hidden = hint.hidden = value !== "visual";
     control.hidden = value !== "html"; display.hidden = value !== "preview";
-    html.setAttribute("aria-pressed", String(value === "html")); preview.setAttribute("aria-pressed", String(value === "preview"));
+    html.setAttribute("aria-pressed", String(value === "html")); preview.setAttribute("aria-pressed", String(value === "preview")); visual.setAttribute("aria-pressed", String(value === "visual"));
     display.replaceChildren();
     if (value === "preview") {
       const raw = source.read();
       display.append(renderReadOnlyField({ raw, presentation: { kind: "richtext", status: raw ? "populated" : "empty" } }, { sourceMode: true }));
     }
   };
-  html.addEventListener("click", () => { mode("html"); control.focus(); });
-  preview.addEventListener("click", async () => {
-    try { await source.finishComposition(); if (row.isConnected && !blocked) mode("preview"); }
-    catch { error.textContent = "Finish composing HTML before opening Preview."; }
-  });
+  const switchMode = async value => {
+    if (blocked) return;
+    const request = ++modeRequest;
+    try {
+      await visualSources.get(field.id)?.freeze(); await source.finishComposition();
+      if (request === modeRequest && row.isConnected && !blocked) { mode(value); if (value === "html") control.focus(); else if (value === "visual") visualSources.get(field.id)?.focus(); }
+    } catch { error.textContent = "Finish composing before changing modes."; visualSources.get(field.id)?.editable(!blocked); }
+  };
+  html.addEventListener("click", () => void switchMode("html"));
+  preview.addEventListener("click", () => void switchMode("preview"));
+  visual.addEventListener("click", () => void switchMode("visual"));
   clear.addEventListener("click", () => {
     if (blocked) return;
+    modeRequest++;
     source.replace("", false); control.dataset.explicitClear = "true";
     send("change", { id: field.id, input: "", clear: true }); mode("html"); control.focus();
     document.getElementById("status").textContent = "Unsaved changes";
   });
-  for (const button of [html, preview, clear]) button.disabled = blocked;
+  for (const button of [html, visual, preview, clear]) button.disabled = blocked;
   control.disabled = blocked;
-  actions.append(html, preview, clear); row.append(actions, control, display, error);
+  actions.append(html, visual, preview, clear); row.append(actions, tools, hint, control, visualArea, display, error, visualError);
   mode(htmlModes.get(field.id) || "html");
 }
 function selectionLabel(field) {

@@ -1,6 +1,6 @@
 # Rich Text editor development guide for agents
 
-Status: implementation guidance, reviewed 2026-10-16. **The 0.46.0 implementation adds HTML source editing; visual editing remains deferred.** The latest published release, 0.45.0, is read-only. Experiments demonstrate bounded feasibility, not production visual support or authorization to widen writes.
+Status: implementation guidance, reviewed 2026-10-16. **0.46.0 adds HTML source editing; 0.47.0 adds the guarded basic visual profile below.** The latest published release, 0.45.0, is read-only. Experiments demonstrate bounded feasibility, not authorization to widen the implemented visual profile.
 
 Read this document before changing Rich Text rendering, editing, serialization, mode switching or save integration. Follow repository `AGENTS.md` and the current user's scope. This guide does not authorize releases, remote pushes, Sitecore mutations or new features outside the assigned task.
 
@@ -13,6 +13,14 @@ Read this document before changing Rich Text rendering, editing, serialization, 
 5. Reuse the ordinary item editor's draft, undo, backup, conflict, journal and save flow. Do not create a separate Rich Text mutation path.
 
 ## Architectural decision and evidence
+
+### Implemented basic visual profile (0.47.0)
+
+The custom Tiptap schema admits explicit paragraphs/headings, bold/italic/underline and hard breaks. `src/editor/richTextAdmission.ts` uses parse5 source locations/errors to reject missing tokens, implied repairs and duplicate attributes before projection. `webview/richTextVisual.ts` compares the normalized model export with an independent parsed source structure before enabling editing. Original attribute tokens are retained. Every changed transaction is re-admitted, with ordered opaque-fragment and attributed-element inventories preventing silent loss. Unknown markup, comments, managed identities/links, nested spans, repeated marks, lists and tables stay HTML-only. Do not widen this list just because the research schema supports more shapes.
+
+Raw HTML remains authoritative. Untouched entry/exit and host undo preserve its exact string; actual visual changes explicitly permit entity/text-newline canonicalization and requested formatting-wrapper changes. CSS and images remain inert data in the trusted visual surface; original CSS is never applied to host chrome. Use the separate isolated Preview for styling. Formatted paste and drag/drop are refused; plain-text insertion goes through the same transaction guard. No visual ProseMirror history plug-in is installed: history belongs to VS Code.
+
+Tiptap/PM 3.32.0 and parse5 7.3.0 are pinned. The 20-package locked closure uses MIT/BSD-2-Clause licenses; see [retained notices](../../THIRD_PARTY_NOTICES.md). Only bundled browser code is loaded. Dependency changes require renewed lockfile/license and duplicate-runtime checks. Test compile with `npm run check:webview` as part of `npm run check`.
 
 **Use Tiptap with custom nodes, marks, extensions and commands as the preferred implementation direction.** Direct ProseMirror provided no preservation advantage when configured equivalently. Revisit this choice only with a concrete unmet requirement and a matched test, not because stock extensions omit HTML features.
 
@@ -104,6 +112,7 @@ Inspect these current locations before changing behavior; follow renamed symbols
 | `src/editor/itemEditorProvider.ts` | Custom document, `recordEdit`, native undo/redo, backup, panel lifecycle, revision/freeze/save coordination |
 | `media/itemEditor/editor.js` and `editor.css` | Field controls, message handling, focus, freeze/unfreeze, rendering |
 | `media/itemEditor/htmlSource.js` | Raw source controller, normalized textarea projection, exact clipboard splicing, composition synchronization |
+| `src/editor/richTextAdmission.ts` and `webview/richTextVisual.ts` | Token-aware basic-profile admission, inert custom schema/export, transaction guards and host history routing |
 | `src/comparison/fieldDiffView.ts` and `media/fieldDiff/` | Read-only Item Details/Field Diff integration; do not accidentally enable writes here |
 | `scripts/spikes/richtext/` and `scripts/spikes/prosemirror/` | Isolated research fixtures, not production adapters |
 
@@ -143,6 +152,7 @@ On each Rich Text change, update the affected support classification, regression
 
 Evidence:
 
+- [Source/basic visual implementation acceptance](../research/richtext-implementation-acceptance.md) — production-profile tests and explicit remaining acceptance gaps.
 - [Custom adapters and decision matrix](../research/custom-richtext-compatibility-spike.md) — latest matched editing evidence.
 - [Direct ProseMirror experiment](../research/prosemirror-compatibility-spike.md) — earlier attribute traps and matched-schema control.
 - [Initial Tiptap/CodeMirror experiment](../research/richtext-compatibility-spike.md) — stock behavior and source/draft integration findings.
