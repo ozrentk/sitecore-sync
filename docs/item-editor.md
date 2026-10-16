@@ -175,3 +175,11 @@ Image/File attributes and original XML are kept in the editor’s existing infor
 ## Further reading
 
 See [fallback behavior](languages-and-fallback.md) and [troubleshooting](troubleshooting.md). Rich Text editing experiments are [research](research/README.md), not shipped editors.
+
+## Compact toolbar and shared actions (0.53.0)
+
+Rich Text separates **HTML / Visual / Preview** from a compact neutral formatting strip. The paragraph/heading selector, text styles, four alignment buttons, lists, quote/formatting and Link/Table controls wrap as groups. Selected commands are pressed; unavailable commands retain a reason in their tooltip. **Clear formatting** removes supported plain bold/italic/underline marks only. **Clear content** explicitly empties the whole field; it remains separate from formatting.
+
+Tab enters/leaves the toolbar; Left/Right and Home/End move among its controls. The heading selector retains native selection keys; Alt+Left/Right moves out of that selector within the toolbar. Enter/Space activates a focused button. In the open Table menu, Up/Down moves through commands and Escape closes it. The toolbar and HTML escape remain outside the isolated Visual frame. Existing selection, history, mode switching and save guards are unchanged.
+
+Common actions retain text alongside consistent local icons across editor, comparison, settings and publishing panels. Familiar formatting buttons are icon-only with accessible names and tooltips. Busy actions show rotating arrows (stationary when reduced motion is requested); disabled and selected states remain distinct. Content choices and filter values retain their own labels. No network icon assets, font installation or additional dependencies are required.

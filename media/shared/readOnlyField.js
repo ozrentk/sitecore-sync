@@ -81,12 +81,12 @@ globalThis.renderReadOnlyField = function (field, options = {}) {
     if (options.requestAsset) {
       box.append(button);
       button.addEventListener("click", event => {
-        event.stopPropagation(); button.disabled = true; status.textContent = "Loading asset…";
+        event.stopPropagation(); button.disabled = true; button.setAttribute("aria-busy", "true"); status.textContent = "Loading asset…";
         options.requestAsset(result => {
           if (!box.isConnected) return;
           status.textContent = result.error || (result.dataUri ? "" : "File reference verified.");
           button.hidden = !result.error;
-          button.disabled = false;
+          button.disabled = false; button.setAttribute("aria-busy", "false");
           if (result.reference) note(result.reference);
           if (result.dataUri && /^data:image\/(?:png|jpeg|gif|webp|svg\+xml);base64,[a-z\d+/]+={0,2}$/iu.test(result.dataUri)) {
             const image = document.createElement("img"); image.className = "asset-preview"; image.alt = presentation.alt || "Asset preview";

@@ -1,3 +1,4 @@
+import { withActionIcons } from "../ui/webviewActions";
 import { randomUUID } from "node:crypto";
 import * as vscode from "vscode";
 import type { ConnectionStore } from "./connectionStore";
@@ -198,10 +199,10 @@ export class ConnectionSettingsPanel implements vscode.Disposable {
     }));
     try {
       const nonce = randomUUID().replaceAll("-", "");
-      panel.webview.html = Buffer.from(await vscode.workspace.fs.readFile(vscode.Uri.joinPath(media, "settings.html"))).toString("utf8")
+      panel.webview.html = withActionIcons(panel.webview, Buffer.from(await vscode.workspace.fs.readFile(vscode.Uri.joinPath(media, "settings.html"))).toString("utf8")
         .replaceAll("{{cspSource}}", panel.webview.cspSource).replaceAll("{{nonce}}", nonce)
         .replaceAll("{{scriptUri}}", panel.webview.asWebviewUri(vscode.Uri.joinPath(media, "settings.js")).toString())
-        .replaceAll("{{styleUri}}", panel.webview.asWebviewUri(vscode.Uri.joinPath(media, "settings.css")).toString());
+        .replaceAll("{{styleUri}}", panel.webview.asWebviewUri(vscode.Uri.joinPath(media, "settings.css")).toString()), this.extensionUri);
     } catch { panel.dispose(); await vscode.window.showErrorMessage("Unable to open Connection Settings."); }
   }
 

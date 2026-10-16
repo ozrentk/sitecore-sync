@@ -1,3 +1,4 @@
+import { withActionIcons } from "../ui/webviewActions";
 import { ContentSession, type ContentEndpoint } from "./contentSession";
 import { observeItemFallback, type ItemFallbackObservation } from "./itemFallback";
 import { comparisonFieldEvidence, type ComparisonItemDetails, type FieldFallbackMode } from "./fieldFallback";
@@ -517,7 +518,7 @@ export class ComparisonPanelManager implements vscode.Disposable {
     ];
 
     try {
-      panel.webview.html = await this.loadHtml(panel.webview, comparisonMediaUri);
+      panel.webview.html = withActionIcons(panel.webview, await this.loadHtml(panel.webview, comparisonMediaUri), this.extensionUri);
     } catch (error: unknown) {
       panel.dispose();
       const message = error instanceof Error ? error.message : "Unknown error";

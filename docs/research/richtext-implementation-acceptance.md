@@ -1,5 +1,14 @@
 # Rich Text source and basic visual implementation acceptance
 
+## Compact toolbar and application action icons (0.53.0)
+
+B32 adds the compact neutral grouped Rich Text toolbar and shared local action icons. The [coverage audit](../development/action-icons.md) records the seven webview surfaces and intentional exceptions. Formatting commands, admission, serialization, frame boundaries and Save semantics are unchanged.
+
+- **467 unit tests and 115 extension-host tests passed**, with strict extension/test/webview type checks. New coverage checks static safe SVG, shared labels, CSP loading, dynamic label/glyph updates, busy restoration, excluded content choices and script-free operation details. Production Rich Text tests check direct alignment, pressed/disabled reasons, accessible command labels and keyboard focus alongside existing mode/freeze/history/save coverage.
+- The first full run found six failures in older form mocks that omitted the real webview's `options` property. The fixtures now model that API; the following full runs passed. No assertion was removed or bypassed.
+- Isolated Edge exercised actual frame typing, HTML/Preview/Visual transitions and freeze, direct alignment, Left/Right/Home/Alt+Right, Table Down/Escape, viewport bounds and screenshots at 1100px and 380px in dark/light/forced colors. Screenshots were inspected. Actual connection/comparison/publishing/scope templates also passed icon and reduced-motion checks; those template probes are static layout checks, with form behavior covered separately by the extension suite.
+- Assets are original local SVG paths; no new dependencies or third-party licenses. Native OS IME, screen-reader operation and live Sitecore Save remain unverified. Existing synthetic composition and save fixtures are not substitutes for those checks. No live writes, remote pushes or publication were performed.
+
 ## Isolated styled surface (0.52.0)
 
 The current Visual surface runs the guarded editor inside an opaque script-sandboxed frame. Supported CSS is a bounded display projection; original source remains authoritative. The [development guide](../development/rich-text-editor.md#isolated-styled-visual-surface-0520) records the bridge, security, lifetime and CSS limits. Images remain opaque; arbitrary HTML/CSS and media selection are not claimed.

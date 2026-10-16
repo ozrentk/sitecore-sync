@@ -110,6 +110,7 @@ window.addEventListener("message", event => {
   document.getElementById("path").textContent = state.item.path;
   document.getElementById("status").textContent = state.busy ? "Working…" : (state.error || state.status);
   document.getElementById("save").disabled = blocked || !state.target.version;
+  document.getElementById("save").setAttribute("aria-busy", String(state.busy));
   document.getElementById("revert").disabled = state.busy;
   document.getElementById("locale").disabled = state.busy;
   document.getElementById("reconcile").hidden = !state.pending;
@@ -234,31 +235,41 @@ function renderHtmlSource(row, field) {
   const visual = document.createElement("button"); visual.textContent = "Visual"; visual.type = "button";
   const visualArea = document.createElement("div"); visualArea.className = "richtext-visual";
   const tools = document.createElement("div"); tools.className = "richtext-tools";
+  tools.setAttribute("role", "toolbar"); tools.setAttribute("aria-label", "Text formatting");
+  const group = label => { const node = document.createElement("div"); node.className = "richtext-tool-group"; node.setAttribute("role", "group"); node.setAttribute("aria-label", label); tools.append(node); return node; };
+  const blocks = group("Block style");
+  const marks = group("Text style");
+  const alignments = group("Alignment");
+  const lists = group("Lists");
+  const extras = group("Quote and formatting");
+  const insert = group("Insert");
   const blockType = document.createElement("select"); blockType.setAttribute("aria-label", "Text block type");
   for (const [value, text] of [["", "Mixed blocks"], ["paragraph", "Paragraph"], ...[1,2,3,4,5,6].map(n=>[`h${n}`, `Heading ${n}`])]) {
     const option = document.createElement("option"); option.value = value; option.textContent = text; option.disabled = !value; blockType.append(option);
   }
-  blockType.addEventListener("change", () => { if (!blocked && blockType.value) visualSources.get(field.id)?.command(blockType.value); }); tools.append(blockType);
-  for (const [name, label] of [["bold", "Bold"], ["italic", "Italic"], ["underline", "Underline"], ["bulletList", "Bullets"], ["orderedList", "Numbers"], ["indent", "Indent"], ["outdent", "Outdent"], ["blockquote", "Quote"], ["clearFormatting", "Clear formatting"]]) {
+  blockType.addEventListener("change", () => { if (!blocked && blockType.value) visualSources.get(field.id)?.command(blockType.value); }); blocks.append(blockType);
+  for (const [name, label] of [["bold", "Bold"], ["italic", "Italic"], ["underline", "Underline"], ["alignLeft", "Align left"], ["alignCenter", "Align center"], ["alignRight", "Align right"], ["alignJustify", "Justify"], ["bulletList", "Bullets"], ["orderedList", "Numbers"], ["indent", "Indent"], ["outdent", "Outdent"], ["blockquote", "Quote"], ["clearFormatting", "Clear formatting"]]) {
     const button = document.createElement("button"); button.type = "button"; button.textContent = label; button.disabled = blocked;
+    button.className = "richtext-icon-button"; button.setAttribute("aria-label", label); button.title = label;
+    const text = document.createElement("span"); text.className = "action-label"; text.textContent = label; button.replaceChildren(text);
     button.dataset.richCommand = name;
     button.addEventListener("mousedown", event => event.preventDefault());
-    button.addEventListener("click", () => { if (blocked) return; if (button.getAttribute("aria-disabled") === "true") visualError.textContent = button.title; else visualSources.get(field.id)?.command(name); }); tools.append(button);
+    button.addEventListener("click", () => { if (blocked) return; if (button.getAttribute("aria-disabled") === "true") visualError.textContent = button.title; else visualSources.get(field.id)?.command(name); });
+    (name.startsWith("align") ? alignments : ["bold", "italic", "underline"].includes(name) ? marks : ["bulletList", "orderedList", "indent", "outdent"].includes(name) ? lists : extras).append(button);
   }
-  const alignment = document.createElement("select"); alignment.setAttribute("aria-label", "Text alignment");
-  for (const [value, label] of [["", "Alignment"], ["alignLeft", "Left"], ["alignCenter", "Center"], ["alignRight", "Right"], ["alignJustify", "Justify"]]) { const option = document.createElement("option"); option.value = value; option.textContent = label; option.disabled = !value; alignment.append(option); }
-  alignment.addEventListener("change", () => { if (!blocked && alignment.value) visualSources.get(field.id)?.command(alignment.value); }); tools.append(alignment);
   const tableMenu = document.createElement("details"); tableMenu.className = "richtext-table-tools";
   const tableTitle = document.createElement("summary"); tableTitle.textContent = "Table"; tableMenu.append(tableTitle);
+  tableTitle.dataset.actionIcon = "table"; tableTitle.title = "Table commands";
+  const tableCommands = document.createElement("div"); tableCommands.className = "richtext-table-menu"; tableMenu.append(tableCommands);
   for (const [name, label] of [["insertTable", "Insert table (2 × 2)"], ["caption", "Add / edit caption"], ["rowBefore", "Insert row above"], ["rowAfter", "Insert row below"],
     ["columnBefore", "Insert column before"], ["columnAfter", "Insert column after"], ["deleteRow", "Delete empty rows"],
     ["deleteColumn", "Delete empty columns"], ["mergeCells", "Merge selected cells"], ["splitCell", "Split cell"]]) {
     const button = document.createElement("button"); button.type = "button"; button.textContent = label; button.disabled = blocked;
     button.dataset.richCommand = name;
     button.addEventListener("mousedown", event => event.preventDefault());
-    button.addEventListener("click", () => { if (blocked) return; if (button.getAttribute("aria-disabled") === "true") visualError.textContent = button.title; else visualSources.get(field.id)?.command(name); }); tableMenu.append(button);
+    button.addEventListener("click", () => { if (blocked) return; if (button.getAttribute("aria-disabled") === "true") visualError.textContent = button.title; else visualSources.get(field.id)?.command(name); }); tableCommands.append(button);
   }
-  tools.append(tableMenu);
+  insert.append(tableMenu);
   const linkButton = document.createElement("button"); linkButton.type = "button"; linkButton.textContent = "Link";
   linkButton.dataset.richCommand = "link";
   const linkForm = document.createElement("div"); linkForm.className = "richtext-link-form"; linkForm.hidden = true;
@@ -280,7 +291,7 @@ function renderHtmlSource(row, field) {
       for (const [value, text] of [["url", "URL"], ["sitecore", "Sitecore item"]]) { const option = document.createElement("option"); option.value = value; option.textContent = text; kind.append(option); }
       kind.value = info.kind === "sitecore" ? "sitecore" : "url";
       const url = document.createElement("input"); url.type = "text"; url.value = info.href; url.setAttribute("aria-label", "Link URL");
-      const target = document.createElement("button"); target.type = "button"; target.textContent = info.itemId ? `Current target: ${info.itemId} — browse…` : "Choose Sitecore item…";
+      const target = document.createElement("button"); target.dataset.actionIcon = "link"; target.type = "button"; target.textContent = info.itemId ? `Current target: ${info.itemId} — browse…` : "Choose Sitecore item…";
       let itemId = info.itemId;
       let active = true;
       const message = document.createElement("p"); message.className = "meta"; message.setAttribute("role", "status"); message.textContent = info.reason || "";
@@ -306,10 +317,28 @@ function renderHtmlSource(row, field) {
       (kind.value === "url" ? url : target).focus();
     } catch (failure) { visualError.textContent = failure.message; }
   });
-  tools.append(linkButton);
+  insert.prepend(linkButton);
+  // A single toolbar tab stop; select arrows retain their native behavior.
+  const toolStops = () => [...tools.querySelectorAll("button, select, summary")].filter(node => !node.disabled && (!node.closest(".richtext-table-menu") || tableMenu.open));
+  const setToolStop = node => { for (const stop of toolStops()) stop.tabIndex = stop === node ? 0 : -1; };
+  setToolStop(blockType);
+  tools.addEventListener("focusin", event => { if (toolStops().includes(event.target)) setToolStop(event.target); });
+  tools.addEventListener("keydown", event => {
+    if (event.key === "Escape" && tableMenu.open) { event.preventDefault(); tableMenu.open = false; tableTitle.focus(); return; }
+    if (tableMenu.open && tableMenu.contains(event.target) && ["ArrowUp", "ArrowDown"].includes(event.key)) {
+      const stops = [tableTitle, ...tableCommands.querySelectorAll("button:not(:disabled)")];
+      const index = stops.indexOf(event.target); event.preventDefault();
+      const next = stops[(index + (event.key === "ArrowDown" ? 1 : -1) + stops.length) % stops.length]; setToolStop(next); next.focus(); return;
+    }
+    if ((event.target.tagName === "SELECT" && !event.altKey) || !["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return;
+    const stops = toolStops(); const index = stops.indexOf(event.target); if (index < 0) return;
+    event.preventDefault();
+    const next = event.key === "Home" ? 0 : event.key === "End" ? stops.length - 1 : (index + (event.key === "ArrowRight" ? 1 : -1) + stops.length) % stops.length;
+    setToolStop(stops[next]); stops[next].focus();
+  });
   const hint = document.createElement("p"); hint.className = "meta";
   hint.textContent = "Supported typography, spacing and borders appear in Visual. Full stored styling appears in Preview. Plain-text paste only; external resources are blocked.";
-  const clear = document.createElement("button"); clear.textContent = "Clear"; clear.type = "button";
+  const clear = document.createElement("button"); clear.textContent = "Clear content"; clear.type = "button"; clear.className = "richtext-clear";
   clear.title = "Store an explicit empty value; does not reset to inherited or Standard Values";
   const control = document.createElement("textarea"); control.id = field.id; control.className = "html-source";
   control.spellcheck = false; control.wrap = "off"; control.setAttribute("aria-label", field.label + " HTML source");
@@ -326,20 +355,30 @@ function renderHtmlSource(row, field) {
         if (button.closest(".richtext-table-tools") && !tableMenu.open) continue;
         const state = editor.status(button.dataset.richCommand);
         button.setAttribute("aria-disabled", String(blocked || !state.enabled));
-        if (["bold","italic","underline","bulletList","orderedList","blockquote"].includes(button.dataset.richCommand)) button.setAttribute("aria-pressed",String(state.active));
+        if (["bold","italic","underline","bulletList","orderedList","blockquote","alignLeft","alignCenter","alignRight","alignJustify"].includes(button.dataset.richCommand)) button.setAttribute("aria-pressed",String(state.active));
         button.title = state.reason || (button.dataset.richCommand === "clearFormatting" ? "Remove bold, italic and underline only; retain links, wrappers and CSS." : button.textContent);
       }
-      for (const select of [blockType, alignment]) {
+      for (const select of [blockType]) {
         let selected = ""; let reason = ""; let available = false;
         for (const option of select.options) if (option.value) {
           const state = editor.status(option.value); option.disabled = !state.enabled; option.title = state.reason;
           if (state.active) selected = option.value; if (state.enabled) available = true; else reason ||= state.reason;
         }
-        select.value = selected; select.disabled = blocked || !available; select.title = available ? select.getAttribute("aria-label") : reason;
+        select.value = selected; select.disabled = blocked || !available; select.title = available ? `${select.getAttribute("aria-label")} (Alt+Left/Right moves between toolbar controls)` : reason;
       }
+      const stops = toolStops(); if (!stops.some(stop => stop.tabIndex === 0)) setToolStop(stops[0]);
     });
   };
-  tableMenu.addEventListener("toggle", () => { visualSources.get(field.id)?.tableMenu?.(tableMenu.open); refreshTools(); });
+  tableMenu.addEventListener("toggle", () => {
+    visualSources.get(field.id)?.tableMenu?.(tableMenu.open); refreshTools();
+    setToolStop(toolStops().includes(document.activeElement) ? document.activeElement : toolStops().find(stop => stop.tabIndex === 0) || toolStops()[0]);
+    if (tableMenu.open) {
+      const rect = tableMenu.getBoundingClientRect();
+      const width = tableCommands.getBoundingClientRect().width;
+      tableCommands.style.left = `${Math.max(8 - rect.left, Math.min(0, document.documentElement.clientWidth - 8 - rect.left - width))}px`;
+      tableCommands.style.right = "auto";
+    }
+  });
   const display = document.createElement("div"); display.className = "html-source-preview";
   const source = createHtmlSource(control, field.clear ? "" : field.input, {
     error: message => { error.textContent = message; },
@@ -397,7 +436,8 @@ function renderHtmlSource(row, field) {
   });
   for (const button of [html, visual, preview, clear]) button.disabled = blocked;
   control.disabled = blocked;
-  actions.append(html, visual, preview, clear); row.append(actions, tools, linkForm, hint, control, visualArea, display, error, visualError);
+  const modes = document.createElement("div"); modes.className = "richtext-modes"; modes.setAttribute("role", "group"); modes.setAttribute("aria-label", "Rich Text mode");
+  modes.append(html, visual, preview); actions.append(modes, clear); row.append(actions, tools, linkForm, hint, control, visualArea, display, error, visualError);
   mode(htmlModes.get(field.id) || "html");
 }
 function selectionLabel(field) {
@@ -443,7 +483,7 @@ function renderNameValues(row, field) {
         input.placeholder = key === "key" ? "Name" : "Value"; input.setAttribute("aria-label", `${field.label} row ${index + 1} ${key}`);
         input.addEventListener("input", () => { entry[key] = input.value; validate(); draft.change(entries); }); pair.append(input);
       }
-      const remove = document.createElement("button"); remove.textContent = "×"; remove.disabled = blocked; remove.setAttribute("aria-label", `Remove row ${index + 1}`);
+      const remove = document.createElement("button"); remove.textContent = "×"; remove.dataset.actionIcon = "remove"; remove.dataset.iconOnly = "true"; remove.disabled = blocked; remove.setAttribute("aria-label", `Remove row ${index + 1}`);
       remove.addEventListener("click", () => { entries.splice(index, 1); draft.change(entries); draw(); (list.children[Math.min(index, entries.length - 1)]?.querySelector("input") || add).focus(); });
       pair.append(remove); list.append(pair);
     });
@@ -739,9 +779,9 @@ function createChoicePicker(row, field, trigger, options) {
   popup.setAttribute("role", "dialog"); popup.setAttribute("aria-label", `${field.label} choices`);
   trigger.setAttribute("aria-controls", popup.id); trigger.setAttribute("aria-haspopup", "dialog");
   const header = document.createElement("div"); header.className = "picker-header";
-  const back = document.createElement("button"); back.textContent = "‹"; back.title = "Back to parent"; back.setAttribute("aria-label", "Back to parent"); back.hidden = true;
+  const back = document.createElement("button"); back.textContent = "‹"; back.dataset.actionIcon = "left"; back.dataset.iconOnly = "true"; back.title = "Back to parent"; back.setAttribute("aria-label", "Back to parent"); back.hidden = true;
   const source = document.createElement("span"); source.className = "picker-source";
-  const dismiss = document.createElement("button"); dismiss.textContent = "×"; dismiss.title = "Close choices"; dismiss.setAttribute("aria-label", "Close choices");
+  const dismiss = document.createElement("button"); dismiss.textContent = "×"; dismiss.dataset.actionIcon = "cancel"; dismiss.dataset.iconOnly = "true"; dismiss.title = "Close choices"; dismiss.setAttribute("aria-label", "Close choices");
   header.append(back,source,dismiss);
   const search = document.createElement("input"); search.type = "search"; search.className = "picker-search";
   search.placeholder = options.tree ? "Filter this level" : "Search items"; search.setAttribute("aria-label", `Search ${field.label} choices`);

@@ -159,7 +159,7 @@ function renderFields() {
 
     const remove = document.createElement("button");
     remove.type = "button";
-    remove.className = "remove-field";
+    remove.className = "remove-field"; remove.dataset.actionIcon = "remove"; remove.dataset.iconOnly = "true";
     remove.textContent = "×";
     remove.title = `Remove ${field.itemName}, ${field.fieldName}`;
     remove.ariaLabel = remove.title;

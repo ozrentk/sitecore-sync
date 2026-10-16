@@ -68,7 +68,7 @@ export const connectionSettingsTests: readonly IntegrationTest[] = [
       const incoming = new vscode.EventEmitter<unknown>(); const closed = new vscode.EventEmitter<void>();
       const messages: Record<string, unknown>[] = [];
       const panel = { title: "", reveal() {}, dispose() { closed.fire(); }, onDidDispose: closed.event,
-        webview: { html: "", cspSource: "test-csp", asWebviewUri: (uri: vscode.Uri) => uri,
+        webview: { options: { enableScripts: true } as vscode.WebviewOptions, html: "", cspSource: "test-csp", asWebviewUri: (uri: vscode.Uri) => uri,
           onDidReceiveMessage: incoming.event, postMessage: async (message: Record<string, unknown>) => { messages.push(message); return true; } } };
       const create = mock.method(vscode.window, "createWebviewPanel", () => panel);
       const configured: Record<string, unknown> = { publicPageUrlTemplate: "{publicBaseUrl}{route}", publicPageValues: { [connection.id]: { sites: { site: { publicBaseUrl: "https://public.example.test", languages: { en: { country: "US" } } } } } } };

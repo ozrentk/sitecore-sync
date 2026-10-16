@@ -1,3 +1,4 @@
+import { actionIconTests } from "./actionIconTests";
 import { itemEditorTests } from "./itemEditorTests";
 import { htmlSourceTests } from "./htmlSourceTests";
 import { richTextVisualTests } from "./richTextVisualTests";
@@ -41,6 +42,7 @@ const integrationTests: readonly IntegrationTest[] = [
   ...htmlSourceTests,
   ...richTextVisualTests,
   ...richTextFrameTests,
+  ...actionIconTests,
   {
     name: "exposes the unified dashboard on connection context menus",
     async execute(): Promise<void> {

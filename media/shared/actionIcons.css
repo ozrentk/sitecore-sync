@@ -1,0 +1,6 @@
+.action-icon { display:inline-block; width:16px; height:16px; flex:none; vertical-align:-3px; margin-right:5px; pointer-events:none; }
+.action-glyph > .action-icon { margin-right:0; }
+[aria-busy=true] > .action-icon { animation:action-busy 1.2s linear infinite; }
+@keyframes action-busy { to { transform:rotate(360deg); } }
+@media (prefers-reduced-motion:reduce) { [aria-busy=true] > .action-icon { animation:none; } }
+@media (forced-colors:active) { .action-icon { color:ButtonText; } :disabled > .action-icon { color:GrayText; } }
