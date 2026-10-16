@@ -5,6 +5,7 @@
 - Isolate Rich Text previews in sandboxed frames, preserving inline formatting and embedded CSS while blocking scripts, navigation and external requests.
 - Rich Text remains read-only. Tiptap and ProseMirror compatibility spikes are evaluation tooling, not shipped editing functionality.
 - Known issue (B31): the General Link destination-focus expansion integration check fails intermittently across verification runs; normal interactive reproduction remains unverified. The release accepts this coverage gap, with investigation deferred.
+- The v0.45.0 publishing workflow accepts only B31's exact assertion failure, reports it explicitly, and still blocks on all other failures. Branch verification remains strict; remove the temporary exception with the B31 fix.
 
 ## 0.44.1
 
