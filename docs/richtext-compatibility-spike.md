@@ -2,6 +2,8 @@
 
 2026-10-16. Evaluation only; no Rich Text editing has been enabled, no Sitecore content was changed, and no release was produced.
 
+Follow-up: the [direct ProseMirror spike](prosemirror-compatibility-spike.md) tests custom preservation adapters and a matched Tiptap schema. It demonstrates that these adapters improve both candidates equally; the stock-extension findings below are not a hard limit on Tiptap customization.
+
 ## Recommendation
 
 **Conditional go: Tiptap for a deliberately limited visual editor, CodeMirror 6 for HTML source. No-go: transparent round-tripping of arbitrary Sitecore HTML through stock Tiptap.** Implement both views over one exact HTML draft, with explicit HTML-only fallback. Do not treat a successful Tiptap parse, or absence of `contentError`, as proof of preservation.
