@@ -1,4 +1,8 @@
 body { color:var(--vscode-foreground); background:var(--vscode-editor-background); font-family:var(--vscode-font-family); padding:16px 24px; max-width:1000px; margin:auto; }
+.html-source-actions { display:flex; align-items:center; margin:8px 0; }
+.html-source-actions button[aria-pressed=true] { outline:1px solid var(--vscode-focusBorder); outline-offset:-2px; }
+textarea.html-source { width:100%; min-height:240px; tab-size:2; font-family:var(--vscode-editor-font-family, monospace); font-size:var(--vscode-editor-font-size, 13px); line-height:1.5; }
+.html-source-preview { margin:8px 0; }
 header { border-bottom:1px solid var(--vscode-panel-border); padding-bottom:16px; }
 h1 { font-size:21px; } h2 { font-size:17px; margin-top:28px; }
 #path, #identity { overflow-wrap:anywhere; } .field { margin:20px 0; } label { font-weight:600; } .meta { color:var(--vscode-descriptionForeground); margin:5px 0; font-size:12px; }

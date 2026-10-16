@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.46.0 — 2026-10-16
+
+- Add HTML source editing for eligible ordinary-item Rich Text fields, with a separate read-only sandboxed Preview.
+- Preserve raw source and mixed line endings across unchanged mode switches, drafts, backup and Save; integrate pending composition with panel/revision-pinned synchronization and native undo after Save.
+- Retain exact-locale, version, fallback and system/page protections. Visual editing and media editing remain deferred.
+- B31 remains unresolved; the v0.45.0 release exception does not apply to this version.
+
 ## 0.45.0 — 2026-10-16
 
 - Isolate Rich Text previews in sandboxed frames, preserving inline formatting and embedded CSS while blocking scripts, navigation and external requests.
