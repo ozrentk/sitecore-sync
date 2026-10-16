@@ -9,6 +9,8 @@ import { editorKey, type EditorState } from "../../src/editor/itemEditorModel";
 import type { ConnectionStore } from "../../src/connections/connectionStore";
 import type { AuthoringContentClient, UpdateAuthoringItemInput } from "../../src/sitecore/authoringClient";
 import type { IntegrationTest } from "./testSupport";
+import { financeHtml } from "../fixtures/richTextSpans";
+import { admitVisual, exportVisual } from "../../src/editor/richTextAdmission";
 const id = "22222222222222222222222222222222";
 function fixture(): EditorState {
   const itemId = "11111111111111111111111111111111";
@@ -22,8 +24,10 @@ export const htmlSourceTests: readonly IntegrationTest[] = [{
   name: "HTML source freeze is panel/revision pinned, records pending history and restores exact backups and undo after Save",
   async execute() {
     const directory = await mkdtemp(join(tmpdir(), "xm-html-save-"));
-    const initial = fixture(); let remote = initial.base; let writes = 0; let failComposition = false;
-    let snapshot = "<P>A\r\nBX\nC\r</P><!--pending-->";
+    const original = fixture();
+    const initial = { ...original, base: { ...original.base, fields: [{ ...original.base.fields[0], value: financeHtml }] } };
+    let remote = initial.base; let writes = 0; let failComposition = false;
+    let snapshot = exportVisual(admitVisual(financeHtml).document).replace("Paying For Your Grenadier", "Updated heading").replace("PRODUCT2", "OFFER");
     const provider = new ItemEditorProvider({ globalStorageUri: vscode.Uri.file(directory) } as vscode.ExtensionContext,
       { get: () => ({ id: "test", name: "Test", serverUrl: "https://example.test" }), getClientSecret: async () => "fixture-secret" } as unknown as ConnectionStore,
       { loadItem: async () => remote, updateEditorFields: async (_c: unknown, _s: unknown, input: UpdateAuthoringItemInput) => {

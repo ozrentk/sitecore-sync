@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.48.0 — 2026-10-16
+
+- Extend Visual editing to nested inline spans without flattening their wrappers, classes or style attributes; preserve heading levels, text spacing and blank paragraphs.
+- Display literal single-declaration text alignment through bundled, scoped CSS rules. Original classes and arbitrary CSS remain inert; no website stylesheets are fetched.
+- Protect even unstyled span nesting against destructive split/join operations. Keep exact no-op mode switches, host undo/redo, pending-input freeze, Save and backup behavior.
+- Add the supplied finance-content example and nested formatting, paste, alignment and persistence regressions. Tables, managed links, visual media and formatted paste remain outside the supported profile.
+
 ## 0.47.0 — 2026-10-16
 
 - Add a conservative Tiptap Visual mode for paragraphs, headings, bold, italic, underline and line breaks, using the existing HTML draft and Save workflow.
