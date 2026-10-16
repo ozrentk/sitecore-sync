@@ -73,3 +73,8 @@ Implemented the bounded [link profile](../item-editor.md#links-0500): recursive 
 - Pending link forms close on mode switch and Save freeze; picker disposal removes its temporary focus listener. Source-only and unknown link variants remain preserved rather than rewritten.
 
 Per the user's decision, leave B31 for later and retain this work on `feature/richtext-managed-links`, without merging to develop or publishing a release. The local VSIX is for review; the final full suite is not green. Native OS IME, assistive technology and live Sitecore save acceptance remain unverified. No dependencies or licensing terms changed.
+
+## B31 resolution and 3C integration (0.50.1)
+
+The earlier deferred-merge decision was superseded by explicit user authorization to fix B31 and merge 3C. An isolated VS Code 1.100.0 probe reproduced `document.hasFocus() === false`, an active destination input and no focus/focusin event after programmatic focus. The test now establishes foreground focus before its unchanged expansion assertion, and also exercises background/foreground restoration. Production controls handle destination clicks and restored window focus. The obsolete release exception is removed from current CI/tests; published v0.45.0 history remains unchanged. This closes the specific focus defect without claiming unrelated native IME/accessibility or live-save acceptance.
+Combined verification: 451 unit tests and all 112 extension-host tests passed, with no B31 exception. Isolated Edge pointer/keyboard checks passed for General Link expansion/chevron navigation and Rich Text URL creation, internal picking/retargeting and removal. Strict type checks passed.

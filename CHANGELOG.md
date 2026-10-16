@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.50.1 — 2026-10-16
+
+- Fix General Link expansion when clicking an already-focused destination or restoring webview focus.
+- Establish real foreground focus in the B31 integration regression; retain its assertion and verify background/foreground restoration. Remove the obsolete CI exception without changing historical release notes.
+
+
 ## 0.50.0 — 2026-10-16
 
 - Add Visual **Link** creation, destination editing and removal, with safe URLs and a Sitecore content picker.
