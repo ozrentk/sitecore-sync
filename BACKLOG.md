@@ -166,7 +166,12 @@ Use this file as the single backlog inventory. Add newly agreed work here, prese
 - Media Library references without URLs resolve names/paths only. SVG/private/custom-CDN previews remain unavailable with retained evidence; no URL guessing, uploads, asset selection, Content Hub credentials, Rich Text editor or publishing expansion.
 - Read-only Dev evidence verified Content Hub mappings and a public JPEG. Isolated tests cover security boundaries, stale results, connection changes, raw preservation and failed previews. No Sitecore mutations. B27 remains separate.
 
-### Rich Text HTML source implementation (0.46.0)
+### Rich Text basic Visual implementation (0.47.0)
+
+- Custom Tiptap paragraphs/headings, basic emphasis, line breaks and plain-text paste now use the HTML source draft and existing persistence/history pipeline. Token-aware admission and transaction guards keep unsupported content HTML-only and retain opaque CSS/images and protected attributes.
+- Remaining work includes richer spans/containers, managed links/identity policies, lists/tables, visual media editing, formatted paste, broader accessibility/native IME acceptance and site-specific content profiles. Styling is displayed in isolated Preview, never applied to trusted visual-editor chrome.
+
+### Rich Text HTML source implementation details (0.46.0)
 
 - Adds HTML source editing and isolated read-only Preview for eligible ordinary-item fields. Raw source stays authoritative; mixed newlines, no-op mode switches, native history, pending-input freeze, backup and the existing Save pipeline are covered by synthetic tests.
 - B24/B25 remain partial: Tiptap visual editing and token-aware admission, managed reference/identity policies, media, complex tables and fallback/page editing remain separate work. No live Sitecore writes are part of this implementation.

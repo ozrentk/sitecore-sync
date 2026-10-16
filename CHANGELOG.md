@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.47.0 — 2026-10-16
+
+- Add a conservative Tiptap Visual mode for paragraphs, headings, bold, italic, underline and line breaks, using the existing HTML draft and Save workflow.
+- Check original source tokens before visual admission. Unsupported, repaired, identity-sensitive and complex markup stays HTML-editable with a reason; unchanged mode switches retain exact raw source.
+- Preserve CSS, image/DAM metadata and inter-block whitespace as inert data. Block visual operations that would remove protected metadata; display styling remains in the isolated Preview.
+- Support plain-text paste and native host undo; reject formatted paste/drop rather than stripping content. No visual media, links, lists, tables or page/fallback editing is added.
+- Record future action-icon consistency work as B32. B31 remains a known intermittent test failure, with no new release exception.
+
 ## 0.46.0 — 2026-10-16
 
 - Add HTML source editing for eligible ordinary-item Rich Text fields, with a separate read-only sandboxed Preview.

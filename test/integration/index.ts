@@ -1,5 +1,6 @@
 import { itemEditorTests } from "./itemEditorTests";
 import { htmlSourceTests } from "./htmlSourceTests";
+import { richTextVisualTests } from "./richTextVisualTests";
 import { appendFileSync } from "node:fs";
 import { isAcceptedB31 } from "../releaseExceptions";
 import { strictEqual } from "node:assert/strict";
@@ -39,6 +40,7 @@ const integrationTests: readonly IntegrationTest[] = [
   ...fallbackWebviewTests,
   ...itemEditorTests,
   ...htmlSourceTests,
+  ...richTextVisualTests,
   {
     name: "exposes the unified dashboard on connection context menus",
     async execute(): Promise<void> {

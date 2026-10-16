@@ -18,20 +18,32 @@ Right-click an ordinary content or component datasource item in **Browse**, or o
 | Name Value List | Read/write valid encoded rows. |
 | General Link | Read/write supported ordinary links; custom/DAM destinations stay protected. |
 | Image, File | Read-only metadata and on-demand supported previews. |
-| Rich Text | Read/write HTML source with a read-only sandboxed preview; no visual editing yet. |
+| Rich Text | Read/write HTML source, guarded basic Visual mode and read-only sandboxed Preview. |
 | Other or unsupported field representations | Read-only; the reason remains visible. |
 
 Eligibility also depends on an existing exact-locale version, valid metadata and the editor's page/system/fallback protections. A supported type alone does not make every field writable.
 
 ## Rich Text HTML source
 
-Eligible ordinary-item Rich Text fields open in **HTML** mode. Edit the source directly, use **Preview** to inspect the current draft, and use the ordinary **Save** workflow. Preview is read-only, script-free and isolated; it blocks external requests and navigation. It is not a website preview or a visual editor. Item Details remains read-only.
+Eligible ordinary-item Rich Text fields open in **HTML** mode. Edit the source directly, choose **Visual** for supported basic markup, use **Preview** to inspect the current draft, and use the ordinary **Save** workflow. Preview is read-only, script-free and isolated; it blocks external requests and navigation. It is not a website preview or a visual editor. Item Details remains read-only.
 
 Opening a field or switching between HTML and Preview does not serialize or change its source. The raw draft preserves comments, malformed markup, attributes, whitespace and mixed CRLF/LF/lone-CR line endings. The textarea displays normalized line breaks while retaining the original raw string separately. Newly typed line breaks use the nearest preceding convention, then the first existing convention, or LF. Pasted/dropped plain text preserves the string supplied by the browser; external clipboard software may itself normalize text. Drops insert at the current selection. **Clear** stores an explicit empty value.
 
 Source editing is limited to 1,048,576 UTF-16 code units per field. Larger stored values remain read-only, and an oversized edit is rejected without truncating the draft. The preview has a separate 262,144-character limit and structural limits; an unavailable preview never alters source. Scripts and unsupported display content remain in the raw draft but cannot execute in Preview.
 
 Save synchronizes pending edits and composition input with the current panel/revision before freezing the controls. If composition cannot finish, Save stops and preserves the draft. Native Undo/Redo, backup, conflicts, journaled non-retried writes and numbered-version readback use the same item-editor pipeline. Server-side rewriting is not silently normalized away to claim a successful exact readback.
+
+## Rich Text basic Visual mode
+
+Visual supports explicit paragraphs, existing headings, bold/italic/underline and line breaks. Type, select text and use **Bold**, **Italic**, **Underline** or Ctrl/Cmd+B/I/U; Enter splits ordinary paragraphs and Shift+Enter inserts a line break. Ctrl/Cmd+Z and redo use the same VS Code draft history as HTML mode. There is no separate visual undo stack.
+
+Original source tokens are checked before admission. Parser repairs, duplicate attributes, comments, links, identity/managed-reference attributes, nested spans, repeated same-type formatting, lists and tables remain HTML-only with a reason. Some other structures may also be refused when the visual representation would alter them. HTML remains available; rejection does not clear or repair the draft.
+
+CSS and original attributes are retained but not applied to the visual surface; use Preview for stored styling. Stylesheets and images/DAM content appear as inert placeholders. Visual operations that remove/change opaque content or protected attributes are rejected, including ambiguous joins/splits of attributed blocks. Edit those structures in HTML. There is no media or link editor.
+
+Unchanged Visual/HTML/Preview switches preserve exact raw HTML. After a real visual edit, text entity spelling and text-node line endings may be canonicalized, and formatting wrappers may be split or merged by the requested operation. Original element attribute syntax and opaque fragments remain retained. Undo to the entry state restores its exact original source. Use HTML when lexical fidelity through edits is required.
+
+Plain-text paste is supported. Formatted clipboard HTML and drag/drop are rejected as a whole; use plain-text paste or HTML mode. Visual admission is limited to 262,144 characters, 5,000 nodes and 40 levels. These bounds do not truncate the HTML draft. Visual has basic document formatting, not website-identical rendering.
 
 ## Basic values and clearing
 

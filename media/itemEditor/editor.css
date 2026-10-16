@@ -82,3 +82,9 @@ select { font:inherit; color:var(--vscode-input-foreground); background:var(--vs
 .link-destination .link-property, .link-destination .selection-trigger { flex:1; min-width:0; width:100%; }
 .link-expand { flex:none; padding:5px; margin:0 0 1px; background:transparent; color:var(--vscode-foreground); }
 .link-summary { white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.richtext-tools { display: flex; gap: 4px; }
+.richtext-tools[hidden] { display: none; }
+.richtext-visual .tiptap { min-height: 160px; padding: 12px; border: 1px solid var(--vscode-input-border, #666); white-space: pre-wrap; overflow-wrap: anywhere; }
+.richtext-visual [data-opaque] { color: var(--vscode-descriptionForeground); font-style: italic; user-select: none; }
+.richtext-visual [data-opaque="gap"] { display: none; }
+.richtext-visual img.ProseMirror-separator { display: inline; border: none; margin: 0; width: 0; height: 0; }

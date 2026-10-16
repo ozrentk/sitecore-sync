@@ -1,0 +1,86 @@
+import * as vscode from "vscode";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { strictEqual } from "node:assert/strict";
+import type { IntegrationTest } from "./testSupport";
+
+export const richTextVisualTests: readonly IntegrationTest[] = [{
+  name: "basic visual webview edits, rejects metadata loss, freezes and returns to exact raw HTML through host history",
+  async execute() {
+    const directory = await mkdtemp(join(tmpdir(), "xm-visual-webview-"));
+    const extension = vscode.extensions.getExtension("OzrenTK.sitecore-xm-cloud-sync")!;
+    const media = vscode.Uri.joinPath(extension.extensionUri, "media", "itemEditor");
+    const shared = vscode.Uri.joinPath(extension.extensionUri, "media", "shared");
+    const out = vscode.Uri.joinPath(extension.extensionUri, "out", "webview");
+    const panel = vscode.window.createWebviewPanel("visualSmoke", "Visual smoke", vscode.ViewColumn.Active, { enableScripts: true });
+    let listener: vscode.Disposable | undefined; let timer: ReturnType<typeof setTimeout> | undefined;
+    try {
+      panel.webview.options = { enableScripts: true, localResourceRoots: [media, shared, out, vscode.Uri.file(directory)] };
+      await writeFile(join(directory, "smoke.js"), String.raw`
+        const assert=(v,m)=>{if(!v)throw Error(m);};
+        const wait=()=>new Promise(r=>setTimeout(r,50));
+        (async()=>{
+          const raw="<P>A&#38;B</P>\r\n<p>second</p>";
+          const field={id:"html",label:"Text",name:"Text",section:"Data",type:"Rich Text",scope:"VERSIONED",source:"Exact locale",kind:"html",original:raw,input:raw,clear:false,raw};
+          const state={type:"state",revision:1,busy:false,pending:false,item:{name:"Fixture",path:"/sitecore/content/Fixture"},target:{language:"en",version:1,itemId:"fixture"},connection:"Test",fields:[field],status:"Ready"};
+          const show=(input,focus)=>window.dispatchEvent(new MessageEvent("message",{data:{...state,fields:[{...field,input}],focus}}));
+          const button=name=>[...document.querySelectorAll(".html-source-actions button")].find(b=>b.textContent===name);
+          show(raw);button("Visual").click();await wait();
+          assert(visualSources.has("html"),"Visual admitted");assert(htmlSources.get("html").read()===raw,"Untouched raw exact");
+          button("HTML").click();await wait();assert(htmlSources.get("html").read()===raw,"Unchanged switch exact");
+          button("Visual").click();await wait();
+          visualSources.get("html").restore({from:1,to:2});visualSources.get("html").command("bold");await wait();
+          assert(htmlSources.get("html").read()==="<P><strong>A</strong>&amp;B</P>\r\n<p>second</p>","Real formatting export");
+          const edited=htmlSources.get("html").read();
+          document.querySelector(".tiptap").dispatchEvent(new KeyboardEvent("keydown",{key:"z",code:"KeyZ",ctrlKey:true,bubbles:true,cancelable:true}));
+          document.querySelector(".tiptap").dispatchEvent(new InputEvent("beforeinput",{inputType:"historyRedo",bubbles:true,cancelable:true}));
+          show(raw,{id:"html"});await wait();assert(visualSources.has("html"),"Host undo restores visual mode");
+          assert(htmlSources.get("html").read()===raw,"Host undo restores original entity spelling");
+          show(edited,{id:"html"});await wait();assert(htmlSources.get("html").read()===edited,"Host redo restores draft");
+          window.dispatchEvent(new MessageEvent("message",{data:{type:"freeze",id:"visual-freeze",revision:1}}));await wait();
+          assert(document.querySelector(".tiptap").contentEditable==="false","Frozen visual surface");
+          window.dispatchEvent(new MessageEvent("message",{data:{type:"unfreeze",revision:1,error:""}}));
+          assert(document.querySelector(".tiptap").contentEditable==="true","Unfrozen visual surface");
+          button("HTML").click();await wait();assert(!document.querySelector(".tiptap"),"Visual disposed on mode switch");
+          show('<p id="managed">keep</p>');button("Visual").click();await wait();
+          assert(!visualSources.has("html")&&!document.getElementById("html").hidden,"Unsupported stays HTML-editable");
+          assert(htmlSources.get("html").read()==='<p id="managed">keep</p>',"Unsupported raw not repaired");
+          assert(document.querySelector(".visual-error").textContent.includes("Identity"),"Admission reason survives source snapshot reads");
+          const opaque='<style>body{display:none}</style><p>A<img src="https://example.test/no-request" data-dam-id="42"></p>';
+          show(opaque);button("Visual").click();await wait();
+          // ProseMirror may insert a source-less IMG separator after inline atoms.
+          assert(visualSources.has("html")&&!document.querySelector("#fields style,#fields img[src],#fields img[srcset]"),"Opaque assets never active in host");
+          const controller=visualSources.get("html");controller.restore({from:1,to:4});
+          document.execCommand("delete");await wait();assert(htmlSources.get("html").read()===opaque,"Deleting opaque data rejected atomically");
+          show("");button("Visual").click();await wait();assert(visualSources.has("html"),"Empty visual projection");
+          assert(htmlSources.get("html").read()==="","Empty opening must not invent paragraph");
+          show("<p>word</p>");await wait();
+          visualSources.get("html").restore({from:1,to:1});
+          const clipboard=new DataTransfer();clipboard.setData("text/plain","paste ");
+          document.querySelector(".tiptap").dispatchEvent(new ClipboardEvent("paste",{clipboardData:clipboard,bubbles:true,cancelable:true}));
+          await wait();assert(htmlSources.get("html").read()==="<p>paste word</p>","Plain paste uses guarded transaction");
+          clipboard.setData("text/html",'<p onclick="bad()">loss</p>');
+          document.querySelector(".tiptap").dispatchEvent(new ClipboardEvent("paste",{clipboardData:clipboard,bubbles:true,cancelable:true}));
+          await wait();assert(htmlSources.get("html").read()==="<p>paste word</p>","Formatted paste is rejected without partial text insertion");
+          api.postMessage({type:"visual-test",ok:true,edited});
+        })().catch(error=>api.postMessage({type:"visual-test",error:String(error)}));
+      `);
+      let frozen: { drafts: Record<string, { input: string }> } | undefined; let undoRequests = 0; let redoRequests = 0;
+      const complete = new Promise<void>((resolve, reject) => {
+        timer = setTimeout(() => reject(Error("Visual webview timed out")), 25000);
+        listener = panel.webview.onDidReceiveMessage(message => {
+          if (message.type === "undo") undoRequests++;
+          if (message.type === "redo") redoRequests++;
+          if (message.type === "frozen") frozen = message;
+          if (message.type === "visual-test") {
+            try { strictEqual(message.ok, true, message.error); strictEqual(frozen?.drafts.html.input, message.edited); strictEqual(undoRequests, 1, "One native undo request per keypress"); strictEqual(redoRequests, 1, "Native beforeinput history routes to host"); resolve(); } catch (error) { reject(error); }
+          }
+        });
+      });
+      const script = (uri: vscode.Uri) => `<script nonce="visual-test" src="${panel.webview.asWebviewUri(uri)}"></script>`;
+      panel.webview.html = `<!doctype html><meta http-equiv="Content-Security-Policy" content="default-src 'none'; frame-src data:; style-src ${panel.webview.cspSource} 'nonce-visual-test'; script-src 'nonce-visual-test';"><link rel="stylesheet" href="${panel.webview.asWebviewUri(vscode.Uri.joinPath(media,"editor.css"))}"><body><h1 id="title"></h1><p id="identity"></p><p id="path"></p><p id="status"></p><button id="save">Save</button><button id="revert">Revert</button><button id="reconcile">Reconcile</button><button id="locale">Locale</button><main id="fields"></main>${script(vscode.Uri.joinPath(shared,"readOnlyField.js"))}${script(vscode.Uri.joinPath(media,"htmlSource.js"))}${script(vscode.Uri.joinPath(out,"richTextVisual.js"))}${script(vscode.Uri.joinPath(media,"editor.js"))}${script(vscode.Uri.file(join(directory,"smoke.js")))}</body>`;
+      await complete;
+    } finally { clearTimeout(timer); listener?.dispose(); panel.dispose(); await rm(directory, { recursive: true, force: true }); }
+  },
+}];
