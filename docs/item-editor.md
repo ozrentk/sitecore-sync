@@ -49,6 +49,8 @@ Plain-text paste is supported. Formatted clipboard HTML and drag/drop are reject
 
 Visual mode supports rectangular tables with explicit `thead`, `tbody` and/or `tfoot` sections, an optional leading caption, column definitions and an optional top-level `div` containing only the table. Each section appears as a separate grid in the editing surface. Original wrapper/section tags, IDs, classes, styles, dimensions, header/scope metadata and spans are retained in exported HTML; original styles and IDs are not applied to editor chrome. Use Preview to inspect stored styling.
 
+To create a table, place the cursor in the document and choose **Table → Insert table (2 × 2)** (added in 0.49.1). It inserts after the current top-level paragraph/block, preserves existing content and focuses the first cell. It never nests a table or replaces selected text; collapse a text selection first. Use row and column insertion to resize it.
+
 Place the cursor in a cell and open **Table** for row/column insertion, empty-row/column deletion, merge/split and **Add / edit caption**. Drag across cells to select them. Captions and cell text support ordinary typing and formatting. The commands have deliberate limits:
 
 - Structural edits require rows and cells without attributes other than row/column spans. Cells with IDs, `headers`, `scope`, styles or other metadata remain text-editable, but structural changes require HTML.
