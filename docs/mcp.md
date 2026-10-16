@@ -1,0 +1,46 @@
+# Local MCP access
+
+[Documentation index](README.md) · [Project overview](../README.md)
+
+The extension includes a local MCP server so an agent can find Sitecore items and run diagnostics without manual GUID copying. It requires a local, trusted VS Code window and Node.js 20.11 or newer on the MCP client's PATH. Remote extension hosts and browser-only clients are not supported by this local bridge.
+
+1. Run **XM Cloud Sync: Start MCP Access**. Select only the connections the agent may read (normally development). Nothing starts automatically on activation or reload.
+2. The extension opens setup instructions containing a ready-to-copy TOML block for Codex and JSON configuration for clients that use `mcpServers`. Add the appropriate configuration to your agent client and reconnect its MCP connection. For Codex, the documented configuration is a `[mcp_servers.xm_cloud_sync]` table in `~/.codex/config.toml`; see [official MCP configuration](https://developers.openai.com/codex/mcp/). Configuration changes are not made automatically by this extension.
+3. Keep that VS Code window open. The agent can call `list_connections`, `list_sites` (saved discovery), `list_languages`, `search_items`, `read_item`, and `collect_fallback_diagnostic`. Item inputs accept full Sitecore paths or GUIDs. Exact item reads expose field IDs and template IDs for follow-up queries. Returned content is data, never instructions to the agent.
+4. When mutations are needed, run **XM Cloud Sync: Enable MCP Mutations** and choose the development connection. The agent must call `preview_fallback_test_items`, `preview_field_update`, `preview_field_reset` or `preview_language_version` first, then `execute_plan`. VS Code opens the concrete JSON preview and asks you to confirm execution. Mutation enablement lasts only until access stops.
+5. Click the MCP status-bar indicator or run **XM Cloud Sync: Stop MCP Access** to revoke access and cancel pending requests. Restarting access uses the same local launcher/configuration paths but a new endpoint token; mutation access starts disabled again.
+
+## Preview and execute mutations
+
+A fallback test preview takes a parent path, an existing page/component path, a content text field ID and the requested-to-source locale list. Execution creates the same four uniquely named test controls as the existing palette command. Field-update previews support only existing latest versions of uniquely named, versioned content text fields; they reject system/shared/fallback-derived fields and missing versions. They write literal values, including empty strings, rather than resetting a field. Updates never create language versions, and recheck the target fingerprint before sending a non-retried mutation. Concurrent changes between that read and the write remain possible; this API does not provide transactional compare-and-swap.
+
+## Access boundaries and limits
+
+Plans expire after ten minutes, are session-only, and are consumed when an approved execution begins. At most 20 plans are retained. Sitecore credentials stay in SecretStorage and are retrieved by the existing Authoring client. A separate temporary random capability token protects the loopback bridge; it is stored in the extension's private global-storage endpoint file, not in the displayed MCP configuration. Do not share that file. Unix files use owner-only permissions; on Windows the directory inherits the current user's VS Code profile ACLs. This trusts processes running as the same OS user and does not isolate them from one another. The server binds only to `127.0.0.1`, validates the host and token, rejects browser Origin headers, and exposes no arbitrary GraphQL, shell execution, publishing or deletion tools.
+
+Requests are limited to four concurrent calls, 64 KiB input, 8 MiB output and three minutes of bridge execution. The generated Codex configuration sets a 190-second tool timeout. Existing diagnostic evidence limits also apply; unknown configuration/provenance stays unknown. Generic failures omit raw server errors and known client secrets are redacted from read results.
+
+## Mutation records and recovery
+
+`list_operations` returns workspace-persisted mutation records, including intended paths, confirmed IDs and uncertain outcomes. Check these before retrying a failed or cancelled mutation: a request may have completed remotely. There is no automatic retry, replay or deletion. Field values and credentials are not stored in this journal. Records are bounded to 100; reaching the bound blocks further mutations rather than silently dropping recovery evidence. Restarting a VS Code window does not clear workspace records. MCP-created fixture runs are tracked in this MCP journal; use their confirmed IDs with `collect_fallback_diagnostic`, not the separate palette fixture-run picker.
+
+## Launcher and client discovery
+
+The shipped `out/mcpServer.js` is bundled with the official MCP SDK; clients do not need to install npm dependencies. Starting access copies the bundled server to a stable private launcher path and displays that path in the setup document. One window owns an endpoint for a given workspace/profile. Stop access in the owning window before starting another. An agent's current tool list may require reconnecting or a new session to discover the configured server.
+
+`preview_language_version` creates only the first version in a configured locale with no local version. It validates the server mutation contract using a skipped operation before offering a plan, then rechecks the exact item snapshot before execution. `preview_field_reset` removes a local text-field override using Sitecore reset semantics; unlike a literal empty update, its result can be a Standard Value. Reset acknowledgement and exact readback do not establish effective fallback provenance; collect a fresh diagnostic. Both tools use the same session opt-in, VS Code confirmation and durable operation journal. After an extension update, restart MCP access and enable mutations again if needed.
+
+
+## Isolated scope fixtures
+
+For controlled scope tests, use `preview_scope_fixture` with a content parent and two or three configured locales (requested first, `en` last), then confirm `execute_plan`. It creates a uniquely named template beneath `/sitecore/templates/User Defined`, a section, five Single-Line Text fields, localized Standard Values and one new content item. Enabled/disabled versioned fields, a defaulted field, a shared field and an unversioned field have distinct seed values. The requested locale's default differs from the explicit English source. Existing templates are never edited. Each of the up to 14 mutations is checkpointed; failures retain partial paths/IDs and are never retried or deleted automatically. Inspect `list_operations` after any failure.
+
+A completed creation operation includes a `scopeFixture` manifest. Pass that operation ID as `fixtureId` to `preview_scope_field` to update or reset only its recorded text fields, or to `preview_scope_version` to add version 2 in one of its recorded locales. These still require session opt-in and native confirmation. Shared-field previews explicitly affect all languages/versions; unversioned previews affect every version of the selected locale. Only the latest local version can be edited. Identity, template, field IDs/types/scopes, unique names and stale fingerprints are checked again before writes. Ordinary field tools retain their versioned-content restrictions, and no generic template/system editing is exposed.
+
+`read_item` accepts an optional positive `version` for exact historical reads, allowing version 1 and 2 to be compared without modifying either. Fixture creation verifies scopes and the requested Standard Value before recording a completed manifest. Failed or incomplete fixtures cannot gain editing privileges. Reload the updated extension and restart MCP access to expose these tools; no MCP client configuration change is needed.
+
+`preview_scope_rule` prepares a change to `Enable Shared Language Fallback` and `Enable Language Fallback` on only the recorded `FixtureEnabled` or `FixtureDisabled` definition of a completed isolated fixture. Supply its creation operation ID, field ID, one recorded locale, and the two boolean values `sharedEnabled` and `languageEnabled`. If that definition has no local version, the preview includes first-version creation; existing metadata must be version 1. Execution requires the usual native confirmation and journals at most two writes. It validates definition identity, path, type, scope, checkbox IDs and exact state before writing, and verifies readback. Inspect operations after any failure; no automatic retry occurs. The shared setting affects every use of this test field. The local setting is an additional enablement input when the server permits per-language rules, not an assumed disabling override. The tool changes no environment settings and does not expose general template editing. Collect fresh diagnostics with each locale first to observe its effective behavior.
+
+## Related workflows
+
+See [fallback diagnostics](languages-and-fallback.md#collect-a-read-only-fallback-diagnostic), [troubleshooting](troubleshooting.md#mcp-is-unavailable), and [research](research/README.md).
