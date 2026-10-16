@@ -20,7 +20,7 @@ Check the selected locale and numbered version, then the Content/Standard Templa
 
 ## General Link properties (B31)
 
-During 0.45.0 verification, the General Link destination-focus expansion integration assertion repeatedly failed; normal interactive reproduction is unverified. Try the explicit properties chevron and report whether mouse and keyboard navigation behave differently. No fix is claimed. The accepted release exception and its test-coverage limits are documented in [releases](releases.md#known-verification-exception-for-v0450); B31 remains open in the backlog.
+The B31 investigation reproduced a background-webview condition in VS Code 1.100.0: programmatic focus changed the active input without firing focus events. The integration test now establishes foreground focus before testing expansion and exercises background/foreground restoration. General Link controls also expand on destination clicks, including an already-focused input, and reconcile restored webview focus. The original assertion remains mandatory. The historical 0.45.0 exception is documented in [releases](releases.md#known-verification-exception-for-v0450); current tests and CI no longer contain that exception.
 
 ## A save, transfer or publish has an uncertain outcome
 
