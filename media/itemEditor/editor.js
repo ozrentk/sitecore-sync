@@ -15,6 +15,8 @@ const htmlModes = new Map();
 const htmlSelections = new Map();
 const visualSources = new Map();
 const visualSelections = new Map();
+// Electron can restore an active input without delivering its original focus event.
+window.addEventListener("focus", () => document.activeElement?.dispatchEvent(new Event("editorFocus")));
 let freezeGeneration = 0;
 document.addEventListener("keydown", event => { if (event.key === "Escape") { cancelDrag?.(); activePicker?.close(); } });
 document.addEventListener("keydown", event => {
@@ -402,7 +404,7 @@ function renderGeneralLink(row, field) {
     const input = document.createElement("input"); input.type = "text"; input.dataset.linkProperty = key;
     input.setAttribute("aria-label",`${field.label} ${title}`);
     input.disabled = blocked || (field.linkCustom && !["text","title","target","class"].includes(key));
-    input.addEventListener("focus",()=>expand(true));
+    for (const event of ["focus", "editorFocus", "click"]) input.addEventListener(event,()=>expand(true));
     input.addEventListener("input",()=>{
       if (key === "url" && values.linktype === "anchor") {
         const attributeOnly = !values.url && Boolean(values.anchor);
@@ -425,7 +427,8 @@ function renderGeneralLink(row, field) {
     chosen:choice=>values.id.replace(/[{}-]/g,"").toLowerCase()===choice.itemId.replace(/[{}-]/g,"").toLowerCase(),
     accept:choice=>{values.id=choice.value;values.url="";names.set(values.id,choice.path);refreshTarget();setSelectionLabel(target,choice.displayName||choice.name,choice.path);changed();picker.close();}
   });
-  target.addEventListener("focus",()=>expand(true));target.addEventListener("click",picker.open);
+  for (const event of ["focus", "editorFocus", "click"]) target.addEventListener(event,()=>expand(true));
+  target.addEventListener("click",picker.open);
   target.addEventListener("keydown",event=>{if(["Enter"," ","ArrowDown"].includes(event.key)){event.preventDefault();picker.open();}});
   for(const [key,title] of [["text","Link text"],["title","Title"],["target","Target"],["class","CSS class"],["anchor","Anchor"],["querystring","Query string"]])add(key,title,properties);
   const update = () => {
