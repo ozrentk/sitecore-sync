@@ -5,6 +5,10 @@
   "version": "0.45.0",
   "publisher": "OzrenTK",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/ozrentk/sitecore-sync.git"
+  },
   "engines": {
     "vscode": "^1.100.0"
   },
