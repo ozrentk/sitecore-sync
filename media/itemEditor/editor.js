@@ -231,28 +231,40 @@ function renderHtmlSource(row, field) {
   const visual = document.createElement("button"); visual.textContent = "Visual"; visual.type = "button";
   const visualArea = document.createElement("div"); visualArea.className = "richtext-visual";
   const tools = document.createElement("div"); tools.className = "richtext-tools";
-  for (const [name, label] of [["bold", "Bold"], ["italic", "Italic"], ["underline", "Underline"]]) {
-    const button = document.createElement("button"); button.type = "button"; button.textContent = label; button.disabled = blocked;
-    button.addEventListener("mousedown", event => event.preventDefault());
-    button.addEventListener("click", () => { if (!blocked) visualSources.get(field.id)?.command(name); }); tools.append(button);
+  const blockType = document.createElement("select"); blockType.setAttribute("aria-label", "Text block type");
+  for (const [value, text] of [["", "Mixed blocks"], ["paragraph", "Paragraph"], ...[1,2,3,4,5,6].map(n=>[`h${n}`, `Heading ${n}`])]) {
+    const option = document.createElement("option"); option.value = value; option.textContent = text; option.disabled = !value; blockType.append(option);
   }
+  blockType.addEventListener("change", () => { if (!blocked && blockType.value) visualSources.get(field.id)?.command(blockType.value); }); tools.append(blockType);
+  for (const [name, label] of [["bold", "Bold"], ["italic", "Italic"], ["underline", "Underline"], ["bulletList", "Bullets"], ["orderedList", "Numbers"], ["indent", "Indent"], ["outdent", "Outdent"], ["blockquote", "Quote"], ["clearFormatting", "Clear formatting"]]) {
+    const button = document.createElement("button"); button.type = "button"; button.textContent = label; button.disabled = blocked;
+    button.dataset.richCommand = name;
+    button.addEventListener("mousedown", event => event.preventDefault());
+    button.addEventListener("click", () => { if (blocked) return; if (button.getAttribute("aria-disabled") === "true") visualError.textContent = button.title; else visualSources.get(field.id)?.command(name); }); tools.append(button);
+  }
+  const alignment = document.createElement("select"); alignment.setAttribute("aria-label", "Text alignment");
+  for (const [value, label] of [["", "Alignment"], ["alignLeft", "Left"], ["alignCenter", "Center"], ["alignRight", "Right"], ["alignJustify", "Justify"]]) { const option = document.createElement("option"); option.value = value; option.textContent = label; option.disabled = !value; alignment.append(option); }
+  alignment.addEventListener("change", () => { if (!blocked && alignment.value) visualSources.get(field.id)?.command(alignment.value); }); tools.append(alignment);
   const tableMenu = document.createElement("details"); tableMenu.className = "richtext-table-tools";
   const tableTitle = document.createElement("summary"); tableTitle.textContent = "Table"; tableMenu.append(tableTitle);
   for (const [name, label] of [["insertTable", "Insert table (2 × 2)"], ["caption", "Add / edit caption"], ["rowBefore", "Insert row above"], ["rowAfter", "Insert row below"],
     ["columnBefore", "Insert column before"], ["columnAfter", "Insert column after"], ["deleteRow", "Delete empty rows"],
     ["deleteColumn", "Delete empty columns"], ["mergeCells", "Merge selected cells"], ["splitCell", "Split cell"]]) {
     const button = document.createElement("button"); button.type = "button"; button.textContent = label; button.disabled = blocked;
+    button.dataset.richCommand = name;
     button.addEventListener("mousedown", event => event.preventDefault());
-    button.addEventListener("click", () => { if (!blocked) visualSources.get(field.id)?.command(name); }); tableMenu.append(button);
+    button.addEventListener("click", () => { if (blocked) return; if (button.getAttribute("aria-disabled") === "true") visualError.textContent = button.title; else visualSources.get(field.id)?.command(name); }); tableMenu.append(button);
   }
   tools.append(tableMenu);
   const linkButton = document.createElement("button"); linkButton.type = "button"; linkButton.textContent = "Link";
+  linkButton.dataset.richCommand = "link";
   const linkForm = document.createElement("div"); linkForm.className = "richtext-link-form"; linkForm.hidden = true;
   let closeLink = () => {};
   linkForm.addEventListener("close-link", () => closeLink());
   linkButton.addEventListener("mousedown", event => event.preventDefault());
   linkButton.addEventListener("click", () => {
     if (blocked) return;
+    if (linkButton.getAttribute("aria-disabled") === "true") { visualError.textContent = linkButton.title; return; }
     closeLink();
     const editor = visualSources.get(field.id);
     try {
@@ -298,6 +310,30 @@ function renderHtmlSource(row, field) {
   control.dataset.fieldId = field.id; control.dataset.original = field.original; control.dataset.explicitClear = String(field.clear);
   const error = document.createElement("p"); error.className = "meta"; error.setAttribute("role", "status");
   const visualError = document.createElement("p"); visualError.className = "meta visual-error"; visualError.setAttribute("role", "status");
+  let toolFrame;
+  const refreshTools = () => {
+    if (toolFrame) return;
+    toolFrame = requestAnimationFrame(() => {
+      toolFrame = undefined;
+      const editor = visualSources.get(field.id); if (!editor || !row.isConnected) return;
+      for (const button of tools.querySelectorAll("button[data-rich-command]")) {
+        if (button.closest(".richtext-table-tools") && !tableMenu.open) continue;
+        const state = editor.status(button.dataset.richCommand);
+        button.setAttribute("aria-disabled", String(blocked || !state.enabled));
+        if (["bold","italic","underline","bulletList","orderedList","blockquote"].includes(button.dataset.richCommand)) button.setAttribute("aria-pressed",String(state.active));
+        button.title = state.reason || (button.dataset.richCommand === "clearFormatting" ? "Remove bold, italic and underline only; retain links, wrappers and CSS." : button.textContent);
+      }
+      for (const select of [blockType, alignment]) {
+        let selected = ""; let reason = ""; let available = false;
+        for (const option of select.options) if (option.value) {
+          const state = editor.status(option.value); option.disabled = !state.enabled; option.title = state.reason;
+          if (state.active) selected = option.value; if (state.enabled) available = true; else reason ||= state.reason;
+        }
+        select.value = selected; select.disabled = blocked || !available; select.title = available ? select.getAttribute("aria-label") : reason;
+      }
+    });
+  };
+  tableMenu.addEventListener("toggle", refreshTools);
   const display = document.createElement("div"); display.className = "html-source-preview";
   const source = createHtmlSource(control, field.clear ? "" : field.input, {
     error: message => { error.textContent = message; },
@@ -317,7 +353,7 @@ function renderHtmlSource(row, field) {
     if (value === "visual") {
       try {
         const editor = createRichTextVisual(visualArea, source.read(), {
-          change: raw => source.replace(raw), history: action => { if (!blocked) send(action); }, error: message => { visualError.textContent = message; },
+          change: raw => source.replace(raw), history: action => { if (!blocked) send(action); }, error: message => { visualError.textContent = message; }, selection: refreshTools,
         });
         editor.editable(!blocked); visualSources.set(field.id, editor); error.textContent = "";
       } catch (failure) { value = "html"; visualError.textContent = `Visual unavailable: ${failure.message}`; }
@@ -327,6 +363,7 @@ function renderHtmlSource(row, field) {
     control.hidden = value !== "html"; display.hidden = value !== "preview";
     html.setAttribute("aria-pressed", String(value === "html")); preview.setAttribute("aria-pressed", String(value === "preview")); visual.setAttribute("aria-pressed", String(value === "visual"));
     display.replaceChildren();
+    refreshTools();
     if (value === "preview") {
       const raw = source.read();
       display.append(renderReadOnlyField({ raw, presentation: { kind: "richtext", status: raw ? "populated" : "empty" } }, { sourceMode: true }));

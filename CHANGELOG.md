@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.51.0 — 2026-10-16
+
+- Add Rich Text paragraph/heading and alignment controls, bullet/numbered lists, list indent/outdent, quotes and plain bold/italic/underline clearing.
+- Show active and unavailable command states with reasons; add heading/list shortcuts and list Enter, Tab/Shift+Tab and Backspace behavior.
+- Preserve nested formatting, links, opaque styles/media and raw no-op fidelity. Guard metadata-bearing structural changes and retain HTML access for unsupported content. Keep ordinary Save, history, freeze and backup protections.
+- Arbitrary styling/media editing, formatted paste and native IME/accessibility/live-save acceptance remain separate work.
+
 ## 0.50.1 — 2026-10-16
 
 - Fix General Link expansion when clicking an already-focused destination or restoring webview focus.

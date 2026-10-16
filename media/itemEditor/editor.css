@@ -108,3 +108,9 @@ select { font:inherit; color:var(--vscode-input-foreground); background:var(--vs
 .richtext-link-form { margin: 8px 0; padding: 10px; border: 1px solid var(--vscode-widget-border); }
 .richtext-link-form > input { min-width: 260px; max-width: 100%; }
 .richtext-link-form > button, .richtext-link-form > select { margin-right: 6px; }
+.richtext-tools { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; }
+.richtext-tools > select { width: auto; max-width: 100%; }
+.richtext-tools button[aria-pressed="true"] { outline: 1px solid var(--vscode-focusBorder); background: var(--vscode-button-hoverBackground); }
+.richtext-tools button[aria-disabled="true"] { opacity: .55; cursor: not-allowed; }
+.richtext-visual blockquote { border-left: 3px solid var(--vscode-textBlockQuote-border); margin-left: 0; padding-left: 1em; }
+.richtext-visual .rt-list-text { display: inline; }

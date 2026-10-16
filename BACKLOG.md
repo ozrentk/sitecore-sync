@@ -1,5 +1,10 @@
 # XM Cloud Sync backlog
 
+### Rich Text command completeness (0.51.0)
+
+- Added guarded paragraph/heading and alignment controls, B/I/U active states, bullet/numbered lists, list indent/outdent, quotes and plain-mark clearing. Keyboard and toolbar paths share the same preservation checks; see [the supported profile](docs/item-editor.md#formatting-commands-lists-and-quotes-0510).
+- B31 and 3C were integrated in 0.50.1. B24/B25 remain partial for 3D broader styling/media, arbitrary mixed containers/lists and formatted paste. Native IME/accessibility and live save acceptance are still outstanding; no live writes or publishing are part of this increment.
+
 Consolidated planning inventory as of 2026-09-14, reviewed against version 0.20.0. Unchecked entries are outstanding, not a commitment to implement them in this order. Product requirements remain in [PRODUCT_SPEC.md](PRODUCT_SPEC.md); completed release details are in [CHANGELOG.md](CHANGELOG.md).
 
 Status: B01–B06 are explicit TODOs; B07–B15 are deferred enhancements; B16 is a known limitation; B17 is documentation cleanup; B18 has a session foundation, single-tree navigation, read-only details/actions and mode switching; full integrated acceptance remains pending. Grouping does not change their priority or scope.
