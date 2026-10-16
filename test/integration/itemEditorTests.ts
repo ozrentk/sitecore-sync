@@ -566,6 +566,40 @@ export const itemEditorTests: readonly IntegrationTest[] = [{
     } finally { doc?.dispose(); provider.dispose(); await rm(directory, { recursive: true, force: true }); }
   },
 }, {
+  name: "Rich Text picker uses the content root and rejects superseded results and disposal",
+  async execute(): Promise<void> {
+    const directory = await mkdtemp(join(tmpdir(), "xm-selection-host-"));
+    const root = { itemId: "44444444444444444444444444444444", name: "Root", displayName: "Root", path: "/sitecore/content", hasChildren: true };
+    let finish: ((value: typeof root) => void) | undefined; let calls = 0;
+    const signals: AbortSignal[] = []; const posted: Record<string, unknown>[] = [];
+    const provider = new ItemEditorProvider({ globalStorageUri: vscode.Uri.file(directory) } as vscode.ExtensionContext,
+      { get: () => ({ id: "test", serverUrl: "https://example.test" }), getClientSecret: async () => "secret" } as unknown as ConnectionStore,
+      { loadSelectionItem: async (_c: unknown, _s: string, locator: unknown, language: string, signal: AbortSignal) => { strictEqual(language, "en-AU"); if ((locator as { itemId?: string }).itemId) return { ...root, itemId: "aaaaaaaa222233334444555555555555", path: "/sitecore/content/Target" }; deepStrictEqual(locator, { path: "/sitecore/content" }); signals.push(signal); calls++; return calls === 1 ? new Promise<typeof root>(resolve => { finish = resolve; }) : root; },
+        loadTreeLevel: async () => ({ item: root, children: [] }) } as unknown as AuthoringContentClient);
+    let doc: ItemDocument | undefined;
+    try {
+      const initial = fixture(); const state = { ...initial, base: { ...initial.base, fields: [{ ...initial.base.fields[0], type: "Rich Text", value: "<p>text</p>", selectionSource: "/sitecore/system/Settings/Html Editor Profiles/Custom" }] } };
+      await vscode.workspace.fs.createDirectory(provider.directory);
+      const uri = vscode.Uri.joinPath(provider.directory, `${editorKey(state.target)}.xmitem`);
+      await vscode.workspace.fs.writeFile(uri, Buffer.from(JSON.stringify(state)));
+      doc = await provider.openCustomDocument(uri, { backupId: undefined, untitledDocumentData: undefined });
+      doc.panels.add({ webview: { postMessage: async (value: Record<string, unknown>) => { posted.push(value); return true; } } } as unknown as vscode.WebviewPanel);
+      const harness = provider as unknown as { message(doc: ItemDocument, value: unknown): Promise<void> };
+      const old = harness.message(doc, { type: "choices", revision: 0, id: fieldId, request: "old" });
+      for (let count = 0; !finish && count < 100; count++) await new Promise(resolve => setTimeout(resolve, 5));
+      strictEqual(Boolean(finish), true);
+      await harness.message(doc, { type: "choices", revision: 0, id: fieldId, request: "new" });
+      finish!(root); await old;
+      strictEqual(signals[0].aborted, true); deepStrictEqual(posted.map(p => p.request), ["new"]);
+      const validator = provider as unknown as { io(doc: ItemDocument, signal: AbortSignal): { validateSelections(item: typeof state.base, changes: { fieldId: string; value: string }[]): Promise<void> } };
+      await validator.io(doc, doc.lifetime.signal).validateSelections(state.base, [{ fieldId, value: '<p><a href="~/link.aspx?_id=AAAAAAAA222233334444555555555555&amp;_z=z">target</a></p>' }]);
+      await rejects(validator.io(doc, doc.lifetime.signal).validateSelections(state.base, [{ fieldId, value: '<p><a href="~/link.aspx?_id=BBBBBBBB222233334444555555555555&amp;_z=z">wrong target</a></p>' }]), /unavailable/);
+      const count = posted.length; doc.dispose();
+      await harness.message(doc, { type: "choices", revision: 0, id: fieldId, request: "disposed" });
+      strictEqual(posted.length, count);
+    } finally { doc?.dispose(); provider.dispose(); await rm(directory, { recursive: true, force: true }); }
+  },
+}, {
   name: "selection requests reject superseded results and abort on document disposal",
   async execute(): Promise<void> {
     const directory = await mkdtemp(join(tmpdir(), "xm-selection-host-"));

@@ -1,5 +1,6 @@
 import { parseFragment, type DefaultTreeAdapterTypes as P } from "parse5";
 import type { JSONContent } from "@tiptap/core";
+import { inspectRichLink } from "./richTextLinks";
 
 export const visualLimit = 262144;
 export interface VisualAdmission { readonly document: JSONContent; readonly signature: string; readonly opaque: readonly string[] }
@@ -43,7 +44,7 @@ export function admitVisual(raw: string): VisualAdmission {
       const tableTags = ["table", "caption", "thead", "tbody", "tfoot", "tr", "td", "th", "colgroup", "col"];
       const tableElement = tableTags.includes(tag) || tag === "div";
       if (child.namespaceURI !== "http://www.w3.org/1999/xhtml") throw new Error("Foreign markup is HTML-only.");
-      if (child.attrs.some(a => /^(?:name|data-sc-.+|data-item-.+|on.+|srcdoc)$/iu.test(a.name) || (a.name === "id" && !tableElement)))
+      if (child.attrs.some(a => /^(?:on.+|srcdoc)$/iu.test(a.name) || (tag !== "a" && (/^(?:name|data-sc-.+|data-item-.+)$/iu.test(a.name) || (a.name === "id" && !tableElement)))))
         throw new Error("Identity, managed references or active attributes require HTML editing.");
       const identity = child.attrs.find(a => a.name === "id")?.value;
       if (identity !== undefined) {
@@ -87,6 +88,10 @@ export function admitVisual(raw: string): VisualAdmission {
       } else if (tag === "img" || (tag === "style" && !inline)) {
         const original = raw.slice(loc.startOffset, loc.endOffset); opaque.push(original);
         result.push({ type: tag === "style" ? "stylesheet" : inline ? "inlineImage" : "blockImage", attrs: { raw: original }, marks });
+      } else if (tag === "a" && inline) {
+        inspectRichLink(attrs.open);
+        result.push({ type: "richLink", attrs, marks,
+          content: children(child, loc.startTag.endOffset, loc.endTag!.startOffset, true, [], depth + 1) });
       } else if (tag === "br" && inline) result.push({ type: "hardBreak", attrs, marks });
       else if (tag === "span" && inline) {
         result.push({ type: "span", attrs, marks,
@@ -142,15 +147,16 @@ export function htmlSignature(raw: string): string {
   return JSON.stringify(parseFragment(raw).childNodes.map(describe));
 }
 
-export function protectedAttributes(raw: string, structuralTableEdit = false): string {
+export function protectedAttributes(raw: string, structuralTableEdit = false, ignoreLinks = false): string {
   const attributes: unknown[] = [];
   function visit(node: P.ChildNode, spanParents: unknown[] = []): void {
     if (!("tagName" in node)) return;
+    if (ignoreLinks && node.tagName === "a") { node.childNodes.forEach(child => visit(child, spanParents)); return; }
     const retained = node.attrs.filter(a => !(structuralTableEdit && ["td", "th"].includes(node.tagName) && ["colspan", "rowspan"].includes(a.name)));
     const descriptor = [node.tagName, retained.map(a => [a.name, a.value])];
     // Even an unstyled span is meaningful structure. Preserve nesting through commands.
     if (node.tagName === "span") attributes.push([descriptor, spanParents]);
-    else if (retained.length || (!structuralTableEdit && ["table", "caption", "thead", "tbody", "tfoot", "tr", "td", "th", "colgroup", "col"].includes(node.tagName))) attributes.push(descriptor);
+    else if (node.tagName === "a" || retained.length || (!structuralTableEdit && ["table", "caption", "thead", "tbody", "tfoot", "tr", "td", "th", "colgroup", "col"].includes(node.tagName))) attributes.push(descriptor);
     node.childNodes.forEach(child => visit(child, node.tagName === "span" ? [...spanParents, descriptor] : spanParents));
   }
   parseFragment(raw).childNodes.forEach(node => visit(node));
@@ -168,7 +174,7 @@ export function exportVisual(node: JSONContent): string {
   else if (["gap", "stylesheet", "inlineImage", "blockImage"].includes(node.type ?? "")) value = String(node.attrs?.raw ?? "");
   else {
     const tableTypes: Record<string, string> = { tableWrapper: "div", tableShell: "table", tableGrid: "tbody", tableRow: "tr", tableCell: "td", tableHeader: "th", caption: "caption", colgroup: "colgroup", col: "col" };
-    const tag = tableTypes[node.type ?? ""] ? String(node.attrs?.tag || tableTypes[node.type!]) : node.type === "heading" ? String(node.attrs?.tag ?? "h2") : node.type === "hardBreak" ? "br" : node.type === "span" ? "span" : "p";
+    const tag = tableTypes[node.type ?? ""] ? String(node.attrs?.tag || tableTypes[node.type!]) : node.type === "heading" ? String(node.attrs?.tag ?? "h2") : node.type === "hardBreak" ? "br" : node.type === "span" ? "span" : node.type === "richLink" ? "a" : "p";
     let open = String(node.attrs?.open || `<${tag}>`);
     if (node.type === "tableCell" || node.type === "tableHeader") {
       for (const key of ["colspan", "rowspan"]) {

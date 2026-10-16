@@ -26,10 +26,10 @@ export const htmlSourceTests: readonly IntegrationTest[] = [{
   async execute() {
     const directory = await mkdtemp(join(tmpdir(), "xm-html-save-"));
     const original = fixture();
-    const initialHtml = financeHtml + richTableHtml;
+    const initialHtml = financeHtml + richTableHtml + '<p><a href="/before" title="Retain"><strong>Link</strong></a></p>';
     const initial = { ...original, base: { ...original.base, fields: [{ ...original.base.fields[0], value: initialHtml }] } };
     let remote = initial.base; let writes = 0; let failComposition = false;
-    let snapshot = exportVisual(admitVisual(initialHtml).document).replace("Paying For Your Grenadier", "Updated heading").replace("PRODUCT2", "OFFER").replace(">Large</td>", ">Large XL</td>");
+    let snapshot = exportVisual(admitVisual(initialHtml).document).replace("Paying For Your Grenadier", "Updated heading").replace("PRODUCT2", "OFFER").replace(">Large</td>", ">Large XL</td>").replace('href="/before"', 'href="/after"');
     const provider = new ItemEditorProvider({ globalStorageUri: vscode.Uri.file(directory) } as vscode.ExtensionContext,
       { get: () => ({ id: "test", name: "Test", serverUrl: "https://example.test" }), getClientSecret: async () => "fixture-secret" } as unknown as ConnectionStore,
       { loadItem: async () => remote, updateEditorFields: async (_c: unknown, _s: unknown, input: UpdateAuthoringItemInput) => {

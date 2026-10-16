@@ -1,6 +1,6 @@
 # Rich Text editor development guide for agents
 
-Status: implementation guidance, reviewed 2026-10-16. **0.46.0 adds HTML source editing; 0.47.0 adds the guarded basic visual profile; 0.48.0 extends it to nested spans and safe alignment; 0.49.0 adds bounded table editing.** The latest published release, 0.45.0, is read-only. Experiments demonstrate bounded feasibility, not authorization to widen the implemented visual profile.
+Status: implementation guidance, reviewed 2026-10-16. **0.46.0 adds HTML source editing; 0.47.0 adds the guarded basic visual profile; 0.48.0 extends it to nested spans and safe alignment; 0.49.0 adds bounded table editing; 0.50.0 adds managed links.** The latest published release, 0.45.0, is read-only. Experiments demonstrate bounded feasibility, not authorization to widen the implemented visual profile.
 
 Read this document before changing Rich Text rendering, editing, serialization, mode switching or save integration. Follow repository `AGENTS.md` and the current user's scope. This guide does not authorize releases, remote pushes, Sitecore mutations or new features outside the assigned task.
 
@@ -13,6 +13,16 @@ Read this document before changing Rich Text rendering, editing, serialization, 
 5. Reuse the ordinary item editor's draft, undo, backup, conflict, journal and save flow. Do not create a separate Rich Text mutation path.
 
 ## Architectural decision and evidence
+
+### Managed links — 3C (0.50.0)
+
+Read the [link profile](../item-editor.md#links-0500). Anchors are recursive `richLink` inline nodes, rendered as inert spans without hrefs, raw attributes or navigation. `richTextLinks.ts` recognizes only the documented ID-based URI plus an optional already-matching `data-sc-id` mirror. A read-only Dev sample confirmed the URI without any mirror; mirror handling is a synthetic compatibility profile. The [archived Sitecore user guide](https://resources.doc.sitecore.com/en/legacy-docs/sitecore-experience-platform-8.0.pdf) documents the URI. Do not generalize these observations into support for arbitrary managed metadata, query parameters, DAM or media links.
+
+Commands capture the exact document and selection. Refuse stale sessions and partial-container/image/link selections. Creating a link must independently compare all non-link protected metadata before authorizing the exact resulting transaction; generic edits retain the full metadata guard. Retargeting changes only the anchor token. Removal retains unrelated styling/title in a span, or unwraps children while refusing conflicting repeated marks. Never use a reusable guard bypass. Matching href/identity changes must be atomic, including intentional removal of the mirror when switching to an ordinary URL. Do not expose arbitrary raw attributes in trusted DOM.
+
+Reuse the revision/request-pinned choice picker and SelectionIO. Rich Text Source is an HTML editor profile, not a selection root; the target root is explicitly `/sitecore/content`. Before Save, resolve newly introduced supported internal IDs on the pinned connection/locale and validate returned identities and paths. Do not revalidate unchanged references as a condition of unrelated text edits. Unknown profiles remain authoritative HTML and cannot be guessed into supported identities. Do not add automatic mutation retries or a second save path.
+
+Tests cover token updates, nested formatting and selection boundaries, stale sessions, content-root requests, failed target validation before writes, actual toolbar/picker interaction, inert DOM, mode/history restoration and provider save/backup. No live content was changed. Native IME/accessibility and live save acceptance remain unverified; 3D broader styling/media is separate work.
 
 ### Table increment — 3B (0.49.0)
 
@@ -57,7 +67,7 @@ The latest spike proved these capabilities in both engines:
 
 These are bounded results, not blanket support. The old spikes intentionally characterize failures of earlier configurations. Their failing behaviors must not be presented as unavoidable library limitations.
 
-The following remain unresolved: ambiguous ID joins and references, mixed-content wrappers/lists, repeated same-type marks, table structural edits beyond the bounded 0.49.0 profile, managed link target reconciliation, media editing, and production iframe/host integration. Images and stylesheet nodes were opaque in the spike; preservation is **not** proof of full visual editing.
+The following remain unresolved: ambiguous ID joins and references, mixed-content wrappers/lists, repeated same-type marks, table structural edits beyond the bounded 0.49.0 profile, arbitrary managed-link variants, media editing, and production iframe/host integration. Images and stylesheet nodes were opaque in the spike; preservation is **not** proof of full visual editing.
 
 ## Non-negotiable draft and fidelity rules
 

@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.50.0 — 2026-10-16
+
+- Add Visual **Link** creation, destination editing and removal, with safe URLs and a Sitecore content picker.
+- Update supported internal hrefs and matching identity metadata together while retaining nested formatting and unrelated attributes. Protect custom, conflicting, image and DAM link variants with HTML access.
+- Recheck new internal targets before Save; reject stale link forms and picker responses. Keep raw/no-op fidelity, native history, freeze, backup and ordinary save protections.
+- Broader styling/media, formatted paste and live save acceptance remain separate work. No new B31 exception.
+
 ## 0.49.1 — 2026-10-16
 
 - Add the missing **Table → Insert table (2 × 2)** action. Insert after the current block without replacing content or nesting tables, and focus the first cell so typing and row/column commands work immediately.

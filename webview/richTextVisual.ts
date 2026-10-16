@@ -6,6 +6,8 @@ import type { Transaction } from "@tiptap/pm/state";
 import { CellSelection } from "@tiptap/pm/tables";
 import { tableExtensions } from "./richTextTables";
 import { tableCommand } from "../src/editor/richTextTableCommands";
+import { beginRichLink, richLinkCommand, type RichLinkSession } from "../src/editor/richTextLinkCommands";
+import type { RichLinkDestination } from "../src/editor/richTextLinks";
 import { admitVisual, exportVisual, htmlSignature, protectedAttributes } from "../src/editor/richTextAdmission";
 
 interface Callbacks { change(raw: string): void; history(action: string): void; error(message: string): void }
@@ -21,6 +23,8 @@ const nodes = [
     renderHTML: ({ node }) => [/^h[1-6]$/u.test(node.attrs.tag) ? node.attrs.tag : "h2", alignment(node.attrs.align), 0] }),
   Node.create({ name: "span", group: "inline", inline: true, content: "inline*", defining: true, addAttributes: attributes,
     renderHTML: ({ node }) => ["span", alignment(node.attrs.align), 0] }),
+  Node.create({ name: "richLink", group: "inline", inline: true, content: "inline*", defining: true, addAttributes: attributes,
+    renderHTML: () => ["span", { class: "rt-link", "data-rich-link": "true" }, 0] }),
   Node.create({ name: "hardBreak", group: "inline", inline: true, selectable: false, addAttributes: attributes, renderHTML: () => ["br"] }),
   ...opaqueNames.map(name => Node.create({ name, group: name === "inlineImage" ? "inline" : "block", inline: name === "inlineImage", atom: true,
     selectable: false, draggable: false, addAttributes: () => ({ raw: { default: "" } }),
@@ -35,6 +39,9 @@ export function createVisual(element: HTMLElement, initial: string, callbacks: C
   if (initial && !admission.document.content?.some(node => ["paragraph", "heading", "tableShell", "tableWrapper"].includes(node.type ?? "")))
     throw new Error("No editable paragraph, heading or table is present. Use HTML.");
   let authorizedTableTransaction: Transaction | undefined;
+  let authorizedLinkTransaction: Transaction | undefined;
+  let authorizedLinkInventory: string | undefined;
+  let linkSession: RichLinkSession | undefined;
   let current = initial; let destroyed = false; let composing = false;
   const reject = (message: string): false => { callbacks.error(message); return false; };
   const guard = Extension.create({ name: "sourceGuard", priority: 1000,
@@ -45,7 +52,8 @@ export function createVisual(element: HTMLElement, initial: string, callbacks: C
           const raw = exportVisual(transaction.doc.toJSON() as JSONContent);
           const next = admitVisual(raw);
           const structural = transaction === authorizedTableTransaction;
-          if (JSON.stringify(next.opaque) !== JSON.stringify(admission.opaque) || protectedAttributes(raw, structural) !== protectedAttributes(current, structural))
+          const expected = transaction === authorizedLinkTransaction ? authorizedLinkInventory : protectedAttributes(current, structural);
+          if (JSON.stringify(next.opaque) !== JSON.stringify(admission.opaque) || protectedAttributes(raw, structural) !== expected)
             return reject("This operation would change protected metadata or opaque content. Use HTML.");
           return true;
         } catch (error) { return reject(error instanceof Error ? error.message : "This operation is outside the visual profile. Use HTML."); }
@@ -96,6 +104,22 @@ export function createVisual(element: HTMLElement, initial: string, callbacks: C
   }
   return {
     read: () => current,
+    beginLink() {
+      linkSession = beginRichLink(editor.state);
+      return { ...linkSession.info, existing: Boolean(linkSession.node) };
+    },
+    cancelLink() { linkSession = undefined; },
+    applyLink(destination: RichLinkDestination | "remove") {
+      if (!editor.isEditable || !linkSession || destroyed) throw new Error("Reopen Link before applying changes.");
+      try {
+        authorizedLinkTransaction = richLinkCommand(editor.state, linkSession, destination);
+        authorizedLinkInventory = protectedAttributes(exportVisual(authorizedLinkTransaction.doc.toJSON()));
+        const expected = authorizedLinkTransaction.doc;
+        editor.view.dispatch(authorizedLinkTransaction);
+        if (!editor.state.doc.eq(expected)) throw new Error("The link change was refused by the preservation guard. Use HTML.");
+        linkSession = undefined; editor.view.focus();
+      } finally { authorizedLinkTransaction = undefined; authorizedLinkInventory = undefined; }
+    },
     command(name: string) { if (editor.isEditable && ["bold", "italic", "underline"].includes(name)) {
       editor.view.focus(); toggleMark(editor.schema.marks[name])(editor.state, editor.view.dispatch);
     } else if (editor.isEditable) {
@@ -114,6 +138,7 @@ export function createVisual(element: HTMLElement, initial: string, callbacks: C
       editor.view.focus();
     },
     async freeze() {
+      linkSession = undefined;
       editor.view.dom.blur();
       const start = Date.now();
       while (composing || editor.view.composing) {

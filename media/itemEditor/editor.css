@@ -104,3 +104,7 @@ select { font:inherit; color:var(--vscode-input-foreground); background:var(--vs
 .richtext-table-tools { display: inline-block; padding: 4px; }
 .richtext-table-tools summary { cursor: pointer; }
 .richtext-table-tools[open] { border: 1px solid var(--vscode-panel-border); }
+.richtext-visual .rt-link { color: var(--vscode-textLink-foreground); text-decoration: underline; }
+.richtext-link-form { margin: 8px 0; padding: 10px; border: 1px solid var(--vscode-widget-border); }
+.richtext-link-form > input { min-width: 260px; max-width: 100%; }
+.richtext-link-form > button, .richtext-link-form > select { margin-right: 6px; }

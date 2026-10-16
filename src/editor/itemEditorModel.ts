@@ -1,4 +1,5 @@
 import { parseMultipleSelection, validateMultipleDraft } from "./multipleSelection";
+import { newRichLinkTargets } from "./richTextLinks";
 import { isMultipleSelection, selectionKind, selectionSourceReason } from "./singleSelection";
 import { createHash } from "node:crypto";
 import type { AuthoringItemDetails, AuthoringItemField } from "../sitecore/authoringClient";
@@ -186,7 +187,7 @@ export async function saveEditor(state: EditorState, io: EditorIO, update: (stat
   if (!changes.length) return state;
   const fresh = await io.read();
   checkConflicts(state, fresh, changes);
-  if (changes.some(change => fresh.fields.some(field => normalizeId(field.fieldId) === change.fieldId && (selectionKind(field) || isGeneralLink(field))))) {
+  if (changes.some(change => fresh.fields.some(field => normalizeId(field.fieldId) === change.fieldId && (selectionKind(field) || isGeneralLink(field) || (fieldKind(field) === "html" && newRichLinkTargets(field.value, change.value).length))))) {
     if (!io.validateSelections) throw new EditorValidationError("Selection source validation is unavailable.");
     await io.validateSelections(fresh, changes);
   }
