@@ -1,3 +1,4 @@
+import { withActionIcons } from "../ui/webviewActions";
 import * as vscode from "vscode";
 
 export class OperationDetailsPanel implements vscode.Disposable {
@@ -16,7 +17,7 @@ export class OperationDetailsPanel implements vscode.Disposable {
     const panel = this.getOrCreatePanel();
     panel.reveal(vscode.ViewColumn.Active);
     this.displayedOperationId = operationId;
-    panel.webview.html = render(panel.webview.cspSource);
+    panel.webview.html = withActionIcons(panel.webview, render(panel.webview.cspSource), this.extensionUri);
   }
 
   renderIfDisplayed(
@@ -26,7 +27,7 @@ export class OperationDetailsPanel implements vscode.Disposable {
     if (!this.panel || this.displayedOperationId !== operationId) {
       return;
     }
-    this.panel.webview.html = render(this.panel.webview.cspSource);
+    this.panel.webview.html = withActionIcons(this.panel.webview, render(this.panel.webview.cspSource), this.extensionUri);
   }
 
   private getOrCreatePanel(): vscode.WebviewPanel {

@@ -1,3 +1,4 @@
+import { withActionIcons } from "../ui/webviewActions";
 import * as vscode from "vscode";
 import type { ObservedReferenceKind } from "./referenceDiscovery";
 import {
@@ -210,7 +211,7 @@ export async function showPowerPublishScopeForm(
       finish(undefined);
       return;
     }
-    panel.webview.html = html;
+    panel.webview.html = withActionIcons(panel.webview, html, extensionUri);
   });
 }
 

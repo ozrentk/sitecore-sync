@@ -1,6 +1,6 @@
 # Rich Text editor development guide for agents
 
-Status: implementation guidance, reviewed 2026-10-16. **0.46.0 adds HTML source editing; 0.47.0 adds the guarded basic visual profile; 0.48.0 extends it to nested spans and safe alignment; 0.49.0 adds bounded table editing; 0.50.0 adds managed links; 0.51.0 adds bounded formatting/list/quote commands; 0.52.0 adds isolated styled editing.** The latest published release, 0.45.0, is read-only. Experiments demonstrate bounded feasibility, not authorization to widen the implemented visual profile.
+Status: implementation guidance, reviewed 2026-10-16. **0.46.0 adds HTML source editing; 0.47.0 adds the guarded basic visual profile; 0.48.0 extends it to nested spans and safe alignment; 0.49.0 adds bounded table editing; 0.50.0 adds managed links; 0.51.0 adds bounded formatting/list/quote commands; 0.52.0 adds isolated styled editing; 0.53.0 adds the compact toolbar and shared action icons.** The latest published release, 0.45.0, is read-only. Experiments demonstrate bounded feasibility, not authorization to widen the implemented visual profile.
 
 Read this document before changing Rich Text rendering, editing, serialization, mode switching or save integration. Follow repository `AGENTS.md` and the current user's scope. This guide does not authorize releases, remote pushes, Sitecore mutations or new features outside the assigned task.
 
@@ -11,6 +11,12 @@ Read this document before changing Rich Text rendering, editing, serialization, 
 3. Inspect Git status and create the appropriate Git Flow branch. Preserve unrelated changes.
 4. Identify the exact content shapes and edit operations your change admits. State the fidelity policy and tests before widening support.
 5. Reuse the ordinary item editor's draft, undo, backup, conflict, journal and save flow. Do not create a separate Rich Text mutation path.
+
+## Toolbar chrome (0.53.0)
+
+Keep action drawings and semantic labels in `src/ui/actionIcons.ts`, the browser decorator in `webview/actionIcons.ts`, and asset injection in `src/ui/webviewActions.ts`. All SVG paths are original static data; never accept SVG from content. Do not decorate choice labels. Shared assets must inherit each panel's existing CSP and minimal local roots; script-free operation panels receive static SVG only. Preserve content text and accessible names when replacing an existing glyph.
+
+The Rich Text grouped toolbar remains outside the opaque frame. Command status/reasons and execution still come from the guarded editor, not from icon state. Keep direct alignment pressed states, native select behavior, keyboard traversal, explicit Clear content vs Clear formatting, narrow layouts and unclipped menus covered by production UI tests. Icons must fail to visible text for formatting controls if their bundle is unavailable. No icon redesign authorizes new commands or relaxed fidelity checks.
 
 ## Architectural decision and evidence
 

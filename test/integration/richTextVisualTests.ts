@@ -172,7 +172,7 @@ export const richTextVisualTests: readonly IntegrationTest[] = [{
           document.querySelector('.tiptap').dispatchEvent(new KeyboardEvent('keydown',{key:'Tab',shiftKey:true,bubbles:true,cancelable:true}));await wait();
           assert(htmlSources.get('html').read()==='<ul><li><p>Alpha</p></li><li><p>Beta</p></li></ul>','Keyboard outdent preserves order');
           const block=document.querySelector('[aria-label="Text block type"]');block.value='h2';block.dispatchEvent(new Event('change'));await wait();
-          const alignment=document.querySelector('[aria-label="Text alignment"]');alignment.value='alignCenter';alignment.dispatchEvent(new Event('change'));await wait();
+          commandButton('alignCenter').click();await wait();assert(commandButton('alignCenter').getAttribute('aria-pressed')==='true','Direct alignment button active');
           const listDraft=htmlSources.get('html').read();assert(listDraft.includes('<h2 style="text-align: center;">Beta</h2>'),'Heading and alignment retain list structure');
           button('HTML').click();await wait();button('Visual').click();await wait();assert(htmlSources.get('html').read()===listDraft,'Command HTML roundtrip exact');
           show('<p>Alpha</p><p>Beta</p>',{id:'html'});await wait();assert(htmlSources.get('html').read()==='<p>Alpha</p><p>Beta</p>','Host undo restores pre-list source');
@@ -180,7 +180,7 @@ export const richTextVisualTests: readonly IntegrationTest[] = [{
           show('<p><strong>Bold</strong> text</p>');await wait();visualSources.get('html').restore({from:1,to:5});await wait();
           assert(commandButton('bold').getAttribute('aria-pressed')==='true','Bold state reflects selection');
           commandButton('clearFormatting').click();await wait();assert(htmlSources.get('html').read()==='<p>Bold text</p>','Clear removes only plain marks');
-          show('<p style="color:red">Text</p>');await wait();assert(document.querySelector('[aria-label="Text alignment"]').disabled,'Arbitrary CSS disables alignment');
+          show('<p style="color:red">Text</p>');await wait();assert(commandButton('alignCenter').getAttribute('aria-disabled')==='true','Arbitrary CSS disables alignment');
           assert(commandButton('indent').getAttribute('aria-disabled')==='true','Indent unavailable outside list');
           assert(commandButton('indent').title.includes('list items'),'Disabled command has reason');
           commandButton('blockquote').click();await wait();assert(htmlSources.get('html').read()==='<blockquote><p style="color:red">Text</p></blockquote>','Quote retains block styling');

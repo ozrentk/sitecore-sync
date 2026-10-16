@@ -58,13 +58,19 @@ export const richTextFrameTests: readonly IntegrationTest[] = [{
         });
       });
       const script = (uri: vscode.Uri) => `<script nonce="styled" src="${panel.webview.asWebviewUri(uri)}"></script>`;
-      panel.webview.html = `<!doctype html><meta http-equiv="Content-Security-Policy" content="default-src 'none'; frame-src data:; style-src 'nonce-styled'; script-src 'nonce-styled';"><h1 id="title"></h1><p id="identity"></p><p id="path"></p><p id="status"></p><button id="save">Save</button><button id="revert">Revert</button><button id="reconcile">Reconcile</button><button id="locale">Locale</button><main id="fields"></main>${script(vscode.Uri.joinPath(shared, "readOnlyField.js"))}${script(vscode.Uri.joinPath(media, "htmlSource.js"))}${script(vscode.Uri.joinPath(root, "richTextFrame.js"))}${script(vscode.Uri.joinPath(media, "editor.js"))}<script nonce="styled">
+      panel.webview.html = `<!doctype html><meta http-equiv="Content-Security-Policy" content="default-src 'none'; frame-src data:; style-src 'nonce-styled'; script-src 'nonce-styled';"><h1 id="title"></h1><p id="identity"></p><p id="path"></p><p id="status"></p><button id="save">Save</button><button id="revert">Revert</button><button id="reconcile">Reconcile</button><button id="locale">Locale</button><main id="fields"></main>${script(vscode.Uri.joinPath(shared, "readOnlyField.js"))}${script(vscode.Uri.joinPath(media, "htmlSource.js"))}${script(vscode.Uri.joinPath(root, "richTextFrame.js"))}${script(vscode.Uri.joinPath(media, "editor.js"))}${script(vscode.Uri.joinPath(root, "actionIcons.js"))}<script nonce="styled">
       (async()=>{
         const assert=(v,m)=>{if(!v)throw Error(m);};const wait=async predicate=>{for(let i=0;i<160;i++){if(predicate())return;await new Promise(r=>setTimeout(r,30));}throw Error('Expected editor state missing');};
         const raw='<p style="text-align:center">Keep</p>';const field={id:'html',label:'Text',name:'Text',section:'Data',type:'Rich Text',scope:'VERSIONED',source:'Exact locale',kind:'html',original:raw,input:raw,clear:false,raw};
         const state={type:'state',revision:4,busy:false,pending:false,item:{name:'Fixture',path:'/sitecore/content/Fixture'},target:{language:'en',version:1,itemId:'fixture'},connection:'Test',fields:[field],status:'Ready'};
         const sendState=data=>window.dispatchEvent(new MessageEvent('message',{data}));const button=name=>[...document.querySelectorAll('.html-source-actions button')].find(b=>b.textContent===name);
         sendState(state);button('Visual').click();await wait(()=>visualSources.get('html')?.status('h2').enabled);
+        await wait(()=>document.querySelector('[data-rich-command="bold"] svg'));
+        const bold=document.querySelector('[data-rich-command="bold"]');bold.focus();bold.dispatchEvent(new KeyboardEvent('keydown',{key:'ArrowRight',bubbles:true,cancelable:true}));
+        assert(document.activeElement.dataset.richCommand==='italic','Arrow navigation reaches adjacent icon command');
+        assert(bold.getAttribute('aria-label')==='Bold'&&bold.textContent==='Bold','Icon command retains accessible and text labels');
+        const alignment=document.querySelector('[data-rich-command="alignCenter"]');await wait(()=>alignment.getAttribute('aria-pressed')==='true');
+        assert(document.querySelector('.richtext-modes')&&button('Clear content'),'Modes and explicit clear are distinct');
         visualSources.get('html').command('h2');await wait(()=>htmlSources.get('html').read().startsWith('<h2'));
         assert(document.getElementById('title').textContent==='Fixture','Frame state must not replace host state');
         const frame=document.querySelector('.richtext-editing-frame');sendState({channel:'rich-text-frame',type:'state',item:{name:'Wrong'}});assert(document.getElementById('title').textContent==='Fixture','Frame namespace is not host state');

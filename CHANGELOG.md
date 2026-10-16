@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.53.0 — 2026-10-16
+
+- Replace the Rich Text text-button row with compact neutral icon groups, direct alignment controls, a heading selector and separate HTML/Visual/Preview controls. Keep Clear content distinct from Clear formatting.
+- Share locally bundled action icons across Browse/Compare, Item Details, editors, connection settings, publishing forms and operation details. Retain useful labels and existing native VS Code icon conventions.
+- Preserve command guards and draft/save behavior; add toolbar keyboard navigation, accessible names, busy indicators, responsive groups and bounded table menus.
+
 ## 0.52.0 — 2026-10-16
 
 - Apply supported inline and embedded CSS in an isolated Rich Text Visual frame, with bounded typography, colors, spacing, borders and dimensions. Keep unsupported CSS and all original source tokens intact.

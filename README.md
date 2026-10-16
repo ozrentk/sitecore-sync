@@ -2,6 +2,8 @@
 
 XM Cloud Sync is an early-stage VS Code extension for browsing, comparing and synchronizing Sitecore XM Cloud authoring content. Connect to an environment, inspect or edit supported item fields, compare environments or languages, and queue transfers and publishing with delivery evidence.
 
+The item editor provides HTML, guarded Visual editing and isolated Preview for supported Rich Text. Its compact toolbar groups formatting, alignment, lists, links and tables; common actions use consistent icons across panels. See the [editor support and keyboard guide](docs/item-editor.md).
+
 ## Requirements and installation
 
 Use VS Code **1.100.0 or newer** and an XM Cloud environment with a CM URL and environment automation-client credentials. [Prerequisites](docs/connections.md#prerequisites) explain connection setup.

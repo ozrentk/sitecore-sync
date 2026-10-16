@@ -132,7 +132,7 @@ export const htmlSourceTests: readonly IntegrationTest[] = [{
           };
           assert(await htmlSources.get("html").finishComposition()===expected+"FINISHLATE","Blur must await final input after synchronous compositionend");
           control.blur=nativeBlur;
-          button("Clear").click(); assert(htmlSources.get("html").read()==="" && control.dataset.explicitClear==="true","Explicit empty");
+          button("Clear content").click(); assert(htmlSources.get("html").read()==="" && control.dataset.explicitClear==="true","Explicit empty");
           api.postMessage({type:"html-test",ok:true,expected:expected+"FINISH"});
         })().catch(error=>api.postMessage({type:"html-test",error:String(error)}));
       `;

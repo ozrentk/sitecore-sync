@@ -3,7 +3,7 @@
 ### Bounded styled Rich Text surface (0.52.0)
 
 - The styled-editing portion of 3D now uses an isolated Visual frame and bounded stored CSS projection, preserving original HTML/CSS, host escape, native history and revision-pinned freeze/Save. Unsupported styling remains in source; no external resources execute or load.
-- Media/DAM selection, arbitrary mixed containers, formatted paste and universal website fidelity remain separate. B24/B25 still cover broader item-editor work. Native IME, assistive-technology and live-save acceptance are not claimed. B32 toolbar/application icons are tracked separately below.
+- Media/DAM selection, arbitrary mixed containers, formatted paste and universal website fidelity remain separate. B24/B25 still cover broader item-editor work. Native IME, assistive-technology and live-save acceptance are not claimed. B32 toolbar/application icons are completed in 0.53.0 below.
 
 ### Rich Text command completeness (0.51.0)
 
@@ -86,7 +86,7 @@ Also recorded: B22–B29 cover environment database/IAR diagnostics, finishing P
 
 ## Editors and publishing integration
 
-- [ ] **B32 — Consistent action icons across the application.** Audit buttons in Browse/Compare, item editors, connection/settings panels and other webviews, including Save, Revert, Preview and Clear. Define a shared action-to-icon mapping so the same action uses the same icon everywhere. This is future UX work, not a requirement to make all buttons icon-only: retain text where it improves clarity, provide accessible names and tooltips for icon-only actions, preserve keyboard/focus behavior, and verify theme/high-contrast legibility.
+- [x] **B32 — Consistent action icons across the application (0.53.0).** Audit buttons in Browse/Compare, item editors, connection/settings panels and other webviews, including Save, Revert, Preview and Clear. Define a shared action-to-icon mapping so the same action uses the same icon everywhere. Delivered with a compact grouped Rich Text toolbar; this does not make all buttons icon-only: retain text where it improves clarity, provide accessible names and tooltips for icon-only actions, preserve keyboard/focus behavior, and verify theme/high-contrast legibility.
 
 - **Stage A delivery (0.36.0):** B24/B25 now have an ordinary-item Edit… entry, pinned custom-editor tabs, the seven basic field types, Save/Revert, conflict checks, readback, local journals and native dirty/backup handling. B24/B25 remain open for Stage B link/relation/list controls and B26 verified fallback-source editing. Rich Text remains deferred pending both visual and HTML source modes. B27 page tree and B29 editor publishing are unchanged. Automated tests use synthetic content; live Sitecore save acceptance remains to be performed.
 - [ ] **B24 — Component/item editor: first development step.** Build an editor screen for ordinary items and component datasource items, with locale selection. Initially support non-document fields in the Simple Field Types, Link and Relation Field Types, and Multi-Value and List Field Types categories. Exclude file/image/media editing, Media and Complex Field Types, and Developer and System Field Types for now. Define the exact Sitecore field-type allowlist and controls during planning; excluded fields must not be accidentally changed on save.
