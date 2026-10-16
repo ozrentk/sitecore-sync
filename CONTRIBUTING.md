@@ -58,6 +58,8 @@ Installation and updates are described in [releases](docs/releases.md#install-or
 
 ## Source layout
 
+Rich Text contributors and agents must first read the [Rich Text editor development guide](docs/development/rich-text-editor.md), which records the implementation direction, preservation rules, unresolved cases and required tests.
+
 The comparison webview is separated into `media/comparison/comparison.html`, `comparison.css`, and `comparison.js`. The bottom-panel field view lives in `media/fieldDiff`, with its provider in `src/comparison/fieldDiffView.ts`. Extension-host lifecycle and state messaging remain in `src/comparison/comparisonPanel.ts`.
 
 The manifest is `package.json`, extension entry point is `src/extension.ts`, authenticated clients are under `src/sitecore/`, unit tests under `test/unit/`, and extension-host tests under `test/integration/`. Generated `out/`, `dist/`, `.test-out/`, `.vscode-test/` and dependency directories are not source changes.

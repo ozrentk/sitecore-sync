@@ -4,6 +4,8 @@
 
 These reports contain experiments, dated observations, unresolved questions and proposed work. They are not user guides or promises of shipped functionality. Research scripts require a source checkout and run from the repository root; they are not shipped in the VSIX.
 
+For Rich Text implementation instructions, start with the [agent development guide](../development/rich-text-editor.md). The reports below remain dated evidence.
+
 - [Fallback investigation](fallback-spike.md)
 - [Tiptap/CodeMirror compatibility](richtext-compatibility-spike.md)
 - [Direct ProseMirror comparison](prosemirror-compatibility-spike.md)

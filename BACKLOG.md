@@ -166,6 +166,8 @@ Use this file as the single backlog inventory. Add newly agreed work here, prese
 
 ### Rich Text editing compatibility spike (2026-10-16)
 
+- Current implementation guidance: [Rich Text editor development guide](docs/development/rich-text-editor.md). The [custom-adapter follow-up](docs/research/custom-richtext-compatibility-spike.md) closes tested structural gaps in both Tiptap and direct ProseMirror; Tiptap remains preferred. Rich Text writes remain unimplemented, with identity/command policies and production integration still required.
+
 - [Evidence and proposed implementation split](docs/research/richtext-compatibility-spike.md): conditional go for MIT Tiptap + CodeMirror with exact raw HTML drafts and HTML-only fallback; no-go for unrestricted stock HTML round-tripping.
 - Four read-only live Dev samples and 14 synthetic fixtures expose custom-attribute loss, table/CSS changes, link defaults, strict-CSP alignment loss and default source newline normalization. No content writes or editing capability delivered.
 - Implement draft/history/freeze/backup integration and the compatibility gate before enabling visual editing; Sitecore references, DAM, tables and arbitrary CSS need separate preservation boundaries.
