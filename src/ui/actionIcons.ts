@@ -27,6 +27,14 @@ export const actionPaths = {
   link: 'M6 10 10 6 M5 8 3 10a2 2 0 0 0 3 3l2-2 M8 5l2-2a2 2 0 0 1 3 3l-2 2',
   table: 'M2 2h12v12H2Z M2 6h12 M2 10h12 M6 2v12 M10 2v12',
   html: 'M5 3 1 8l4 5 M11 3l4 5-4 5', check: 'M2 8l4 4L14 3',
+  strike: 'M4 3h8 M8 3v10 M4 13h8 M2 8h12',
+  subscript: 'M2 3l6 8 M8 3l-6 8 M11 10h3v2l-3 2h3',
+  superscript: 'M2 5l6 8 M8 5l-6 8 M11 1h3v2l-3 2h3',
+  horizontalRule: 'M2 8h12',
+  find: 'M10 10l4 4 M11 6a5 5 0 1 1-10 0 5 5 0 0 1 10 0',
+  replace: 'M2 4h10l-3-3 M12 4l-3 3 M14 12H4l3 3 M4 12l3-3',
+  undo: 'M6 3 2 7l4 4 M2 7h7a4 4 0 0 1 4 4v2',
+  redo: 'M10 3l4 4-4 4 M14 7H7a4 4 0 0 0-4 4v2',
 } as const;
 export type ActionIcon = keyof typeof actionPaths;
 export function isActionIcon(value: string): value is ActionIcon { return Object.hasOwn(actionPaths, value); }

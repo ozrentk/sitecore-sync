@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.54.0 — 2026-10-17
+
+- Add Strikethrough, Subscript, Superscript and top-level Horizontal rule to guarded Visual editing, including preserved import/export and disabled reasons.
+- Separate formatting and document actions into two toolbar rows, with grouped wrapping, explicit native Undo/Redo and accessible icons.
+- Add field-scoped inline Find/Replace beneath the toolbar in Visual and HTML modes: literal matching, Match case, previous/next, counts, highlights, Replace and atomic Replace all. Keep replacement beneath Find; support Ctrl/Cmd+F/H, Enter/Shift+Enter and Escape.
+- Keep search decorations out of saved HTML and history. Replacements use the existing native document history and retain raw HTML newline conventions. Refuse Visual replacements across link/wrapper boundaries or protected metadata loss before changing any match.
+
 ## 0.53.0 — 2026-10-16
 
 - Replace the Rich Text text-button row with compact neutral icon groups, direct alignment controls, a heading selector and separate HTML/Visual/Preview controls. Keep Clear content distinct from Clear formatting.

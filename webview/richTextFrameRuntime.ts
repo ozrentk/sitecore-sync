@@ -1,3 +1,4 @@
+import { validSearchInput, validReplaceInput } from "../src/editor/richTextSearchInput";
 import { createVisual } from "./richTextVisual";
 import { isolatedStyles } from "./richTextStyles";
 import { richCommands } from "../src/editor/richTextCommands";
@@ -45,6 +46,10 @@ window.addEventListener("message", event => {
             if (value !== "remove" && (!value || !((value.kind === "url" && typeof value.href === "string" && value.href.length <= 8192) || (value.kind === "sitecore" && typeof value.itemId === "string" && value.itemId.length <= 38)))) throw new Error("Invalid link destination.");
             editor.applyLink(value as RichLinkDestination | "remove"); break;
           }
+          case "clearSearch": editor.clearSearch(); break;
+          case "highlightSearch": if (!validSearchInput(message.value)) throw new Error("Invalid search."); result = editor.highlightSearch(message.value); break;
+          case "search": if (!validSearchInput(message.value)) throw new Error("Invalid search."); result = editor.search(message.value); break;
+          case "replaceSearch": if (!validReplaceInput(message.value)) throw new Error("Invalid replacement."); result = editor.replaceSearch(message.value); break;
           case "focus": editor.focus(); break;
           case "theme": {
             const value = message.value;
@@ -71,6 +76,7 @@ window.addEventListener("message", event => {
 document.addEventListener("click", event => { if ((event.target as Element).closest?.("a")) event.preventDefault(); }, true);
 document.addEventListener("submit", event => event.preventDefault(), true);
 document.addEventListener("keydown", event => {
+  if ((event.ctrlKey || event.metaKey) && ["f", "h"].includes(event.key.toLowerCase())) { event.preventDefault(); send({ type: "find", replace: event.key.toLowerCase() === "h" }); }
   if (event.key === "Escape") { event.preventDefault(); send({ type: "escape" }); }
   if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "s") { event.preventDefault(); send({ type: "save" }); }
 });

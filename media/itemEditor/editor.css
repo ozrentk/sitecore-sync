@@ -140,3 +140,21 @@ select { font:inherit; color:var(--vscode-input-foreground); background:var(--vs
 .richtext-table-menu button { display:block; width:100%; text-align:left; }
 @media (max-width:500px) { body { padding:12px; } .field-section > .field { margin-left:0; } .richtext-tool-group { padding:0 3px; } .richtext-table-menu { right:auto; left:0; } }
 @media (forced-colors:active) { .richtext-tools button[aria-pressed=true], .richtext-modes button[aria-pressed=true] { border:1px solid Highlight; } .richtext-tools button[aria-disabled=true] { color:GrayText; opacity:1; } }
+
+/* Keep formatting and document actions on intentionally separate rows. */
+.richtext-tools { flex-direction:column; align-items:stretch; }
+.richtext-tool-row { display:flex; flex-wrap:wrap; gap:4px 0; align-items:center; }
+.richtext-tool-row[hidden], .richtext-tool-group[hidden], .richtext-search[hidden], .richtext-search > div[hidden], .richtext-source-wrap[hidden] { display:none; }
+.richtext-tool-row + .richtext-tool-row { border-top:1px solid var(--vscode-panel-border); padding-top:4px; }
+.richtext-search { padding:6px; border:1px solid var(--vscode-panel-border); }
+.richtext-search > div { display:flex; align-items:center; gap:5px; flex-wrap:wrap; }
+.richtext-search > div + div { margin-top:5px; }
+.richtext-search input[type=text] { width:220px; max-width:100%; }
+.richtext-search label { display:flex; align-items:center; white-space:nowrap; }
+.richtext-source-wrap { position:relative; }
+.richtext-source-wrap .html-source, .richtext-search-mirror { font:13px/20px var(--vscode-editor-font-family, monospace); padding:8px; box-sizing:border-box; tab-size:4; }
+.richtext-search-mirror { position:absolute; inset:0; margin:0; overflow:hidden; white-space:pre; color:transparent; pointer-events:none; border:1px solid transparent; }
+.richtext-search-mirror mark { background:var(--vscode-editor-findMatchHighlightBackground, #a8880044); color:transparent; }
+.richtext-search-mirror mark.current { background:var(--vscode-editor-findMatchBackground, #a8880088); outline:1px solid var(--vscode-editor-findMatchBorder, #aa8800); }
+.richtext-source-wrap.searching .html-source { position:relative; background:transparent; }
+@media(forced-colors:active) { .richtext-search-mirror mark { outline:1px solid Highlight; } .richtext-search-mirror mark.current { outline-width:3px; } }

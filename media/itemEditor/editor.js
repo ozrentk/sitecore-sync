@@ -236,26 +236,30 @@ function renderHtmlSource(row, field) {
   const visualArea = document.createElement("div"); visualArea.className = "richtext-visual";
   const tools = document.createElement("div"); tools.className = "richtext-tools";
   tools.setAttribute("role", "toolbar"); tools.setAttribute("aria-label", "Text formatting");
-  const group = label => { const node = document.createElement("div"); node.className = "richtext-tool-group"; node.setAttribute("role", "group"); node.setAttribute("aria-label", label); tools.append(node); return node; };
+  const formatRow = document.createElement("div"); formatRow.className = "richtext-tool-row";
+  const actionRow = document.createElement("div"); actionRow.className = "richtext-tool-row"; tools.append(formatRow, actionRow);
+  const group = (label, parent = formatRow) => { const node = document.createElement("div"); node.className = "richtext-tool-group"; node.setAttribute("role", "group"); node.setAttribute("aria-label", label); parent.append(node); return node; };
   const blocks = group("Block style");
   const marks = group("Text style");
   const alignments = group("Alignment");
   const lists = group("Lists");
   const extras = group("Quote and formatting");
-  const insert = group("Insert");
+  const historyGroup = group("History", actionRow);
+  const searchGroup = group("Find and replace", actionRow);
+  const insert = group("Insert", actionRow);
   const blockType = document.createElement("select"); blockType.setAttribute("aria-label", "Text block type");
   for (const [value, text] of [["", "Mixed blocks"], ["paragraph", "Paragraph"], ...[1,2,3,4,5,6].map(n=>[`h${n}`, `Heading ${n}`])]) {
     const option = document.createElement("option"); option.value = value; option.textContent = text; option.disabled = !value; blockType.append(option);
   }
   blockType.addEventListener("change", () => { if (!blocked && blockType.value) visualSources.get(field.id)?.command(blockType.value); }); blocks.append(blockType);
-  for (const [name, label] of [["bold", "Bold"], ["italic", "Italic"], ["underline", "Underline"], ["alignLeft", "Align left"], ["alignCenter", "Align center"], ["alignRight", "Align right"], ["alignJustify", "Justify"], ["bulletList", "Bullets"], ["orderedList", "Numbers"], ["indent", "Indent"], ["outdent", "Outdent"], ["blockquote", "Quote"], ["clearFormatting", "Clear formatting"]]) {
+  for (const [name, label] of [["bold", "Bold"], ["italic", "Italic"], ["underline", "Underline"], ["strike", "Strikethrough"], ["subscript", "Subscript"], ["superscript", "Superscript"], ["horizontalRule", "Horizontal rule"], ["alignLeft", "Align left"], ["alignCenter", "Align center"], ["alignRight", "Align right"], ["alignJustify", "Justify"], ["bulletList", "Bullets"], ["orderedList", "Numbers"], ["indent", "Indent"], ["outdent", "Outdent"], ["blockquote", "Quote"], ["clearFormatting", "Clear formatting"]]) {
     const button = document.createElement("button"); button.type = "button"; button.textContent = label; button.disabled = blocked;
     button.className = "richtext-icon-button"; button.setAttribute("aria-label", label); button.title = label;
     const text = document.createElement("span"); text.className = "action-label"; text.textContent = label; button.replaceChildren(text);
     button.dataset.richCommand = name;
     button.addEventListener("mousedown", event => event.preventDefault());
     button.addEventListener("click", () => { if (blocked) return; if (button.getAttribute("aria-disabled") === "true") visualError.textContent = button.title; else visualSources.get(field.id)?.command(name); });
-    (name.startsWith("align") ? alignments : ["bold", "italic", "underline"].includes(name) ? marks : ["bulletList", "orderedList", "indent", "outdent"].includes(name) ? lists : extras).append(button);
+    (name === "horizontalRule" ? insert : name.startsWith("align") ? alignments : ["bold", "italic", "underline", "strike", "subscript", "superscript"].includes(name) ? marks : ["bulletList", "orderedList", "indent", "outdent"].includes(name) ? lists : extras).append(button);
   }
   const tableMenu = document.createElement("details"); tableMenu.className = "richtext-table-tools";
   const tableTitle = document.createElement("summary"); tableTitle.textContent = "Table"; tableMenu.append(tableTitle);
@@ -319,7 +323,7 @@ function renderHtmlSource(row, field) {
   });
   insert.prepend(linkButton);
   // A single toolbar tab stop; select arrows retain their native behavior.
-  const toolStops = () => [...tools.querySelectorAll("button, select, summary")].filter(node => !node.disabled && (!node.closest(".richtext-table-menu") || tableMenu.open));
+  const toolStops = () => [...tools.querySelectorAll("button, select, summary")].filter(node => !node.disabled && !node.closest("[hidden]") && (!node.closest(".richtext-table-menu") || tableMenu.open));
   const setToolStop = node => { for (const stop of toolStops()) stop.tabIndex = stop === node ? 0 : -1; };
   setToolStop(blockType);
   tools.addEventListener("focusin", event => { if (toolStops().includes(event.target)) setToolStop(event.target); });
@@ -355,8 +359,8 @@ function renderHtmlSource(row, field) {
         if (button.closest(".richtext-table-tools") && !tableMenu.open) continue;
         const state = editor.status(button.dataset.richCommand);
         button.setAttribute("aria-disabled", String(blocked || !state.enabled));
-        if (["bold","italic","underline","bulletList","orderedList","blockquote","alignLeft","alignCenter","alignRight","alignJustify"].includes(button.dataset.richCommand)) button.setAttribute("aria-pressed",String(state.active));
-        button.title = state.reason || (button.dataset.richCommand === "clearFormatting" ? "Remove bold, italic and underline only; retain links, wrappers and CSS." : button.textContent);
+        if (["bold","italic","underline","strike","subscript","superscript","bulletList","orderedList","blockquote","alignLeft","alignCenter","alignRight","alignJustify"].includes(button.dataset.richCommand)) button.setAttribute("aria-pressed",String(state.active));
+        button.title = state.reason || (button.dataset.richCommand === "clearFormatting" ? "Remove plain text marks; retain links, wrappers and CSS." : button.textContent);
       }
       for (const select of [blockType]) {
         let selected = ""; let reason = ""; let available = false;
@@ -390,8 +394,94 @@ function renderHtmlSource(row, field) {
     history: action => { if (!blocked) send(action); },
   });
   htmlSources.set(field.id, source);
+  const searchBar = document.createElement("div"); searchBar.className = "richtext-search"; searchBar.hidden = true;
+  const findRow = document.createElement("div"); const replaceRow = document.createElement("div"); replaceRow.hidden = true;
+  const query = document.createElement("input"); query.type = "text"; query.maxLength = 1024; query.placeholder = "Find in this field"; query.setAttribute("aria-label", "Find in this field");
+  const replacement = document.createElement("input"); replacement.type = "text"; replacement.maxLength = 8192; replacement.placeholder = "Replace with"; replacement.setAttribute("aria-label", "Replace with");
+  const matchCase = document.createElement("input"); matchCase.type = "checkbox";
+  const caseLabel = document.createElement("label"); caseLabel.append(matchCase, "Match case");
+  const searchStatus = document.createElement("span"); searchStatus.setAttribute("role", "status");
+  const mirror = document.createElement("pre"); mirror.className = "richtext-search-mirror"; mirror.setAttribute("aria-hidden", "true"); mirror.hidden = true;
+  const sourceWrap = document.createElement("div"); sourceWrap.className = "richtext-source-wrap"; sourceWrap.append(mirror, control);
+  let searchEpoch = 0; let searchBusy = false; let searchTimer;
+  const input = direction => ({ query: query.value, matchCase: matchCase.checked, direction });
+  const mirrorScroll = () => { mirror.scrollTop = control.scrollTop; mirror.scrollLeft = control.scrollLeft; };
+  control.addEventListener("scroll", mirrorScroll);
+  const paintSource = matches => {
+    mirror.replaceChildren(); let offset = 0; const raw = source.read();
+    for (const found of matches) {
+      mirror.append(document.createTextNode(htmlSourceTools.normalize(raw.slice(offset, found.from))));
+      const mark = document.createElement("mark"); mark.textContent = htmlSourceTools.normalize(raw.slice(found.from, found.to));
+      if (htmlSourceTools.normalize(raw.slice(0, found.from)).length === control.selectionStart && htmlSourceTools.normalize(raw.slice(0, found.to)).length === control.selectionEnd) mark.className = "current";
+      mirror.append(mark); offset = found.to;
+    }
+    mirror.append(document.createTextNode(htmlSourceTools.normalize(raw.slice(offset)) + "\n"));
+    mirror.hidden = searchBar.hidden || control.hidden; sourceWrap.classList.toggle("searching", !mirror.hidden); mirrorScroll();
+  };
+  const closeSearch = (focus = true) => {
+    searchEpoch++; clearTimeout(searchTimer); searchBar.hidden = true; mirror.hidden = true; sourceWrap.classList.remove("searching");
+    visualSources.get(field.id)?.clearSearch();
+    if (focus) { const editor = visualSources.get(field.id); if (editor) editor.focus(); else control.focus(); }
+  };
+  const runSearch = async (direction = "next", operation = "find") => {
+    if (blocked || searchBusy || searchBar.hidden || !row.isConnected) return;
+    const epoch = ++searchEpoch; const editor = visualSources.get(field.id); searchBusy = true;
+    try {
+      if (!query.value) { editor?.clearSearch(); paintSource([]); searchStatus.textContent = ""; return; }
+      const request = input(direction); let result;
+      if (editor) {
+        result = operation === "refresh" ? await editor.highlightSearch(request) : operation === "find" ? await editor.search(request) : await editor.replaceSearch({ ...request, replacement: replacement.value, all: operation === "all" });
+      } else {
+        await source.finishComposition();
+        if (epoch !== searchEpoch || blocked || !row.isConnected) return;
+        let raw = source.read(); let matches = richTextSearchTools.literalMatches(raw, request);
+        let from = htmlSourceTools.offset(raw, control.selectionStart); let to = htmlSourceTools.offset(raw, control.selectionEnd); let replaced = 0;
+        if (operation === "one" || operation === "all") {
+          const selected = operation === "all" ? matches : matches.filter(match => match.from === from && match.to === to);
+          if (!selected.length && operation === "one") throw new Error("Find a match before replacing it. The selection may have changed.");
+          for (const match of [...selected].reverse()) raw = raw.slice(0, match.from) + replacement.value + raw.slice(match.to);
+          if (raw.length > htmlSourceTools.limit) throw new Error("Replacement exceeds the HTML size limit.");
+          matches = richTextSearchTools.literalMatches(raw, request); // Validate the entire result before any draft change.
+          source.replace(raw); replaced = selected.length; from = to = 0;
+        }
+        let index = matches.findIndex(match => match.from === from && match.to === to);
+        if (operation === "find" && matches.length) {
+          index = direction === "previous" ? matches.reduce((found, match, i) => match.to <= from ? i : found, -1) : matches.findIndex(match => match.from >= to);
+          if (index < 0) index = direction === "previous" ? matches.length - 1 : 0;
+          const found = matches[index]; control.setSelectionRange(htmlSourceTools.normalize(raw.slice(0, found.from)).length, htmlSourceTools.normalize(raw.slice(0, found.to)).length);
+          const line = htmlSourceTools.normalize(raw.slice(0, found.from)).split("\n").length - 1;
+          control.scrollTop = Math.max(0, line * parseFloat(getComputedStyle(control).lineHeight) - control.clientHeight / 2);
+          const column = htmlSourceTools.normalize(raw.slice(0, found.from)).split("\n").at(-1).length;
+          control.scrollLeft = Math.max(0, column * parseFloat(getComputedStyle(control).fontSize) * .61 - control.clientWidth / 2);
+        }
+        paintSource(matches); result = { count: matches.length, index: index + 1, replaced };
+      }
+      if (epoch === searchEpoch && row.isConnected && visualSources.get(field.id) === editor) searchStatus.textContent = `${result.index} of ${result.count}${result.replaced ? ` · ${result.replaced} replaced` : ""}`;
+    } catch (failure) { if (epoch === searchEpoch && row.isConnected) { searchStatus.textContent = failure.message; editor?.clearSearch(); paintSource([]); } }
+    finally { searchBusy = false; }
+  };
+  const refreshSearch = () => { clearTimeout(searchTimer); if (!searchBar.hidden) searchTimer = setTimeout(() => { if (searchBusy) refreshSearch(); else void runSearch("next", "refresh"); }, 100); };
+  const openSearch = replace => { if (blocked || htmlModes.get(field.id) === "preview") return; searchBar.hidden = false; replaceRow.hidden = !replace; query.focus(); query.select(); void runSearch("next", "refresh"); };
+  const actionButton = (parent, label, action, icon) => { const button = document.createElement("button"); button.type = "button"; button.textContent = label; button.title = label; button.setAttribute("aria-label", label); if (icon) button.dataset.actionIcon = icon; button.disabled = blocked; button.addEventListener("mousedown", event => event.preventDefault()); button.addEventListener("click", () => { if (!blocked) action(); }); parent.append(button); return button; };
+  for (const action of ["undo", "redo"]) actionButton(historyGroup, action === "undo" ? "Undo" : "Redo", async () => {
+    const editor = visualSources.get(field.id);
+    try { await editor?.freeze(); await source.finishComposition(); if (!blocked && row.isConnected && editor === visualSources.get(field.id)) { editor?.editable(true); send(action); } }
+    catch (failure) { visualError.textContent = failure.message; if (editor === visualSources.get(field.id)) editor?.editable(!blocked); }
+  }, action);
+  actionButton(searchGroup, "Find", () => openSearch(false), "find"); actionButton(searchGroup, "Replace", () => openSearch(true), "replace");
+  findRow.append(query); actionButton(findRow, "Previous match", () => void runSearch("previous")); actionButton(findRow, "Next match", () => void runSearch());
+  actionButton(findRow, "Show replacement", () => { replaceRow.hidden = !replaceRow.hidden; if (!replaceRow.hidden) replacement.focus(); }, "replace");
+  findRow.append(caseLabel, searchStatus); actionButton(findRow, "Close search", () => closeSearch(), "cancel");
+  replaceRow.append(replacement); actionButton(replaceRow, "Replace", () => void runSearch("next", "one"), "replace"); actionButton(replaceRow, "Replace all", () => void runSearch("next", "all"), "replace");
+  searchBar.append(findRow, replaceRow);
+  for (const node of [query, matchCase]) node.addEventListener("input", refreshSearch);
+  control.addEventListener("input", refreshSearch);
+  control.addEventListener("keydown", event => { if ((event.ctrlKey || event.metaKey) && !event.altKey && ["f", "h"].includes(event.key.toLowerCase())) { event.preventDefault(); openSearch(event.key.toLowerCase() === "h"); } });
+  searchBar.addEventListener("keydown", event => { if (event.key === "Escape") { event.preventDefault(); closeSearch(); } else if (event.key === "Enter") { event.preventDefault(); void runSearch(event.shiftKey ? "previous" : "next"); } });
+  row.addEventListener("close-link", () => closeSearch(false), true);
   let modeRequest = 0;
   const mode = value => {
+    closeSearch(false);
     linkRequest++;
     closeLink();
     visualError.textContent = "";
@@ -399,17 +489,19 @@ function renderHtmlSource(row, field) {
     if (value === "visual") {
       try {
         const editor = (globalThis.createRichTextFrame || createRichTextVisual)(visualArea, source.read(), {
-          change: raw => source.replace(raw), history: action => { if (!blocked) send(action); }, error: message => { visualError.textContent = message; }, selection: refreshTools,
+          change: raw => { source.replace(raw); refreshSearch(); }, find: openSearch, history: action => { if (!blocked) send(action); }, error: message => { visualError.textContent = message; }, selection: refreshTools,
           escape: () => html.focus(), save: () => { if (!blocked) document.getElementById("save").click(); },
         });
         editor.editable(!blocked); visualSources.set(field.id, editor); error.textContent = "";
       } catch (failure) { value = "html"; visualError.textContent = `Visual unavailable: ${failure.message}`; }
     }
     source.read(); htmlModes.set(field.id, value);
-    visualArea.hidden = tools.hidden = hint.hidden = value !== "visual";
-    control.hidden = value !== "html"; display.hidden = value !== "preview";
+    visualArea.hidden = formatRow.hidden = insert.hidden = hint.hidden = value !== "visual";
+    tools.hidden = value === "preview";
+    sourceWrap.hidden = control.hidden = value !== "html"; display.hidden = value !== "preview";
     html.setAttribute("aria-pressed", String(value === "html")); preview.setAttribute("aria-pressed", String(value === "preview")); visual.setAttribute("aria-pressed", String(value === "visual"));
     display.replaceChildren();
+    setToolStop(toolStops()[0]);
     refreshTools();
     if (value === "preview") {
       const raw = source.read();
@@ -437,7 +529,7 @@ function renderHtmlSource(row, field) {
   for (const button of [html, visual, preview, clear]) button.disabled = blocked;
   control.disabled = blocked;
   const modes = document.createElement("div"); modes.className = "richtext-modes"; modes.setAttribute("role", "group"); modes.setAttribute("aria-label", "Rich Text mode");
-  modes.append(html, visual, preview); actions.append(modes, clear); row.append(actions, tools, linkForm, hint, control, visualArea, display, error, visualError);
+  modes.append(html, visual, preview); actions.append(modes, clear); row.append(actions, tools, searchBar, linkForm, hint, sourceWrap, visualArea, display, error, visualError);
   mode(htmlModes.get(field.id) || "html");
 }
 function selectionLabel(field) {

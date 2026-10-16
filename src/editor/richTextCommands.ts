@@ -1,3 +1,4 @@
+import { richMarkNames } from "./richTextMarks";
 import type { Node as PMNode } from "@tiptap/pm/model";
 import { EditorState, TextSelection, AllSelection, Selection, type Command, type Transaction } from "@tiptap/pm/state";
 import { toggleMark, lift } from "@tiptap/pm/commands";
@@ -6,8 +7,8 @@ import { parseFragment } from "parse5";
 import { admitVisual, exportVisual, protectedAttributes, safeTextAlignment } from "./richTextAdmission";
 import type { JSONContent } from "@tiptap/core";
 
-export const richCommands = ["paragraph", "h1", "h2", "h3", "h4", "h5", "h6", "bold", "italic", "underline", "bulletList", "orderedList", "indent", "outdent", "blockquote", "alignLeft", "alignCenter", "alignRight", "alignJustify", "clearFormatting", "splitListItem"] as const;
-const marks = ["bold", "italic", "underline"];
+export const richCommands = ["paragraph", "h1", "h2", "h3", "h4", "h5", "h6", "bold", "italic", "underline", "strike", "subscript", "superscript", "horizontalRule", "bulletList", "orderedList", "indent", "outdent", "blockquote", "alignLeft", "alignCenter", "alignRight", "alignJustify", "clearFormatting", "splitListItem"] as const;
+const marks = richMarkNames;
 const listNames = ["bulletList", "orderedList"];
 function ancestor(state: EditorState, names: readonly string[]): { node: PMNode; pos: number; depth: number } | undefined {
   for (let depth = state.selection.$from.depth; depth > 0; depth--) {
@@ -81,7 +82,12 @@ export function richTextCommand(state: EditorState, name: string, availabilityOn
   if (!(state.selection instanceof TextSelection)) throw new Error("Select text or place the cursor in a text block first.");
   const tr = state.tr;
   let structural = false; let semanticBlockEdit = false;
-  if (name === "paragraph" || /^h[1-6]$/u.test(name) || name.startsWith("align")) {
+  if (name === "horizontalRule") {
+    if (!state.selection.empty || state.selection.$from.depth !== 1 || !["paragraph", "heading"].includes(state.selection.$from.parent.type.name)) throw new Error("Place the cursor in a top-level paragraph or heading. The rule is inserted after that block.");
+    const position = state.selection.$from.after(1);
+    tr.insert(position, [state.schema.nodes.horizontalRule.create(), state.schema.nodes.paragraph.create()]);
+    tr.setSelection(TextSelection.create(tr.doc, position + 2));
+  } else if (name === "paragraph" || /^h[1-6]$/u.test(name) || name.startsWith("align")) {
     for (const { node, pos } of selectedBlocks(state)) {
       const alignment = name.startsWith("align") ? name.slice(5).toLowerCase() : undefined;
       const tag = alignment ? node.type.name === "heading" ? String(node.attrs.tag) : "p" : name === "paragraph" ? "p" : name;
@@ -92,12 +98,16 @@ export function richTextCommand(state: EditorState, name: string, availabilityOn
     }
     semanticBlockEdit = true;
   } else if (marks.includes(name) || name === "clearFormatting") {
-    const affected = name === "clearFormatting" ? marks : [name];
+    const opposite = name === "subscript" ? "superscript" : name === "superscript" ? "subscript" : undefined;
+    const affected = name === "clearFormatting" ? marks : opposite ? [name, opposite] : [name];
     for (let d = state.selection.$from.depth; d > 0; d--) if (state.selection.$from.node(d).marks.some(mark => affected.includes(mark.type.name)))
       throw new Error("Formatting belongs to an enclosing inline wrapper. Select the whole wrapper or edit HTML.");
     if (name === "clearFormatting") {
       for (const mark of marks) { tr.removeMark(state.selection.from, state.selection.to, state.schema.marks[mark]); tr.removeStoredMark(state.schema.marks[mark]); }
-    } else apply(tr, state, toggleMark(state.schema.marks[name]));
+    } else {
+      if (opposite && !activeRichCommand(state, name)) { tr.removeMark(state.selection.from, state.selection.to, state.schema.marks[opposite]); tr.removeStoredMark(state.schema.marks[opposite]); }
+      apply(tr, state, toggleMark(state.schema.marks[name]));
+    }
   } else {
     structural = true;
     const list = ancestor(state, listNames);
