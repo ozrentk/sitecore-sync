@@ -2,9 +2,13 @@
   "name": "sitecore-xm-cloud-sync",
   "displayName": "XM Cloud Sync",
   "description": "Compare and synchronize Sitecore XM Cloud authoring content from VS Code.",
-  "version": "0.21.2",
+  "version": "0.45.0",
   "publisher": "OzrenTK",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/ozrentk/sitecore-sync.git"
+  },
   "engines": {
     "vscode": "^1.100.0"
   },
@@ -29,7 +33,6 @@
     "onView:xmCloudSync.operations",
     "onView:xmCloudSync.fieldDiff",
     "onCommand:xmCloudSync.addConnection",
-    "onCommand:xmCloudSync.pasteAsConnectionUrl",
     "onCommand:xmCloudSync.testConnection",
     "onCommand:xmCloudSync.configureDeploymentMonitoring",
     "onCommand:xmCloudSync.removeConnection",
@@ -44,7 +47,14 @@
     "onCommand:xmCloudSync.configurePublishing",
     "onCommand:xmCloudSync.compareWithConnection",
     "onCommand:xmCloudSync.refreshAll",
-    "onCommand:xmCloudSync.openProductSpec"
+    "onCommand:xmCloudSync.openProductSpec",
+    "onCommand:xmCloudSync.collectFallbackDiagnostic",
+    "onCommand:xmCloudSync.createFallbackTestItems",
+    "onCommand:xmCloudSync.diagnoseFallbackTestItems",
+    "onCommand:xmCloudSync.startMcpAccess",
+    "onCommand:xmCloudSync.stopMcpAccess",
+    "onCommand:xmCloudSync.enableMcpMutations",
+    "onCustomEditor:xmCloudSync.itemEditor"
   ],
   "main": "./out/extension.js",
   "contributes": {
@@ -53,10 +63,6 @@
         "command": "xmCloudSync.addConnection",
         "title": "XM Cloud Sync: Add Connection",
         "icon": "$(add)"
-      },
-      {
-        "command": "xmCloudSync.pasteAsConnectionUrl",
-        "title": "XM Cloud Sync: Paste as Connection URL"
       },
       {
         "command": "xmCloudSync.testConnection",
@@ -255,6 +261,50 @@
         "command": "xmCloudSync.configurePublicPageValues",
         "title": "XM Cloud Sync: Configure Connection/Site Public URL Values",
         "shortTitle": "Configure Public URL Values…"
+      },
+      {
+        "command": "xmCloudSync.configureConnection",
+        "title": "XM Cloud Sync: Configure Connection…",
+        "shortTitle": "Configure Connection…",
+        "icon": "$(settings-gear)"
+      },
+      {
+        "command": "xmCloudSync.browseConnection",
+        "title": "XM Cloud Sync: Browse Connection"
+      },
+      {
+        "command": "xmCloudSync.createFallbackTestItems",
+        "title": "Create Fallback Test Items",
+        "category": "XM Cloud Sync"
+      },
+      {
+        "command": "xmCloudSync.diagnoseFallbackTestItems",
+        "title": "Diagnose Fallback Test Items",
+        "category": "XM Cloud Sync"
+      },
+      {
+        "command": "xmCloudSync.collectFallbackDiagnostic",
+        "title": "Collect Authoring Fallback Diagnostic",
+        "category": "XM Cloud Sync"
+      },
+      {
+        "command": "xmCloudSync.startMcpAccess",
+        "title": "Start MCP Access",
+        "category": "XM Cloud Sync"
+      },
+      {
+        "command": "xmCloudSync.stopMcpAccess",
+        "title": "Stop MCP Access",
+        "category": "XM Cloud Sync"
+      },
+      {
+        "command": "xmCloudSync.enableMcpMutations",
+        "title": "Enable MCP Mutations",
+        "category": "XM Cloud Sync"
+      },
+      {
+        "command": "xmCloudSync.editItem",
+        "title": "XM Cloud Sync: Edit Item…"
       }
     ],
     "viewsContainers": {
@@ -268,7 +318,7 @@
       "panel": [
         {
           "id": "xmCloudSyncFieldDiff",
-          "title": "Field Diff",
+          "title": "Item Details",
           "icon": "$(diff)"
         }
       ]
@@ -296,7 +346,7 @@
     "viewsWelcome": [
       {
         "view": "xmCloudSync.connections",
-        "contents": "No XM Cloud connections have been added.\n[Add Connection](command:xmCloudSync.addConnection)\n[Paste as Connection URL](command:xmCloudSync.pasteAsConnectionUrl)"
+        "contents": "No XM Cloud connections have been added.\n[Add Connection](command:xmCloudSync.addConnection)"
       },
       {
         "view": "xmCloudSync.operations",
@@ -349,12 +399,12 @@
       ],
       "view/item/context": [
         {
-          "command": "xmCloudSync.configurePublicPageValues",
+          "command": "xmCloudSync.browseConnection",
           "when": "view == xmCloudSync.connections && viewItem == xmCloudConnection",
           "group": "1_connections"
         },
         {
-          "command": "xmCloudSync.pasteAsConnectionUrl",
+          "command": "xmCloudSync.configureConnection",
           "when": "view == xmCloudSync.connections && viewItem == xmCloudConnection",
           "group": "1_connections"
         },
@@ -367,16 +417,6 @@
           "command": "xmCloudSync.testConnection",
           "when": "view == xmCloudSync.connections && viewItem == xmCloudConnection",
           "group": "inline"
-        },
-        {
-          "command": "xmCloudSync.configureDeploymentMonitoring",
-          "when": "view == xmCloudSync.connections && viewItem == xmCloudConnection",
-          "group": "1_connections"
-        },
-        {
-          "command": "xmCloudSync.configurePublishing",
-          "when": "view == xmCloudSync.connections && viewItem == xmCloudConnection",
-          "group": "1_connections"
         },
         {
           "command": "xmCloudSync.removeConnection",
@@ -606,6 +646,14 @@
         {
           "command": "xmCloudSync.removeSequenceOperation",
           "when": "false"
+        },
+        {
+          "command": "xmCloudSync.browseConnection",
+          "when": "false"
+        },
+        {
+          "command": "xmCloudSync.editItem",
+          "when": "false"
         }
       ]
     },
@@ -638,7 +686,19 @@
           "description": "Connection IDs mapped to {defaultSite, sites: {siteName: {publicBaseUrl, deploymentBaseUrl, languages: {SitecoreLanguage: {language, country}}}}}. Base URLs are configured separately from the shared template. Language/region are inferred; languages contains optional overrides."
         }
       }
-    }
+    },
+    "customEditors": [
+      {
+        "viewType": "xmCloudSync.itemEditor",
+        "displayName": "XM Cloud Item Editor",
+        "selector": [
+          {
+            "filenamePattern": "*.xmitem"
+          }
+        ],
+        "priority": "default"
+      }
+    ]
   },
   "scripts": {
     "clean": "node ./scripts/clean.mjs",
@@ -665,8 +725,10 @@
     "typescript": "^5.9.0"
   },
   "dependencies": {
+    "@modelcontextprotocol/sdk": "1.32.0",
     "graphql": "^16.11.0",
     "graphql-tag": "^2.12.6",
-    "playwright-core": "^1.62.0"
+    "playwright-core": "^1.62.0",
+    "zod": "4.6.5"
   }
 }

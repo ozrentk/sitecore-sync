@@ -105,7 +105,7 @@ export async function resolvePublicPage(
   template: string, configuration: PublicPageConnectionValues, sites: readonly AuthoringSite[],
   item: AuthoringItemDetails, language: string,
   loadPath: (path: string) => Promise<AuthoringItemDetails>, signal: AbortSignal, preferredSite?: string,
-): Promise<PublicPageTarget> {
+): Promise<PublicPageTarget | undefined> {
   let matches = sites.filter(site => isWithinPath(item.path, site.rootPath));
   if (preferredSite) { matches = matches.filter(site => site.name === preferredSite); }
   const longest = Math.max(...matches.map(site => site.rootPath.length));
@@ -126,7 +126,7 @@ export async function resolvePublicPage(
     if (parent === page.path || !isWithinPath(parent, site.rootPath)) { break; }
     page = await loadPath(parent);
   }
-  throw new Error("No page presentation was detected on this item or its ancestors within the site. Presentation inherited from Standard Values may not be returned by Authoring. Shared datasources outside page ancestry are unsupported.");
+  return undefined;
 }
 
 export function parsePublicPageConnectionValues(value: unknown): PublicPageConnectionValues {

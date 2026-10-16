@@ -1,10 +1,16 @@
 import type { XmCloudConnection } from "../connections/connection";
+import { fieldAssetUrl, readFieldImage } from "./fieldPresentation";
+import { buildFallbackProbes, collectFallbackDiagnostic, serializeFallbackDiagnostic } from "./fallbackDiagnostics";
 import { randomUUID } from "node:crypto";
 import { print } from "graphql";
 import {
   createItemMutation,
+  addItemVersionMutation,
   deleteItemMutation,
   itemDetailsQuery,
+  selectionItemQuery,
+  selectionTreeQuery,
+  withFieldFallback,
   languagesQuery,
   nonStandardFieldIdsQuery,
   testConnectionQuery,
@@ -15,6 +21,7 @@ import {
   SitecoreHttpClient,
   type SitecoreHttpLogger,
   type SitecoreHttpRuntime,
+  type SitecoreHttpAttempt,
 } from "./sitecoreHttpClient";
 import {
   readItemIconDataUri,
@@ -22,6 +29,16 @@ import {
 } from "./itemIcon";
 
 export class AuthoringItemNotFoundError extends Error {}
+/** The editor reports only this fixed classification, never raw GraphQL response text. */
+export class AuthoringGraphQlError extends Error {
+  readonly reason: "permission" | "locked" | "validation" | "other";
+  constructor(message: string) {
+    super(message);
+    this.reason = /access denied|unauthori[sz]ed|forbidden|permission/iu.test(message) ? "permission"
+      : /locked|check.?out/iu.test(message) ? "locked"
+      : /cannot query field|unknown argument|invalid value|not defined by type|validation/iu.test(message) ? "validation" : "other";
+  }
+}
 
 const tokenEndpoint = "https://auth.sitecorecloud.io/oauth/token";
 const audience = "https://api.sitecorecloud.io";
@@ -97,11 +114,13 @@ interface SiteQueryResult {
 }
 
 interface RawAuthoringTreeItem {
+  readonly template?: { readonly templateId?: unknown } | null;
   readonly itemId?: unknown;
   readonly name?: unknown;
   readonly displayName?: unknown;
   readonly path?: unknown;
   readonly hasChildren?: unknown;
+  readonly language?: { readonly name?: unknown };
 }
 
 interface TreeLevelQueryResponse {
@@ -164,6 +183,7 @@ interface RawItemField {
     readonly versioning?: unknown;
     readonly sortOrder?: unknown;
     readonly section?: {
+      readonly itemTemplateSectionId?: unknown;
       readonly name?: unknown;
       readonly sortOrder?: unknown;
     };
@@ -197,6 +217,9 @@ interface ItemDetailsQueryResponse {
 interface NonStandardFieldIdsQueryResponse {
   readonly data?: {
     readonly item?: {
+      readonly itemId?: unknown;
+      readonly version?: unknown;
+      readonly language?: { readonly name?: unknown };
       readonly fields?: {
         readonly nodes?: readonly { readonly fieldId?: unknown }[];
         readonly pageInfo?: RawPageInfo;
@@ -210,6 +233,8 @@ interface ItemMutationResponse {
   readonly data?: {
     readonly createItem?: { readonly item?: RawMutatedItem | null } | null;
     readonly updateItem?: { readonly item?: RawMutatedItem | null } | null;
+    readonly addItemVersion?: { readonly item?: RawMutatedItem | null } | null;
+    readonly __typename?: unknown;
   };
   readonly errors?: readonly GraphQlError[];
 }
@@ -229,6 +254,7 @@ interface DeleteItemMutationResponse {
 }
 
 export interface AuthoringTreeItem {
+  readonly templateId?: string;
   readonly itemId: string;
   readonly name: string;
   readonly displayName: string;
@@ -897,6 +923,7 @@ export class AuthoringContentClient {
     locator: AuthoringItemLocator,
     language: string,
     signal: AbortSignal,
+    selectionLimit?: number,
   ): Promise<AuthoringTreeLevel> {
     const accessToken = await this.getAccessToken(connection, clientSecret, signal);
     const children: AuthoringTreeItem[] = [];
@@ -912,7 +939,12 @@ export class AuthoringContentClient {
         language,
         after,
         signal,
+        selectionLimit !== undefined,
       );
+      if (selectionLimit !== undefined && (children.length + page.children.length > selectionLimit || seenCursors.size >= 20
+        || (item && (normalizeGuid(item.itemId) !== normalizeGuid(page.item.itemId) || item.path !== page.item.path)))) {
+        throw new Error("Selection source exceeded its limit or changed during paging.");
+      }
       item ??= page.item;
       children.push(...page.children);
       after = page.nextCursor;
@@ -925,6 +957,50 @@ export class AuthoringContentClient {
     } while (after !== undefined);
 
     return { item, children };
+  }
+
+  /** Minimal exact-locale lookup for source roots and references; never crawls descendants. */
+  async loadSelectionItem(connection: XmCloudConnection, secret: string, locator: AuthoringItemLocator,
+    language: string, signal: AbortSignal): Promise<AuthoringTreeItem> {
+    const token = await this.getAccessToken(connection, secret, signal);
+    const payload = await this.postGraphQl<TreeLevelQueryResponse>(connection.serverUrl, token,
+      "Sitecore Authoring selection item query", "XmCloudSyncSelectionItem", print(selectionItemQuery),
+      { where: { database: "master", ...locator, language } }, signal);
+    if (!payload.data?.item) throw new AuthoringItemNotFoundError("Selection item is missing or inaccessible.");
+    assertSelectionIdentity(payload.data.item, locator, language);
+    return parseTreeItem(payload.data.item);
+  }
+
+  /** Presentation-only template titles; no content values or fallback writes. */
+  async loadFieldTitles(connection: XmCloudConnection, secret: string, ids: readonly string[], language: string,
+    signal: AbortSignal): Promise<ReadonlyMap<string, string>> {
+    if (ids.length > 32) throw new Error("Too many field titles requested.");
+    const result = new Map<string, string>();
+    if (!ids.length) return result;
+    const variables: Record<string, unknown> = {};
+    const definitions: string[] = []; const selections: string[] = [];
+    ids.forEach((id, index) => {
+      for (const [suffix, locale] of [["local", language], ["english", "en"]]) {
+        const key = `${suffix}${index}`;
+        definitions.push(`$${key}: ItemQueryInput!`);
+        variables[key] = { database: "master", itemId: id, language: locale };
+        selections.push(`${key}: item(where: $${key}) { itemId path title: field(name: "Title") { value } }`);
+      }
+    });
+    const token = await this.getAccessToken(connection, secret, signal);
+    const response = await this.postGraphQl<{ readonly errors?: readonly GraphQlError[]; readonly data?: Record<string, { itemId?: unknown; path?: unknown; title?: { value?: unknown } } | null> }>(
+      connection.serverUrl, token, "Sitecore field titles query", "XmCloudSyncFieldTitles",
+      `query XmCloudSyncFieldTitles(${definitions.join(",")}) { ${selections.join(" ")} }`, variables, signal);
+    ids.forEach((id, index) => {
+      for (const suffix of ["local", "english"]) {
+        const item = response.data?.[`${suffix}${index}`];
+        if (!item) continue;
+        if (typeof item.itemId !== "string" || normalizeGuid(item.itemId) !== normalizeGuid(id)
+          || typeof item.path !== "string" || !item.path.toLowerCase().startsWith("/sitecore/templates/")) throw new Error("Invalid field title identity.");
+        if (typeof item.title?.value === "string" && item.title.value.trim()) { result.set(normalizeGuid(id), item.title.value); break; }
+      }
+    });
+    return result;
   }
 
   async loadLanguages(
@@ -1130,6 +1206,22 @@ export class AuthoringContentClient {
     }));
   }
 
+  async loadFieldAsset(connection: XmCloudConnection, clientSecret: string, source: string, image: boolean, signal: AbortSignal): Promise<{ url: string; dataUri?: string }> {
+    const destination = fieldAssetUrl(connection.serverUrl, source);
+    if (!destination) throw new Error("Unsupported asset destination.");
+    const token = destination.authenticated ? await this.getAccessToken(connection, clientSecret, signal) : undefined;
+    signal.throwIfAborted();
+    const response = await this.http.request(destination.url, {
+      method: image ? "GET" : "HEAD", redirect: "error", credentials: "omit",
+      headers: token ? { authorization: `Bearer ${token}` } : {},
+    }, { name: "Field asset preview", signal, retryable: false });
+    if (image) return { url: destination.url.href, dataUri: await readFieldImage(response, signal) };
+    const type = response.headers.get("content-type")?.split(";")[0].trim().toLowerCase();
+    await response.body?.cancel(); signal.throwIfAborted();
+    if (!response.ok || response.redirected || !type || !["application/pdf", "application/octet-stream", "application/zip", "text/plain", "image/png", "image/jpeg", "image/gif", "image/webp", "video/mp4", "audio/mpeg"].includes(type)) throw new Error("File reference unavailable or unsupported.");
+    return { url: destination.url.href };
+  }
+
   async loadItemIcon(
     connection: XmCloudConnection,
     clientSecret: string,
@@ -1153,12 +1245,27 @@ export class AuthoringContentClient {
     return readItemIconDataUri(response);
   }
 
+  async collectFallbackDiagnostic(
+    connection: XmCloudConnection, clientSecret: string,
+    selection: { readonly itemId: string; readonly languages: readonly string[] } | undefined,
+    signal: AbortSignal, progress: (message: string) => void = () => undefined,
+  ): Promise<string> {
+    const probes = selection ? buildFallbackProbes(selection.itemId, selection.languages) : [];
+    signal.throwIfAborted();
+    const accessToken = await this.getAccessToken(connection, clientSecret, signal);
+    const report = await collectFallbackDiagnostic(probes, (operation, query, variables, onAttempt) =>
+      this.postGraphQl(connection.serverUrl, accessToken, "Authoring fallback diagnostic", operation, query, variables, signal, true, onAttempt),
+    signal, progress, selection !== undefined);
+    return serializeFallbackDiagnostic(report, [clientSecret, accessToken]);
+  }
+
   async loadItemDetails(
     connection: XmCloudConnection,
     clientSecret: string,
     itemId: string,
     language: string,
     signal: AbortSignal,
+    fieldFallback = false,
   ): Promise<AuthoringItemDetails> {
     return this.loadItem(
       connection,
@@ -1167,6 +1274,7 @@ export class AuthoringContentClient {
       language,
       undefined,
       signal,
+      fieldFallback,
     );
   }
 
@@ -1177,6 +1285,8 @@ export class AuthoringContentClient {
     language: string,
     version: number | undefined,
     signal: AbortSignal,
+    fieldFallback = false,
+    strictIdentity = false,
   ): Promise<AuthoringItemDetails> {
     const accessToken = await this.getAccessToken(connection, clientSecret, signal);
     const where = {
@@ -1185,9 +1295,14 @@ export class AuthoringContentClient {
       language,
       ...(version === undefined ? {} : { version }),
     };
+    if (strictIdentity) {
+      const raw = await this.loadItemDetailsPages(connection.serverUrl, accessToken, where, signal, false, true);
+      const ids = await this.loadNonStandardFieldIds(connection.serverUrl, accessToken, { ...where, version: raw.version }, signal, false, true);
+      return parseItemDetails(raw, ids);
+    }
     const [rawDetails, nonStandardFieldIds] = await Promise.all([
-      this.loadItemDetailsPages(connection.serverUrl, accessToken, where, signal),
-      this.loadNonStandardFieldIds(connection.serverUrl, accessToken, where, signal),
+      this.loadItemDetailsPages(connection.serverUrl, accessToken, where, signal, fieldFallback, strictIdentity),
+      this.loadNonStandardFieldIds(connection.serverUrl, accessToken, where, signal, fieldFallback),
     ]);
     return parseItemDetails(rawDetails, nonStandardFieldIds);
   }
@@ -1261,11 +1376,58 @@ export class AuthoringContentClient {
     );
   }
 
+  async validateAddItemVersion(connection: XmCloudConnection, clientSecret: string,
+    input: { readonly itemId: string; readonly language: string }, signal: AbortSignal): Promise<void> {
+    const payload = await this.requestAddItemVersion(connection, clientSecret, input, true, signal);
+    if (typeof payload.data?.__typename !== "string" || payload.data.addItemVersion !== undefined) {
+      throw new Error("Authoring API could not validate version creation without execution.");
+    }
+  }
+
+  async addItemVersion(connection: XmCloudConnection, clientSecret: string,
+    input: { readonly itemId: string; readonly language: string }, signal: AbortSignal): Promise<AuthoringItemDetails> {
+    const payload = await this.requestAddItemVersion(connection, clientSecret, input, false, signal);
+    const raw = payload.data?.addItemVersion?.item;
+    const item = parseMutatedItem(raw, "versioned");
+    if (normalizeGuid(item.itemId) !== normalizeGuid(input.itemId)
+      || item.language.toLowerCase() !== input.language.toLowerCase()
+      || typeof raw?.version !== "number" || !Number.isInteger(raw.version) || raw.version < 1) {
+      throw new Error("Authoring API did not confirm the new language version.");
+    }
+    return this.loadItem(connection, clientSecret, { itemId: item.itemId }, item.language, raw.version, signal);
+  }
+
+  private async requestAddItemVersion(connection: XmCloudConnection, clientSecret: string,
+    input: { readonly itemId: string; readonly language: string }, validateOnly: boolean,
+    signal: AbortSignal): Promise<ItemMutationResponse> {
+    const accessToken = await this.getAccessToken(connection, clientSecret, signal);
+    return this.postGraphQl<ItemMutationResponse>(connection.serverUrl, accessToken,
+      "create Authoring language version", "XmCloudSyncAddItemVersion", print(addItemVersionMutation),
+      { input: { database: "master", ...input }, validateOnly }, signal, false);
+  }
+
+  async resetItemField(connection: XmCloudConnection, clientSecret: string,
+    input: Omit<UpdateAuthoringItemInput, "fields"> & { readonly fieldName: string },
+    signal: AbortSignal): Promise<AuthoringItemDetails> {
+    await this.mutateItemFields(connection, clientSecret,
+      { ...input, fields: { [input.fieldName]: "" } }, signal, true);
+    return this.loadItem(connection, clientSecret, { itemId: input.itemId }, input.language, input.version, signal);
+  }
+
+  /** Pinned editor write: no implicit latest-version read and no mutation retries. */
+  async updateEditorFields(connection: XmCloudConnection, clientSecret: string,
+    input: UpdateAuthoringItemInput, signal: AbortSignal): Promise<void> {
+    if (!Number.isInteger(input.version) || input.version < 1) throw new Error("Editing requires an existing numbered version.");
+    await this.mutateItemFields(connection, clientSecret, input, signal, false, true);
+  }
+
   private async mutateItemFields(
     connection: XmCloudConnection,
     clientSecret: string,
     input: UpdateAuthoringItemInput,
     signal: AbortSignal,
+    reset = false,
+    strictVersion = false,
   ): Promise<{ readonly itemId: string; readonly language: string }> {
     const accessToken = await this.getAccessToken(connection, clientSecret, signal);
     const payload = await this.postGraphQl<ItemMutationResponse>(
@@ -1280,14 +1442,16 @@ export class AuthoringContentClient {
           itemId: input.itemId,
           language: input.language,
           version: input.version,
-          fields: fieldEntries(input.fields),
+          fields: fieldEntries(input.fields).map(field => ({ ...field, reset })),
         },
       },
       signal,
       false,
     );
+    if (strictVersion && payload.data?.updateItem?.item?.version !== input.version) throw new Error("Authoring did not confirm the requested numbered version; reconcile before retrying.");
     const updatedItem = parseMutatedItem(payload.data?.updateItem?.item, "updated");
-    if (normalizeGuid(updatedItem.itemId) !== normalizeGuid(input.itemId)) {
+    if (normalizeGuid(updatedItem.itemId) !== normalizeGuid(input.itemId)
+      || updatedItem.language.toLowerCase() !== input.language.toLowerCase()) {
       throw new Error("Authoring API did not confirm the updated item.");
     }
     return updatedItem;
@@ -1325,6 +1489,8 @@ export class AuthoringContentClient {
     accessToken: string,
     where: Readonly<Record<string, unknown>>,
     signal: AbortSignal,
+    fieldFallback = false,
+    strictIdentity = false,
   ): Promise<RawItemDetails> {
     const fields: RawItemField[] = [];
     const seenCursors = new Set<string>();
@@ -1336,13 +1502,24 @@ export class AuthoringContentClient {
         accessToken,
         "Sitecore Authoring item-details query",
         "XmCloudSyncItemDetails",
-        print(itemDetailsQuery),
+        print(fieldFallback ? withFieldFallback(itemDetailsQuery) : itemDetailsQuery),
         { where, pageSize: 100, after: after ?? null },
         signal,
       );
       if (!payload.data?.item) {
         throw new Error("The requested Authoring item was not found.");
       }
+      if ((fieldFallback || strictIdentity) && (
+        typeof payload.data.item.itemId !== "string" ||
+        (typeof where.itemId === "string" && normalizeGuid(payload.data.item.itemId) !== normalizeGuid(where.itemId)) ||
+        (typeof where.path === "string" && String(payload.data.item.path).toLowerCase() !== where.path.toLowerCase()) ||
+        typeof payload.data.item.language?.name !== "string" ||
+        payload.data.item.language.name.toLowerCase() !== String(where.language).toLowerCase() ||
+        !Number.isInteger(payload.data.item.version) || Number(payload.data.item.version) < 0 ||
+        (strictIdentity && where.version !== undefined && payload.data.item.version !== where.version) ||
+        (item && (item.version !== payload.data.item.version || item.itemId !== payload.data.item.itemId))
+      )) throw new Error("Fallback field read returned a different item, locale or version. Refresh and retry.");
+      if (strictIdentity && seenCursors.size >= 50) throw new Error("Editor field pagination exceeded its limit.");
       item ??= payload.data.item;
       fields.push(...(payload.data.item.fields?.nodes ?? []));
       after = nextCursor(payload.data.item.fields?.pageInfo, "item fields");
@@ -1356,6 +1533,8 @@ export class AuthoringContentClient {
     accessToken: string,
     where: Readonly<Record<string, unknown>>,
     signal: AbortSignal,
+    fieldFallback = false,
+    strictIdentity = false,
   ): Promise<ReadonlySet<string>> {
     const fieldIds = new Set<string>();
     const seenCursors = new Set<string>();
@@ -1366,7 +1545,7 @@ export class AuthoringContentClient {
         accessToken,
         "Sitecore Authoring non-Standard fields query",
         "XmCloudSyncNonStandardFieldIds",
-        print(nonStandardFieldIdsQuery),
+        print(fieldFallback ? withFieldFallback(nonStandardFieldIdsQuery) : nonStandardFieldIdsQuery),
         { where, pageSize: 100, after: after ?? null },
         signal,
       );
@@ -1374,6 +1553,9 @@ export class AuthoringContentClient {
       if (!item) {
         throw new Error("The requested Authoring item was not found while classifying fields.");
       }
+      if (strictIdentity && (typeof item.itemId !== "string" || normalizeGuid(item.itemId) !== normalizeGuid(String(where.itemId))
+        || String(item.language?.name).toLowerCase() !== String(where.language).toLowerCase() || item.version !== where.version
+        || seenCursors.size >= 50)) throw new Error("Editor field classification returned a different item, locale or version, or exceeded its pagination limit.");
       const fields = item.fields;
       if (!fields) {
         return fieldIds;
@@ -1399,6 +1581,7 @@ export class AuthoringContentClient {
     variables: Readonly<Record<string, unknown>>,
     signal: AbortSignal,
     retryable = true,
+    onAttempt?: (attempt: SitecoreHttpAttempt) => void,
   ): Promise<T> {
     const endpoint = new URL("/sitecore/api/authoring/graphql/v1/", serverUrl);
     const response = await this.http.request(
@@ -1411,7 +1594,7 @@ export class AuthoringContentClient {
         },
         body: JSON.stringify({ operationName, query, variables }),
       },
-      { name: requestName, signal, retryable },
+      { name: requestName, signal, retryable, onAttempt },
     );
     const payload = await readJson<T>(response, "Authoring GraphQL endpoint");
     if (!response.ok) {
@@ -1532,6 +1715,7 @@ export class AuthoringContentClient {
     language: string,
     after: string | undefined,
     signal: AbortSignal,
+    strictSelection = false,
   ): Promise<{
     readonly item: AuthoringTreeItem;
     readonly children: readonly AuthoringTreeItem[];
@@ -1548,7 +1732,7 @@ export class AuthoringContentClient {
         },
         body: JSON.stringify({
           operationName: "XmCloudSyncTreeLevel",
-          query: print(treeLevelQuery),
+          query: print(strictSelection ? selectionTreeQuery : treeLevelQuery),
           variables: {
             where: { database: "master", language, ...locator },
             pageSize: 100,
@@ -1573,6 +1757,13 @@ export class AuthoringContentClient {
     }
 
     if (!payload.data?.item) { throw new Error("Authoring returned an invalid item lookup response."); }
+    if (strictSelection) {
+      assertSelectionIdentity(payload.data.item, locator, language);
+      if (!Array.isArray(payload.data.item.children?.nodes) || typeof payload.data.item.children?.pageInfo?.hasNextPage !== "boolean") throw new Error("Incomplete selection source children.");
+      for (const child of payload.data.item.children.nodes) {
+        if (child.language?.name?.toString().toLowerCase() !== language.toLowerCase()) throw new Error("Selection child returned a different locale.");
+      }
+    }
     const item = parseTreeItem(payload.data.item);
     const children = (payload.data.item.children?.nodes ?? []).map(parseTreeItem);
     const pageInfo = payload.data.item.children?.pageInfo;
@@ -1670,6 +1861,7 @@ export interface AuthoringItemField {
   readonly typeKey: string;
   readonly scope: AuthoringFieldScope;
   readonly sortOrder: number;
+  readonly sectionId?: string;
   readonly sectionName: string;
   readonly sectionSortOrder: number;
   readonly isStandardTemplate: boolean;
@@ -1677,6 +1869,8 @@ export interface AuthoringItemField {
   readonly containsInheritedValue: boolean;
   readonly containsStandardValue: boolean;
   readonly textual: boolean;
+  /** Editor-only metadata read from the template field item. Undefined means unavailable. */
+  readonly selectionSource?: string;
 }
 
 export interface AuthoringItemDetails {
@@ -1707,6 +1901,7 @@ function parseTreeItem(value: RawAuthoringTreeItem): AuthoringTreeItem {
     displayName: typeof value.displayName === "string" ? value.displayName : value.name,
     path: value.path,
     hasChildren: value.hasChildren === true,
+    ...(typeof value.template?.templateId === "string" ? { templateId: value.template.templateId } : {}),
   };
 }
 
@@ -1747,6 +1942,7 @@ function parseItemDetails(
       typeKey: definition.typeKey,
       scope: definition.versioning,
       sortOrder: typeof definition.sortOrder === "number" ? definition.sortOrder : 0,
+      sectionId: typeof definition.section?.itemTemplateSectionId === "string" ? definition.section.itemTemplateSectionId : undefined,
       sectionName: typeof definition.section?.name === "string" ? definition.section.name : "",
       sectionSortOrder:
         typeof definition.section?.sortOrder === "number" ? definition.section.sortOrder : 0,
@@ -1799,7 +1995,7 @@ function createFieldEntries(
 
 function parseMutatedItem(
   value: RawMutatedItem | null | undefined,
-  operation: "created" | "updated",
+  operation: "created" | "updated" | "versioned",
 ): { readonly itemId: string; readonly language: string } {
   if (
     !value ||
@@ -1859,7 +2055,7 @@ function throwForGraphQlErrors(errors: readonly GraphQlError[] | undefined): voi
     .map((error) => error.message)
     .filter((message): message is string => typeof message === "string")
     .join("; ");
-  throw new Error(messages || "Authoring API returned a GraphQL error.");
+  throw new AuthoringGraphQlError(messages || "Authoring API returned a GraphQL error.");
 }
 
 function property(value: unknown, ...names: readonly string[]): unknown {
@@ -1953,5 +2149,14 @@ async function readJson<T>(response: Response, endpointName: string): Promise<T>
     return (await response.json()) as T;
   } catch {
     throw new Error(`${endpointName} returned invalid JSON.`);
+  }
+}
+
+function assertSelectionIdentity(item: RawAuthoringTreeItem, locator: AuthoringItemLocator, language: string): void {
+  if (typeof item.itemId !== "string" || typeof item.language?.name !== "string"
+    || item.language.name.toLowerCase() !== language.toLowerCase()
+    || ("itemId" in locator ? normalizeGuid(item.itemId) !== normalizeGuid(locator.itemId)
+      : typeof item.path !== "string" || item.path.toLowerCase() !== locator.path.toLowerCase())) {
+    throw new Error("Selection lookup returned a different item or locale.");
   }
 }

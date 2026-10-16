@@ -28,6 +28,7 @@ export class ConnectionTreeItem extends vscode.TreeItem {
     this.id = connection.id;
     this.description = connection.serverUrl;
     this.contextValue = "xmCloudConnection";
+    this.command = { command: "xmCloudSync.browseConnection", title: "Browse Connection", arguments: [this] };
     this.iconPath = iconForStatus(testState.status);
 
     const tooltip = new vscode.MarkdownString(undefined, true);

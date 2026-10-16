@@ -1,6 +1,11 @@
+import { itemEditorTests } from "./itemEditorTests";
 import { strictEqual } from "node:assert/strict";
 import * as vscode from "vscode";
 import { connectionStoreTests } from "./connectionStoreTests";
+import { fallbackDiagnosticTests } from "./fallbackDiagnosticTests";
+import { fallbackFixtureTests } from "./fallbackFixtureTests";
+import { mcpAccessTests } from "./mcpAccessTests";
+import { connectionSettingsTests } from "./connectionSettingsTests";
 import { comparisonPanelTests } from "./comparisonPanelTests";
 import { itemTaskRunnerTests } from "./itemTaskRunnerTests";
 import { javaScriptTaskHostTests } from "./javascriptTaskHostTests";
@@ -8,6 +13,7 @@ import { operationSequenceStoreTests } from "./operationSequenceStoreTests";
 import { publishingFormTests } from "./publishingFormTests";
 import { publishingManagerTests } from "./publishingManagerTests";
 import { transferProcessorTests } from "./transferProcessorTests";
+import { fallbackWebviewTests } from "./fallbackWebviewTests";
 import { transferQueueStoreTests } from "./transferQueueStoreTests";
 
 const extensionId = "OzrenTK.sitecore-xm-cloud-sync";
@@ -27,14 +33,16 @@ interface IntegrationTest {
 }
 
 const integrationTests: readonly IntegrationTest[] = [
+  ...fallbackWebviewTests,
+  ...itemEditorTests,
   {
-    name: "exposes public URL configuration on connection context menus",
+    name: "exposes the unified dashboard on connection context menus",
     async execute(): Promise<void> {
       const extension = requireExtension();
       await extension.activate();
       const manifest = extension.packageJSON as ExtensionManifest;
       const entries = manifest.contributes?.menus?.["view/item/context"] ?? [];
-      const entry = entries.find(value => value.command === "xmCloudSync.configurePublicPageValues");
+      const entry = entries.find(value => value.command === "xmCloudSync.configureConnection");
       strictEqual(entry?.when, "view == xmCloudSync.connections && viewItem == xmCloudConnection");
     },
   },
@@ -59,6 +67,8 @@ const integrationTests: readonly IntegrationTest[] = [
         return entry.command;
       });
       const registered = new Set(await vscode.commands.getCommands(true));
+      strictEqual(registered.has("xmCloudSync.pasteAsConnectionUrl"), false);
+      strictEqual(JSON.stringify(manifest).includes("xmCloudSync.pasteAsConnectionUrl"), false);
       const missing = contributed.filter((command) => !registered.has(command));
       strictEqual(
         missing.length,
@@ -75,6 +85,10 @@ const integrationTests: readonly IntegrationTest[] = [
     },
   },
   ...connectionStoreTests,
+  ...fallbackDiagnosticTests,
+  ...fallbackFixtureTests,
+  ...mcpAccessTests,
+  ...connectionSettingsTests,
   ...comparisonPanelTests,
   ...itemTaskRunnerTests,
   ...javaScriptTaskHostTests,

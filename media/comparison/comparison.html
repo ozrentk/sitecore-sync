@@ -9,6 +9,11 @@
 </head>
 <body>
   <header class="toolbar">
+    <div class="mode-controls" role="group" aria-label="Content mode">
+      <button id="mode-browse" type="button" aria-pressed="false">Browse</button>
+      <button id="mode-compare" type="button" aria-pressed="true">Compare</button>
+      <button id="content-cancel" type="button" hidden>Cancel loading</button>
+    </div>
     <div class="selector">
       <select id="left-connection" aria-label="Left XM Cloud connection"></select>
       <select id="left-language" aria-label="Left content language"></select>
@@ -17,10 +22,10 @@
       <div class="toolbar-buttons">
         <button id="swap" class="swap" type="button" title="Swap left and right selections" aria-label="Swap selections">⇄</button>
       </div>
-      <label class="language-lock" title="Keep both comparison sides on the same configured language">
-        <input id="language-lock" type="checkbox">
-        <span>Lock languages</span>
-      </label>
+      <div class="toolbar-buttons">
+        <button id="language-lock" class="comparison-toggle" type="button" aria-pressed="false" title="Keep both comparison sides on the same configured language">Lock Languages</button>
+        <button id="field-fallback-mode" class="comparison-toggle" type="button" aria-pressed="false" title="Include server-returned language fallback values. Off uses Exact locale.">Fallback</button>
+      </div>
     </div>
     <div class="selector">
       <select id="right-connection" aria-label="Right XM Cloud connection"></select>

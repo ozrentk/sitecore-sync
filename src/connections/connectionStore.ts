@@ -2,6 +2,9 @@ import { randomUUID } from "node:crypto";
 import * as vscode from "vscode";
 import type { NewXmCloudConnection, XmCloudConnection } from "./connection";
 import type { AuthoringSite } from "../sitecore/authoringClient";
+import type { SecretEdit } from "./connectionSettingsValidation";
+import type { PublishingSiteProfile } from "../publishing/publishingTypes";
+import { publishingProfilesKey, readPublishingProfiles } from "../publishing/publishingRunState";
 
 const connectionsKey = "sitecoreXmCloudSync.connections.v1";
 const secretPrefix = "sitecoreXmCloudSync.connectionSecret.v1";
@@ -174,6 +177,45 @@ export class ConnectionStore implements vscode.Disposable {
 
   async getClientSecret(connectionId: string): Promise<string | undefined> {
     return this.secrets.get(secretKey(connectionId));
+  }
+
+  async saveSettings(
+    connection: XmCloudConnection,
+    edits: { clientSecret: SecretEdit; deploymentSecret: SecretEdit; edgeToken: SecretEdit },
+    profile: PublishingSiteProfile | undefined,
+    savePublicSettings: () => Promise<void>,
+  ): Promise<void> {
+    const previous = this.get(connection.id);
+    const snapshots = [connectionsKey, publishingProfilesKey, verifiedSitesKey].map(key => ({ key, value: this.globalState.get<unknown>(key) }));
+    const keys = [secretKey(connection.id), deploymentSecretKey(connection.id), edgeTokenSecretKey(connection.id)];
+    const oldSecrets = await Promise.all(keys.map(key => this.secrets.get(key)));
+    const changes = [edits.clientSecret, edits.deploymentSecret, edits.edgeToken];
+    const undo: (() => PromiseLike<void>)[] = [];
+    try {
+      for (let index = 0; index < keys.length; index += 1) {
+        const edit = changes[index];
+        if (edit.action === "keep") { continue; }
+        undo.push(() => oldSecrets[index] === undefined ? this.secrets.delete(keys[index]) : this.secrets.store(keys[index], oldSecrets[index]!));
+        if (edit.action === "remove") { await this.secrets.delete(keys[index]); }
+        else { await this.secrets.store(keys[index], edit.value); }
+      }
+      const write = async (key: string, value: unknown): Promise<void> => {
+        undo.push(() => this.globalState.update(key, snapshots.find(entry => entry.key === key)?.value));
+        await this.globalState.update(key, value);
+      };
+      await write(connectionsKey, [...this.list().filter(value => value.id !== connection.id), connection]);
+      const existingProfiles = readPublishingProfiles(this.globalState.get(publishingProfilesKey, []));
+      await write(publishingProfilesKey, [...existingProfiles.filter(value => value.connectionId !== connection.id), ...(profile ? [profile] : [])]);
+      if (previous && (previous.serverUrl !== connection.serverUrl || previous.clientId !== connection.clientId || edits.clientSecret.action !== "keep")) {
+        await write(verifiedSitesKey, this.readVerifiedSites().filter(entry => entry.connectionId !== connection.id));
+      }
+      await savePublicSettings();
+    } catch {
+      let failed = false;
+      for (const restore of undo.reverse()) { try { await restore(); } catch { failed = true; } }
+      throw new Error(failed ? "Saving failed and some settings could not be restored. Reopen the dashboard to review them." : "Unable to save settings. Previous connection settings were restored; review public URL settings if a settings-file write failed.");
+    }
+    this.changeEmitter.fire();
   }
 
   async configureDeploymentMonitoring(

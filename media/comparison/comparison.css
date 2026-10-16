@@ -50,20 +50,21 @@ select {
   gap: 5px;
 }
 
-.language-lock {
-  display: flex;
-  gap: 5px;
-  align-items: center;
+.comparison-toggle {
+  font: inherit;
+  padding: 3px 7px;
   color: var(--vscode-foreground);
+  background: transparent;
+  border: 1px solid var(--vscode-button-border, var(--vscode-panel-border));
   white-space: nowrap;
   cursor: pointer;
 }
-
-.language-lock input {
-  accent-color: var(--vscode-focusBorder);
+.comparison-toggle[aria-pressed="true"] {
+  color: var(--vscode-button-foreground);
+  background: var(--vscode-button-background);
 }
-
-.language-lock:has(input:disabled) {
+.comparison-toggle:focus-visible { outline: 1px solid var(--vscode-focusBorder); outline-offset: 2px; }
+.comparison-toggle:disabled {
   color: var(--vscode-disabledForeground);
   cursor: default;
 }
@@ -628,3 +629,21 @@ select:focus {
 .navigation-results[hidden] { display: none; }
 .navigation-results button { text-align: left; white-space: normal; overflow-wrap: anywhere; }
 .navigation-scope { color: var(--vscode-descriptionForeground); }
+
+/* Browse keeps the existing tree nodes/navigation but has no comparison column or gutter. */
+[hidden] { display: none !important; }
+body.browse .toolbar { grid-template-columns: minmax(0, 1fr) auto; }
+body.browse .toolbar-actions .toolbar-buttons:first-child { display: none; }
+body.browse .selector { grid-template-columns: minmax(0, 1fr) minmax(120px, 220px); }
+body.browse .comparison { min-width: 0; }
+body.browse .comparison-row { grid-template-columns: 30px minmax(0, 1fr); }
+body.browse .root-statuses, body.browse .comparison-inline-status, body.browse .connection-footer { grid-template-columns: minmax(0, 1fr); }
+body.browse .right, body.browse .connection-footer-gutter,
+body.browse .root-statuses > div:not(.left), body.browse .comparison-inline-status > div:not(.left) { display: none; }
+body.browse .comparison-cell, body.browse .row-control { border-left: 0; }
+body.browse .language-switch-status { left: 50%; width: max-content; }
+
+.mode-controls { grid-column: 1 / -1; display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.mode-controls button[aria-pressed="true"] { background: var(--vscode-button-background); color: var(--vscode-button-foreground); outline: 1px solid var(--vscode-focusBorder); }
+#content-cancel { margin-left: auto; }
+[hidden] { display: none !important; }

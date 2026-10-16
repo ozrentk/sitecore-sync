@@ -9,6 +9,7 @@ import {
   SitecoreHttpClient,
   type SitecoreHttpLogger,
   type SitecoreHttpRuntime,
+  type SitecoreHttpAttempt,
 } from "../../src/sitecore/sitecoreHttpClient";
 
 type FetchOutcome = Response | Error;
@@ -86,6 +87,45 @@ function requestOptions(
 ) {
   return { name: "Load item", signal, retryable } as const;
 }
+
+test("attempt evidence records bounded network/HTTP retries and timing without sensitive data", async () => {
+  const runtime = new TestRuntime([new Error("private-network-detail"),
+    new Response(null, { status: 503, headers: { "retry-after": "2", "set-cookie": "private-cookie" } }),
+    new Response(null, { status: 401 })]);
+  const fetch = runtime.fetch.bind(runtime);
+  runtime.fetch = async (input, init) => { runtime.nowValue += 25; return fetch(input, init); };
+  const attempts: SitecoreHttpAttempt[] = [];
+  const client = new SitecoreHttpClient(new TestLogger(), runtime);
+  await client.request("https://example.test/private-path", { headers: { authorization: "private-token" } },
+    { ...requestOptions(), onAttempt: attempt => attempts.push(attempt) });
+  deepStrictEqual(attempts.map(a => [a.attempt, a.outcome, a.status, a.elapsedMilliseconds, a.retryScheduled, a.retryDelayMilliseconds]), [
+    [1, "network-failure", undefined, 25, true, 500], [2, "response", 503, 25, true, 2000],
+    [3, "response", 401, 25, false, undefined],
+  ]);
+  strictEqual(Date.parse(attempts[1]!.startedAt) - Date.parse(attempts[0]!.startedAt), 525);
+  strictEqual(JSON.stringify(attempts).includes("private"), false);
+});
+
+test("attempt evidence distinguishes exhaustion and cancellation without altering retries", async () => {
+  const attempts: SitecoreHttpAttempt[] = [];
+  const runtime = new TestRuntime(Array.from({ length: 4 }, () => new Error("private")));
+  const client = new SitecoreHttpClient(new TestLogger(), runtime);
+  await rejects(client.request("https://example.test", {}, { ...requestOptions(), onAttempt: a => attempts.push(a) }));
+  strictEqual(attempts.length, 4);
+  strictEqual(attempts[3]!.retryScheduled, false);
+  const controller = new AbortController();
+  runtime.fetch = async () => { controller.abort(); throw controller.signal.reason; };
+  await rejects(client.request("https://example.test", {}, { ...requestOptions(controller.signal), onAttempt: a => attempts.push(a) }), { name: "AbortError" });
+  strictEqual(attempts.at(-1)!.outcome, "cancelled");
+});
+
+test("a failed attempt observer cannot retry or fail a successful request", async () => {
+  const runtime = new TestRuntime([new Response(null, { status: 200 })]);
+  const response = await new SitecoreHttpClient(new TestLogger(), runtime).request("https://example.test", {},
+    { ...requestOptions(), onAttempt: () => { throw new Error("observer failed"); } });
+  strictEqual(response.status, 200);
+  strictEqual(runtime.requests.length, 1);
+});
 
 test("request forwards request data and returns a successful response", async () => {
   const response = new Response("created", { status: 201 });

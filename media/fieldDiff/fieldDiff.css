@@ -1,4 +1,14 @@
 :root { color-scheme: light dark; }
+#field-fallback-mode { font: inherit; color: var(--vscode-foreground); background: transparent; border: 1px solid var(--vscode-button-border, var(--vscode-panel-border)); padding: 3px 7px; cursor: pointer; }
+#field-fallback-mode[aria-pressed="true"] { color: var(--vscode-button-foreground); background: var(--vscode-button-background); }
+#field-fallback-mode:disabled { color: var(--vscode-disabledForeground); cursor: default; }
+#field-fallback-mode:focus-visible { outline: 1px solid var(--vscode-focusBorder); }
+[hidden] { display: none !important; }
+body:not(.browse) .browse-only { display: none; }
+body.browse .paired-grid { grid-template-columns: minmax(0, 1fr); min-width: 0; }
+body.browse .summary-cell span { white-space: normal; overflow-wrap: anywhere; }
+body.browse .public-page { justify-self: start; padding: 3px 8px; border: 1px solid var(--vscode-button-border, transparent); color: var(--vscode-button-foreground); background: var(--vscode-button-background); font: inherit; cursor: pointer; }
+body.browse .public-page:focus-visible { outline: 1px solid var(--vscode-focusBorder); outline-offset: 2px; }
 * { box-sizing: border-box; }
 body {
   margin: 0;
@@ -47,8 +57,9 @@ body {
 .summary { border-bottom: 1px solid var(--vscode-panel-border); }
 .summary-cell { display: grid; gap: 3px; min-width: 0; padding: 8px 12px; }
 .summary-cell span { overflow: hidden; color: var(--vscode-descriptionForeground); text-overflow: ellipsis; white-space: nowrap; }
+.summary-cell .item-fallback-note { display: block; }
 .item-id { display: flex; gap: 6px; align-items: center; min-width: 0; color: var(--vscode-descriptionForeground); font-size: 11px; }
-.item-id button {
+.identity-copy {
   min-width: 0;
   padding: 0;
   overflow: hidden;
@@ -61,10 +72,10 @@ body {
   white-space: nowrap;
   cursor: pointer;
 }
-.item-id button:hover:not(:disabled) { text-decoration: underline; }
-.item-id button:focus-visible { outline: 1px solid var(--vscode-focusBorder); outline-offset: 2px; }
-.item-id button:disabled { color: var(--vscode-disabledForeground); cursor: wait; }
-.item-id button.copied { color: var(--vscode-testing-iconPassed, var(--vscode-charts-green)); }
+.identity-copy:hover:not(:disabled) { text-decoration: underline; }
+.identity-copy:focus-visible { outline: 1px solid var(--vscode-focusBorder); outline-offset: 2px; }
+.identity-copy:disabled { color: var(--vscode-disabledForeground); cursor: wait; }
+.identity-copy.copied { color: var(--vscode-testing-iconPassed, var(--vscode-charts-green)); }
 .field-row { border-bottom: 1px solid color-mix(in srgb, var(--vscode-panel-border) 72%, transparent); }
 .field-row.different { background: color-mix(in srgb, var(--vscode-editorWarning-foreground) 5%, transparent); }
 .field-cell { min-width: 0; padding: 7px 12px; }

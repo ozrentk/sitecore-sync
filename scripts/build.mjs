@@ -2,6 +2,14 @@ import { build } from "esbuild";
 
 await Promise.all([
   build({
+    entryPoints: ["src/mcp/server.ts"],
+    bundle: true,
+    format: "cjs",
+    platform: "node",
+    target: "node20",
+    outfile: "out/mcpServer.js",
+  }),
+  build({
     entryPoints: ["src/extension.ts"],
     bundle: true,
     external: ["vscode", "playwright-core"],

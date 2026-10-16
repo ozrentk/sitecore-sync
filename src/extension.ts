@@ -1,10 +1,11 @@
-import { PublicPageService } from "./publicPages/publicPageService";
+import { ItemEditorProvider, itemEditorViewType } from "./editor/itemEditorProvider";
+import { McpAccessManager } from "./mcp/accessManager";
+import { FallbackFixtureCommands } from "./connections/fallbackFixtureCommands";
+import { ConnectionSettingsPanel } from "./connections/connectionSettingsPanel";
+import { runFallbackDiagnostic } from "./connections/fallbackDiagnosticCommand";
 import * as vscode from "vscode";
 import { ComparisonPanelManager } from "./comparison/comparisonPanel";
 import {
-  addConnection,
-  configureDeploymentMonitoring,
-  pasteAsConnectionUrl,
   removeConnection,
   testConnection,
 } from "./connections/connectionCommands";
@@ -49,6 +50,11 @@ export function activate(context: vscode.ExtensionContext): void {
   const connectionStore = new ConnectionStore(context.globalState, context.secrets);
   const connectionProvider = new ConnectionTreeProvider(connectionStore);
   const authoringClient = new AuthoringContentClient(log);
+  const mcpAccess = new McpAccessManager(context, connectionStore, authoringClient);
+  context.subscriptions.push(mcpAccess);
+  const diagnosticLifetime = new AbortController();
+  context.subscriptions.push({ dispose: () => diagnosticLifetime.abort() });
+  const fallbackFixtures = new FallbackFixtureCommands(connectionStore, authoringClient, context.workspaceState, diagnosticLifetime.signal);
   const deploymentClient = new DeploymentClient(log);
   const taskOutput = vscode.window.createOutputChannel("XM Cloud Tasks");
   const publishOutput = vscode.window.createOutputChannel("XM Cloud Publish");
@@ -127,6 +133,15 @@ export function activate(context: vscode.ExtensionContext): void {
     publishingManager,
     log,
   );
+  const itemEditors = new ItemEditorProvider(context, connectionStore, authoringClient);
+  context.subscriptions.push(itemEditors,
+    vscode.window.registerCustomEditorProvider(itemEditorViewType, itemEditors, { supportsMultipleEditorsPerDocument: false }),
+    vscode.commands.registerCommand("xmCloudSync.editItem", async (args: unknown) => {
+      try { await itemEditors.open(args); }
+      catch { await vscode.window.showErrorMessage("Unable to open this item editor. Check the connection and select an existing content item."); }
+    }),
+    itemEditors.onDidSave(target => { void comparisonPanelManager.handleEditorSaved(target.connectionId, target.itemId).catch(() => { log.warn("Item save confirmed, but comparison refresh failed. Refresh the comparison to reload values."); }); }),
+  );
   const connectionsView = vscode.window.createTreeView("xmCloudSync.connections", {
     treeDataProvider: connectionProvider,
   });
@@ -165,6 +180,8 @@ export function activate(context: vscode.ExtensionContext): void {
     comparisonPanelManager.isConnectionInOpenComparison(connectionId) ||
     transferQueue.referencesConnection(connectionId) ||
     sequenceStore.referencesConnection(connectionId);
+  const connectionSettings = new ConnectionSettingsPanel(context.extensionUri, context.globalState, connectionStore, authoringClient, deploymentClient, experienceEdgeClient, connectionIsInUse);
+  context.subscriptions.push(connectionSettings);
   const updateConnectionRemovalContext = async (): Promise<void> => {
     const selected = selectedConnectionItem?.connection;
     await Promise.all([
@@ -268,25 +285,32 @@ export function activate(context: vscode.ExtensionContext): void {
   );
 
   context.subscriptions.push(
+    vscode.commands.registerCommand("xmCloudSync.configureConnection", async (argument: unknown) => {
+      await connectionSettings.choose("connection", argument instanceof ConnectionTreeItem ? argument.connection.id : undefined);
+    }),
     vscode.commands.registerCommand("xmCloudSync.configurePublicPageUrls", async () => {
-      try { await new PublicPageService(connectionStore, authoringClient).configure(comparisonPanelManager.getPublicPagePreviewContext()); }
-      catch (error: unknown) { await vscode.window.showErrorMessage(`Unable to configure public-page URLs: ${error instanceof Error ? error.message : String(error)}`); }
+      if (connectionStore.list().length) { await connectionSettings.choose("public"); }
+      else { await connectionSettings.open(undefined, "public"); }
     }),
     vscode.commands.registerCommand("xmCloudSync.configurePublicPageValues", async (argument: unknown) => {
-      try { await new PublicPageService(connectionStore, authoringClient).configureValues(argument instanceof ConnectionTreeItem ? argument.connection.id : undefined); }
-      catch (error: unknown) { await vscode.window.showErrorMessage(`Unable to configure public-page URL values: ${error instanceof Error ? error.message : String(error)}`); }
+      await connectionSettings.choose("public", argument instanceof ConnectionTreeItem ? argument.connection.id : undefined);
     }),
     vscode.commands.registerCommand("xmCloudSync.addConnection", async () => {
-      await addConnection(connectionStore, connectionProvider, authoringClient);
-    }),
-    vscode.commands.registerCommand("xmCloudSync.pasteAsConnectionUrl", async () => {
-      await pasteAsConnectionUrl(connectionStore, connectionProvider, authoringClient);
+      await connectionSettings.open();
     }),
     vscode.commands.registerCommand("xmCloudSync.testConnection", async (argument) => {
       await testConnection(argument, connectionStore, connectionProvider, authoringClient);
     }),
+    vscode.commands.registerCommand("xmCloudSync.createFallbackTestItems", () => fallbackFixtures.run(false)),
+    vscode.commands.registerCommand("xmCloudSync.diagnoseFallbackTestItems", () => fallbackFixtures.run(true)),
+    vscode.commands.registerCommand("xmCloudSync.startMcpAccess", () => mcpAccess.start()),
+    vscode.commands.registerCommand("xmCloudSync.stopMcpAccess", () => mcpAccess.stop()),
+    vscode.commands.registerCommand("xmCloudSync.enableMcpMutations", () => mcpAccess.enableMutations()),
+    vscode.commands.registerCommand("xmCloudSync.collectFallbackDiagnostic", async () => {
+      await runFallbackDiagnostic(connectionStore, authoringClient, diagnosticLifetime.signal);
+    }),
     vscode.commands.registerCommand("xmCloudSync.configureDeploymentMonitoring", async (argument) => {
-      await configureDeploymentMonitoring(argument, connectionStore, deploymentClient);
+      await connectionSettings.choose("deployment", argument instanceof ConnectionTreeItem ? argument.connection.id : undefined);
     }),
     vscode.commands.registerCommand("xmCloudSync.removeConnection", async (argument) => {
       await removeConnection(
@@ -294,6 +318,9 @@ export function activate(context: vscode.ExtensionContext): void {
         connectionStore,
         connectionIsInUse,
       );
+    }),
+    vscode.commands.registerCommand("xmCloudSync.browseConnection", async (argument) => {
+      if (argument instanceof ConnectionTreeItem) await comparisonPanelManager.openBrowse(argument.connection.id);
     }),
     vscode.commands.registerCommand("xmCloudSync.openComparison", async () => {
       await comparisonPanelManager.open();
@@ -348,9 +375,7 @@ export function activate(context: vscode.ExtensionContext): void {
       await publishingManager.abandonCurrentPublish();
     }),
     vscode.commands.registerCommand("xmCloudSync.configurePublishing", async (argument) => {
-      await publishingManager.configureConnection(
-        argument instanceof ConnectionTreeItem ? argument.connection.id : undefined,
-      );
+      await connectionSettings.choose("publishing", argument instanceof ConnectionTreeItem ? argument.connection.id : typeof argument === "string" ? argument : undefined);
     }),
     vscode.commands.registerCommand("xmCloudSync.startTransfers", async () => {
       await transferProcessor.start();

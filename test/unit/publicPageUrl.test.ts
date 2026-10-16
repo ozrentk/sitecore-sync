@@ -1,4 +1,4 @@
-import { deepStrictEqual, strictEqual, throws, rejects } from "node:assert/strict";
+import { deepStrictEqual, strictEqual, throws, rejects, ok } from "node:assert/strict";
 import { test } from "node:test";
 import { hasPagePresentation, inferLanguageParts, resolveHomepageUrl, validatePublicPageTemplate, parsePublicPageConnectionValues, resolvePublicPage, resolvePublicPageUrl } from "../../src/publicPages/publicPageUrl";
 import type { AuthoringItemDetails } from "../../src/sitecore/authoringClient";
@@ -23,9 +23,10 @@ test("effective inherited layout identifies pages and resolves nearest owning pa
   strictEqual(hasPagePresentation(item(`${site.rootPath}/Home`)), false);
   const requested: string[] = [];
   const target = await resolvePublicPage("{publicBaseUrl}/{country}/{route}", { sites: { site: values } }, [site], item(`${page.path}/Data/Text`), "en-CA", async path => { requested.push(path); return path === page.path ? page : item(path); }, new AbortController().signal);
+  ok(target);
   strictEqual(target.url, "https://public.example/ca/article");
   strictEqual(requested.length, 2);
-  await rejects(resolvePublicPage("{publicBaseUrl}{route}", { sites: { site: values } }, [site], item(`${site.rootPath}/Data/Shared`), "en", async path => item(path), new AbortController().signal), /No page presentation/);
+  strictEqual(await resolvePublicPage("{publicBaseUrl}{route}", { sites: { site: values } }, [site], item(`${site.rootPath}/Data/Shared`), "en", async path => item(path), new AbortController().signal), undefined);
   await rejects(resolvePublicPage("{publicBaseUrl}{route}", {}, [site], page, "en", async () => { throw new Error("offline"); }, AbortSignal.abort()), /abort/i);
   await rejects(resolvePublicPage("{publicBaseUrl}{route}", {}, [site, { ...site, name: "another" }], page, "en", async path => item(path), new AbortController().signal), /Several sites/);
   await rejects(resolvePublicPage("{publicBaseUrl}{route}", {}, [site], item(`${page.path}/Data/Text`), "en", async () => { throw new Error("offline"); }, new AbortController().signal), /offline/);
@@ -42,10 +43,12 @@ test("final-layout delta identifies the selected page without returned shared la
   strictEqual(hasPagePresentation(page), true);
   const target = await resolvePublicPage("https://example.test{route}", {}, [site], page, "en-US",
     async () => { throw new Error("Selected page must resolve without walking ancestors"); }, new AbortController().signal);
+  ok(target);
   strictEqual(target.page, page);
   strictEqual(target.url, "https://example.test/50-states-50-trails");
   const datasource = await resolvePublicPage("https://example.test{route}", {}, [site], item(`${page.path}/Data/Text`), "en-US",
     async path => path === page.path ? page : item(path), new AbortController().signal);
+  ok(datasource);
   strictEqual(datasource.page, page);
 });
 

@@ -1,5 +1,263 @@
 # Changelog
 
+## 0.45.0 — 2026-10-16
+
+- Isolate Rich Text previews in sandboxed frames, preserving inline formatting and embedded CSS while blocking scripts, navigation and external requests.
+- Rich Text remains read-only. Tiptap and ProseMirror compatibility spikes are evaluation tooling, not shipped editing functionality.
+- Known issue (B31): the General Link destination-focus expansion integration check fails intermittently across verification runs; normal interactive reproduction remains unverified. The release accepts this coverage gap, with investigation deferred.
+
+## 0.44.1
+
+- Preview ordinary SVG logos using a bounded shape-only allowlist; reject scripts, external references, styles and unsupported markup.
+- Move Image/File attributes and stored XML into field information, keep the main field compact, and distinguish certificate and unsupported-SVG failures.
+
+## 0.44.0
+
+- Make unsupported editor fields inspectable: Image/File metadata, on-demand safe asset previews/reference resolution, inert Rich Text formatting with original HTML, and explicit empty/unavailable/raw states.
+- Keep asset failures visible without losing metadata; scope requests to the captured connection and cancel obsolete results. Preserve unsupported values when saving other fields.
+- Show matching Image/File metadata and Rich Text/source presentation in Item Details without changing comparison or transfer behavior.
+
+## 0.43.1
+
+- Inset expanded General Link properties with surrounding spacing to visually group them within their field.
+
+## 0.43.0
+
+- Make General Link compact with keyboard-accessible type buttons, one destination, inline expandable properties and a collapsed summary. Validation errors stay expanded.
+- Preserve per-type temporary destinations and properties across switching, Undo/Redo and backup/reload. Save writes only the active type; Save/Clear/Revert discard temporary alternatives.
+- Preserve protected custom/DAM metadata, unsupported type identification and existing Source-aware picking. No automatic save or link execution.
+
+## 0.42.0
+
+- Add compact Name Value List rows with lossless encoding, explicit add/remove/clear and validation. Preserve existing duplicates and reject new duplicate keys or malformed rows.
+- Add structured General Link editing for internal, HTTP(S), email and anchor links, with Source-aware item picking. Preserve unknown XML/DAM attributes and original raw values; unsupported variants remain read-only.
+- Retain changed-only Save, exact-locale protection, conflict checks, backups and Undo/Redo, including restoration after Save/Clear. No link execution, asset selection, media upload or publishing is added.
+
+## 0.41.1
+
+- Show only the final item name in picker headers instead of the shortened breadcrumb; preserve full-path tooltips and tree navigation.
+
+## 0.41.0
+
+- Replace inline item choices with compact, viewport-bounded searchable popovers. Multi-selection uses Add items, persistent Added indicators and add-only result rows; single-selection closes after choosing.
+- Keep search fixed above scrolling results, shorten Source breadcrumbs, show relative paths only for duplicate labels, and retain full paths/Source expressions in tooltips. Add accessible close/keyboard navigation and explicit child-level tree navigation.
+- Preserve selected-list removal/reordering, draft Undo/Redo, Source validation and Save behavior.
+
+## 0.40.0
+
+- Replace selected-list Move up/down buttons with same-field drag handles and Alt+Up/Alt+Down keyboard reordering for Multilist, Treelist and TreelistEx. Add insertion markers, edge scrolling, compact removal, full-label tooltips and accessible move announcements.
+- Make completed reorders coherent native Undo/Redo edits; existing draft edits use the same event model. Preserve exact reference tokens and validate reorder snapshots without changing Save or Source protections.
+
+## 0.39.0
+
+- Support bounded relative immediate-child queries with one exact template-ID filter for Droplist, Droplink, Checklist and Multilist, including the Hotspots Source form.
+- Resolve choices from the pinned edited item and validate fresh Source membership before saving; preserve retained unavailable references. Other query forms and grouped/tree query Sources remain read-only.
+
+## 0.38.0
+
+- Add Checklist, Multilist, Treelist and TreelistEx editing through the existing draft, Save/Revert and recovery pipeline.
+- Preserve unresolved references and stored ID representations; support explicit add/remove, ordered list movement and lazy tree browsing. Checklist has no ordering controls.
+- Validate newly added references against fresh supported Sources before Save. Query/parameterized Sources and malformed or duplicate stored lists remain read-only.
+
+## 0.37.7
+
+- Merge inherited template sections with the same name into one editor group, preserving field order and prior expansion choices.
+- Resolve editor headings from template-field Title metadata instead of Authoring value labels such as “standard value”; keep internal names in the information box.
+
+## 0.37.6
+
+- Fix editor section ordering: equal section sort orders now use section names before field-level ordering, so fields cannot pull their section ahead of another group.
+
+## 0.37.5
+
+- Group editor fields by Sitecore section identity, preventing repeated headings when section sort orders match.
+- Add keyboard-accessible collapsible sections; standard-only groups start collapsed and expansion choices survive editor refreshes.
+
+## 0.37.4
+
+- Extend the information popover to every editable and read-only field, with metadata and stored values. Reference paths remain in the popover.
+- Preserve whitespace and allow scrolling for long stored values.
+
+## 0.37.3
+
+- Compact selection fields into a name-only textbox with Clear on the right; clicking or keyboard-opening the textbox loads choices.
+- Close choices after selection, Escape, outside click or focus leaving the field.
+- Move selection metadata, stored value and full item path into a hover/click/focus information popover.
+
+## 0.37.2
+
+- Resolve selected Droplink, Grouped Droplink and Droptree names/paths automatically when fields appear, independently of loading their choices.
+- Preserve stored values and drafts, show unavailable-reference feedback, and discard stale label responses after edits, refresh or disposal.
+
+## 0.37.1
+
+- Remove the redundant Clear button from checkbox fields; check or uncheck directly.
+- Accept literal punctuation such as braces in returned selection item paths without weakening Source restrictions or membership checks.
+
+## 0.37.0
+
+- Add source-aware single-selection controls for Droplist, Droplink, Grouped Droplist, Grouped Droplink and Droptree.
+- Support explicit Source root paths/IDs with searchable grouped lists and lazy tree navigation; keep unsupported source forms read-only.
+- Preserve unresolved existing values, prevent ambiguous name selection, and revalidate source membership before saving through the existing journal/recovery flow.
+
+## 0.36.1
+
+- Keep open item-editor resources stable while persisting save journals in a separate state file, with recovery of existing drafts.
+- Report the failing save stage and safe permission, HTTP, response-validation or cancellation details while retaining drafts and blocking uncertain write retries.
+
+## 0.36.0
+
+- Add Edit… from Browse and the clicked Compare side, opening a dedicated item editor pinned to connection, item, locale and numbered version.
+- Add basic text, checkbox, integer, number, date and explicitly UTC datetime controls; preserve untouched values and keep unsupported/fallback fields read-only.
+- Add Save/Revert, conflict checks, native dirty tabs/backups, persisted save tracking and readback reconciliation without automatic mutation retries or version creation.
+
+## 0.35.0
+
+- Make displayed Item Details paths copyable like IDs in Browse and on each Compare side, with keyboard-accessible buttons and inline success/failure feedback.
+- Keep identity-copy feedback visible without re-rendering away the success mark; validate path copies against the displayed host snapshot.
+
+## 0.34.2
+
+- Show an expected-source hint for fallback fields when their own item has a suitable configured candidate, consistently in Browse, Item Details and Compare.
+- Explain candidate provenance and its chain in the tooltip; retain unknown sources when no suitable candidate exists. Resolution and write decisions remain unchanged.
+
+## 0.34.1
+
+- Position Browse's Fallback toggle immediately to the right of the language selector.
+
+## 0.34.0
+
+- Enable synchronized Fallback toggles in Browse and Item Details as well as Compare.
+- Display Authoring's effective fields for missing translations while retaining the requested locale and version 0.
+- Show bounded, validated configured item-fallback candidates separately from unknown effective provenance; never substitute candidate content.
+- Distinguish empty fallback responses from exact-locale absence. Preserve read-only fallback comparisons and stale-request guards.
+
+## 0.33.2
+
+- Replace the fallback dropdown with synchronized Fallback toggles in the tree comparison and Field Diff toolbars; use a Lock Languages toggle in the tree toolbar.
+- Remove duplicate fallback-mode labels, the Exact locale values disclosure and the field-transfer reminder while retaining transfer guards.
+
+## 0.33.1
+
+- Removed the missing-page-presentation warning from Item Details and Field Diff. Items without a detected page quietly omit the public-page link.
+
+## 0.33.0
+
+- Add explicit Exact locale / With fallback comparison modes, preserving tree expansion and selection when switching.
+- Compare Sitecore-provided effective fields independently on each side, retain inspectable exact values, and label unverified fallback sources unknown.
+- Restrict field transfers to Exact locale and reject stale transfers and detail results across mode changes. Browse, publishing and tree transfers keep their existing semantics.
+
+## 0.32.1
+
+- Validate fallback diagnostic outer item identity and requested locale without rejecting legitimate fallback field values.
+- Restart a paginated probe once from page one on numbered-version drift; separate discarded evidence and report repeated drift as incomplete/item-changed within shared collection budgets.
+- Label the original-locale cross-check as an item.fields-only field-fallback read and expose outer returned metadata separately.
+- Include fixed queries, actual variables/cursors, omitted/latest version selection, and safe HTTP attempt timing/status/retry evidence in diagnostic format 3. Preserve existing routing and authentication behavior.
+
+## 0.32.0
+
+- Add confirmed MCP control of the two fallback rule checkboxes on isolated fixture field definitions, including first metadata-language version creation when needed.
+- Preserve fixture ownership, stale-preview checks, bounded journaling and unknown-outcome handling for per-language rule experiments.
+
+## 0.31.0
+
+- Add confirmed isolated fallback scope fixtures with their own template, five text fields, localized Standard Values and content item.
+- Add journal-bound fixture field edits/resets and second-version creation without widening general shared/system editing.
+- Support explicit-version MCP item reads for controlled cross-version comparisons.
+
+## 0.30.0
+
+- Add previewed MCP creation of the first local language version and explicit content-field reset for controlled fallback testing.
+- Validate the version mutation contract without execution before preview, preserve confirmation and stale-state checks, and journal uncertain outcomes without retries.
+
+## 0.29.0
+
+- Add explicitly started local MCP access for selected connections, with path-based reads, indexed search, language/site discovery and fallback diagnostics.
+- Add previewed, confirmed fallback test creation and exact-locale content field updates with session mutation controls, stale-state checks and persisted recovery records.
+- Bundle the stdio MCP server and display client setup instructions; keep Sitecore credentials inside VS Code and revoke access on stop.
+
+## 0.28.1
+
+- Keep fallback test and diagnostic GUID/locale textboxes open when switching windows to copy values.
+
+## 0.28.0
+
+- Add Create Fallback Test Items and Diagnose Fallback Test Items commands, with confirmed template-based creation, workspace recovery records and exact/fallback evidence collection.
+- Follow configured fallback-language names as well as GUID references.
+- Keep test content unpublished and preserve existing content and template settings.
+
+## 0.27.0
+
+- Extend the Authoring fallback diagnostic with exact language-chain reference, field-definition and template/Standard Values evidence, explicit limits and unknown environment settings.
+- Recognize version-0/null-fields responses as completed observations rather than invalid API responses.
+- Keep the same connection/item/locale inputs; select **Item probes and fallback configuration** to collect the expanded version-2 report.
+
+## 0.26.0
+
+- Add **Collect Authoring Fallback Diagnostic** to the Command Palette, using saved connection credentials without requiring the browser Playground.
+- Collect the schema and optional paginated exact-locale/fallback cross-check evidence into an unsaved JSON report, with cancellation, collection limits and credential redaction.
+- Keep comparison, transfer and publishing semantics unchanged while live fallback provenance is investigated.
+
+## 0.25.2
+
+- Recover removed comparison endpoints in Browse without silently selecting another connection; show an explicit connection choice when the browsed source is missing.
+- Clear content, language and navigation caches when connection endpoints change, and reject requests superseded while credentials are loading.
+- Record B18 automated and browser verification separately from pending manual desktop and live Sitecore acceptance.
+
+## 0.25.1
+
+- Always retain the left comparison side when switching to Browse, preserving its language and navigation. Remove the Keep in Browse selector and side-choice prompt; ignore old retained-side preferences.
+
+## 0.25.0
+
+- Add a visible Browse / Compare selector with the active mode highlighted.
+- Remember each browsed connection's comparison partner and language; prompt for missing partners, unavailable languages and conflicting language locks without losing the current view on cancellation.
+- Remember the side retained in Browse and preserve its root, selection, loaded branches and scroll through mode switches within the open panel.
+- Remove Browse's toolbar Refresh button; retain context-menu refresh and show Cancel loading only during cancellable loads in either mode.
+
+## 0.24.2
+
+- Accept null publishing-language metadata without pausing the queue; continue honoring the reported job state, completion and failure flags.
+
+## 0.24.1
+
+- Correct the shared bottom-panel tab name to Item Details.
+- Distinguish hidden fields from an empty Authoring response, report language/version context and provide Show all fields.
+- Identify invalid publishing-status fields without exposing response values; report the remote outcome as unknown.
+
+## 0.24.0
+
+- Add read-only Item Details to Browse with item metadata, one field column, scope/source markers and separate All/Hidden visibility controls.
+- Enable Standard, Traced and Power Publish, matching item tasks, public-page links and copying item IDs/paths from Browse.
+- Reject stale detail responses and action contexts while preserving Compare field differences and transfers.
+
+## 0.23.0
+
+- Open connections in Browse with one full-width content tree, connection-scoped search, sites/favorites and navigation controls.
+- Keep comparison actions out of Browse and preserve explicit two-sided Compare workflows. Single-item details/actions and complete mode switching remain planned.
+
+## 0.22.4
+
+- Distinguish valid Experience Edge tokens from site-catalog mismatches; show Authoring and Edge sites and allow an explicit scope override on Save.
+
+## 0.22.3
+
+- Give the Experience Edge token the same single masked field and concise hints as other secrets; empty input keeps the stored token.
+
+## 0.22.2
+
+- Simplify secret placeholders and helper text, shorten the Test connection button, and show connection test results in a modal.
+
+## 0.22.1
+
+- Simplify client and organization secrets to a single masked field each: enter a replacement or leave empty to retain the saved secret.
+
+## 0.22.0
+
+- Add a unified Connection Settings dashboard for creating and editing connections, deployment monitoring, site URL values and traced-publishing defaults.
+- Validate entries inline, test unsaved credentials, discover sites, and keep saved secrets masked with explicit keep/replace/remove controls.
+- Preserve existing configurations and favorites, reject stale edits and attempt rollback if saving fails.
+
 ## 0.21.2
 
 - Distribute installable VSIX files through GitHub Releases, with version-tag and main-branch validation.

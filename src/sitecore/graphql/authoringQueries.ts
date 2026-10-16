@@ -1,4 +1,13 @@
 import gql from "graphql-tag";
+import { Kind, visit, type DocumentNode } from "graphql";
+
+/** Only item.fields opts into fallback; the outer lookup keeps its requested locale. */
+export function withFieldFallback(query: DocumentNode): DocumentNode {
+  return visit(query, { Argument(node) {
+    return node.name.value === "withLanguageFallback"
+      ? { ...node, value: { kind: Kind.BOOLEAN, value: true } } : undefined;
+  } });
+}
 
 export const testConnectionQuery = gql`
   query XmCloudSyncTestConnection {
@@ -92,8 +101,6 @@ export const itemDetailsQuery = gql`
         first: $pageSize
         after: $after
         ownFields: false
-        # TODO: Decide whether field comparison should resolve language fallback.
-        # See the fallback investigation in PRODUCT_SPEC.md.
         withLanguageFallback: false
       ) {
         nodes {
@@ -134,12 +141,14 @@ export const nonStandardFieldIdsQuery = gql`
     $after: String
   ) {
     item(where: $where) {
+      itemId
+      version
+      language { name }
       fields(
         first: $pageSize
         after: $after
         ownFields: false
         excludeStandardFields: true
-        # TODO: Keep this aligned with XmCloudSyncItemDetails while fallback is investigated.
         withLanguageFallback: false
       ) {
         nodes {
@@ -184,10 +193,39 @@ export const updateItemMutation = gql`
   }
 `;
 
+// Validation uses GraphQL's skip directive: the server checks the contract without executing it.
+export const addItemVersionMutation = gql`
+  mutation XmCloudSyncAddItemVersion($input: AddItemVersionInput!, $validateOnly: Boolean!) {
+    __typename
+    addItemVersion(input: $input) @skip(if: $validateOnly) {
+      item { itemId path version language { name } }
+    }
+  }
+`;
+
 export const deleteItemMutation = gql`
   mutation XmCloudSyncDeleteItem($input: DeleteItemInput!) {
     deleteItem(input: $input) {
       successful
+    }
+  }
+`;
+
+// These fields reuse the established Authoring Item and children schema. Locale is
+// selected explicitly to reject a response for another editor context.
+export const selectionItemQuery = gql`
+  query XmCloudSyncSelectionItem($where: ItemQueryInput!) {
+    item(where: $where) { itemId name displayName path hasChildren language { name } }
+  }
+`;
+export const selectionTreeQuery = gql`
+  query XmCloudSyncTreeLevel($where: ItemQueryInput!, $pageSize: PaginationAmount!, $after: String) {
+    item(where: $where) {
+      itemId name displayName path hasChildren language { name }
+      children(first: $pageSize, after: $after) {
+        nodes { itemId name displayName path hasChildren language { name } template { templateId } }
+        pageInfo { hasNextPage endCursor }
+      }
     }
   }
 `;

@@ -1,10 +1,13 @@
+import { ContentSession, type ContentEndpoint } from "./contentSession";
+import { observeItemFallback, type ItemFallbackObservation } from "./itemFallback";
+import { comparisonFieldEvidence, type ComparisonItemDetails, type FieldFallbackMode } from "./fieldFallback";
+import { modePreferencesKey, navigationEndpoint, prepareCompare, readModePreferences } from "./modeSwitching";
 import { PublicPageService, type PublicPagePreviewContext } from "../publicPages/publicPageService";
 import * as vscode from "vscode";
 import type { ConnectionStore } from "../connections/connectionStore";
 import {
   AuthoringContentClient,
   AuthoringItemNotFoundError,
-  type AuthoringItemDetails,
   type AuthoringItemIconReference,
   type AuthoringItemLocator,
   type AuthoringLanguage,
@@ -65,6 +68,12 @@ interface ComparisonSelection {
 }
 
 interface WebviewMessage {
+  readonly fallbackMode?: unknown;
+  readonly fallbackRevision?: unknown;
+  readonly mode?: unknown;
+  readonly navigation?: unknown;
+  readonly viewMode?: unknown;
+  readonly viewContext?: unknown;
   readonly searchRequestId?: unknown;
   readonly query?: unknown;
   readonly roots?: unknown;
@@ -174,6 +183,13 @@ class FieldDiffContentProvider implements vscode.TextDocumentContentProvider {
 }
 
 export class ComparisonPanelManager implements vscode.Disposable {
+  private readonly clipboard = vscode.env.clipboard;
+  private fallbackMode: FieldFallbackMode = "exact";
+  private fallbackRevision = 0;
+  private readonly contentSession = new ContentSession();
+  private modeIntent = 0;
+  private modeSwitchPicker: vscode.CancellationTokenSource | undefined;
+  private readonly modeNavigation = new Map<string, ContentEndpoint>();
   private itemSearchSession: ItemSearchSession | undefined;
   private publicPageController: AbortController | undefined;
   private lookupController: AbortController | undefined;
@@ -184,8 +200,8 @@ export class ComparisonPanelManager implements vscode.Disposable {
   private readonly pendingTreeLevels = new Map<string, Promise<AuthoringTreeLevel>>();
   private readonly languageCache = new Map<string, readonly AuthoringLanguage[]>();
   private readonly pendingLanguages = new Map<string, Promise<readonly AuthoringLanguage[]>>();
-  private readonly itemDetailsCache = new Map<string, AuthoringItemDetails>();
-  private readonly pendingItemDetails = new Map<string, Promise<AuthoringItemDetails>>();
+  private readonly itemDetailsCache = new Map<string, ComparisonItemDetails>();
+  private readonly pendingItemDetails = new Map<string, Promise<ComparisonItemDetails>>();
   private readonly itemIconReferenceCache = new Map<string, string | undefined>();
   private readonly pendingItemIconReferences = new Map<string, Promise<string | undefined>>();
   private readonly itemIconCache = new Map<string, CachedItemIcon | undefined>();
@@ -239,10 +255,12 @@ export class ComparisonPanelManager implements vscode.Disposable {
       async (fieldId, direction) => {
         await this.copySelectedFieldValue(fieldId, direction);
       },
-      async (side, itemId) => await this.copySelectedItemId(side, itemId),
+      async (side, itemId, path) => await this.copySelectedItemIdentity(side, itemId, path),
       async (side, itemId) => {
         if (this.selectedFieldDiffItem?.[`${side}ItemId`] === itemId) { await this.openPublicPage(side, itemId); }
       },
+      async mode => { if (!this.pendingLanguageView) await this.setFieldFallbackMode(mode); },
+      () => this.fallbackMode,
     );
     this.disposables.push(
       this.fieldDiffViewProvider,
@@ -348,7 +366,112 @@ export class ComparisonPanelManager implements vscode.Disposable {
     }
   }
 
+  async openBrowse(connectionId: string): Promise<void> {
+    if (!this.connectionStore.get(connectionId)) return;
+    const intent = ++this.modeIntent;
+    this.cancelRequests();
+    const previous = this.getSelection();
+    this.contentSession.openConnection({ connectionId, language: previous.leftConnectionId === connectionId ? previous.leftLanguage : defaultLanguage, rootPath: "/" });
+    await this.clearFieldDiffSelection();
+    if (intent !== this.modeIntent) return;
+    await this.openPanel();
+    if (intent !== this.modeIntent) return;
+    await this.postState();
+    await this.loadInitialTrees();
+  }
+
+  private get browseMode(): boolean { return this.contentSession?.state?.mode === "browse"; }
+
   async open(): Promise<void> {
+    if (this.browseMode) {
+      if (this.panel) await this.panel.webview.postMessage({ type: "requestCompareMode" });
+      else await this.switchMode({ mode: "compare" });
+    }
+    await this.openPanel();
+  }
+
+  private cancelModeSwitch(): void {
+    this.modeIntent = (this.modeIntent ?? 0) + 1;
+    this.modeSwitchPicker?.cancel();
+    this.modeSwitchPicker?.dispose();
+    this.modeSwitchPicker = undefined;
+  }
+
+  private async switchMode(message: WebviewMessage): Promise<void> {
+    this.cancelModeSwitch();
+    const mode = message.mode;
+    if ((mode !== "browse" && mode !== "compare") || mode === (this.browseMode ? "browse" : "compare")) return;
+    const intent = this.modeIntent;
+    const picker = new vscode.CancellationTokenSource();
+    this.modeSwitchPicker = picker;
+    const currentSession = this.contentSession.capture();
+    const current = (): boolean => intent === this.modeIntent && currentSession() && !picker.token.isCancellationRequested;
+    const preferences = readModePreferences(this.workspaceState.get(modePreferencesKey));
+    const selection = this.getSelection();
+    const navigation = message.navigation && typeof message.navigation === "object"
+      ? message.navigation as Record<string, unknown> : {};
+    const endpoint = (side: TreeSide): ContentEndpoint | undefined => {
+      const connectionId = selection[`${side}ConnectionId`];
+      if (!connectionId) return undefined;
+      return navigationEndpoint(this.sessionEndpoint(side) ?? { connectionId, language: selection[`${side}Language`], rootPath: "/" }, navigation[side]);
+    };
+    const left = endpoint("left");
+    const right = endpoint("right");
+    if (!left) { picker.dispose(); this.modeSwitchPicker = undefined; return; }
+    try {
+      let next;
+      if (mode === "compare") {
+        const saved = Object.hasOwn(preferences.partners, left.connectionId) ? preferences.partners[left.connectionId] : undefined;
+        next = await prepareCompare(left, saved, this.connectionStore.list().map(connection => connection.id), {
+          current,
+          partner: async () => (await vscode.window.showQuickPick(this.connectionStore.list().map(connection => ({
+            label: connection.name, description: connection.id === left.connectionId ? "Same connection" : undefined, id: connection.id,
+          })), { title: "Choose comparison partner", placeHolder: "The browsed connection stays on the left" }, picker.token))?.id,
+          languages: async id => (await this.getLanguages(id)).map(language => language.name),
+          language: async (id, languages) => (await vscode.window.showQuickPick(languages.map(label => ({ label })),
+            { title: `Choose language — ${this.connectionStore.get(id)?.name ?? id}`, placeHolder: "The previous language is unavailable" }, picker.token))?.label,
+          unlock: async () => Boolean(await vscode.window.showQuickPick([{ label: "Unlock languages and compare", value: true }],
+            { title: "The restored languages differ", placeHolder: "Unlock to preserve both language choices, or Escape to cancel" }, picker.token)),
+        });
+        if (next?.mode === "compare") {
+          const remembered = this.modeNavigation.get(JSON.stringify([next.right.connectionId, next.right.language]));
+          if (remembered) next = { ...next, right: remembered };
+        }
+      } else {
+        if (!right) return;
+        next = { mode: "browse" as const, source: left };
+      }
+      if (!next || !current()) return;
+      for (const value of [left, right]) if (value) {
+        const key = JSON.stringify([value.connectionId, value.language]);
+        this.modeNavigation.delete(key); this.modeNavigation.set(key, value);
+      }
+      while (this.modeNavigation.size > 16) this.modeNavigation.delete(this.modeNavigation.keys().next().value!);
+      this.cancelRequests();
+      this.contentSession.setState(next);
+      const persistence = next.mode === "compare" ? this.saveSelection(this.getSelection())
+        : this.workspaceState.update(modePreferencesKey, { ...preferences,
+          partners: { ...preferences.partners, [next.source.connectionId]: {
+            connectionId: right!.connectionId,
+            language: right!.language, languagesLocked: selection.languagesLocked,
+          } } });
+      const committed = this.contentSession.capture();
+      await persistence;
+      if (!committed()) return;
+      await this.clearFieldDiffSelection();
+      if (!committed()) return;
+      await this.postState();
+      if (!committed()) return;
+      await this.loadInitialTrees();
+    } catch (error: unknown) {
+      if (intent === this.modeIntent) await vscode.window.showErrorMessage(`Unable to switch content mode: ${errorMessage(error)}`);
+    } finally {
+      if (this.modeSwitchPicker === picker) this.modeSwitchPicker = undefined;
+      picker.dispose();
+    }
+  }
+
+  private async openPanel(): Promise<void> {
     if (this.panel) {
       this.log.debug("Revealing the existing comparison tab.");
       this.panel.reveal(vscode.ViewColumn.Active);
@@ -356,6 +479,8 @@ export class ComparisonPanelManager implements vscode.Disposable {
     }
 
     this.log.info("Opening the comparison tab.");
+    this.fallbackMode = "exact";
+    this.fallbackRevision += 1;
 
     const comparisonMediaUri = vscode.Uri.joinPath(this.extensionUri, "media", "comparison");
     const panel = vscode.window.createWebviewPanel(
@@ -375,6 +500,9 @@ export class ComparisonPanelManager implements vscode.Disposable {
     this.panelDisposables = [
       panel.onDidDispose(() => {
         this.cancelRequests();
+        this.fallbackMode = "exact";
+        this.fallbackRevision += 1;
+        void this.clearFieldDiffSelection();
         this.disposePanelSubscriptions();
         this.panel = undefined;
         this.comparisonStateEmitter.fire();
@@ -398,6 +526,7 @@ export class ComparisonPanelManager implements vscode.Disposable {
   }
 
   async openWith(leftConnectionId: string, rightConnectionId: string): Promise<void> {
+    const intent = ++this.modeIntent;
     const current = this.getSelection();
     const requested = this.normalizeSelection({
       leftConnectionId,
@@ -407,9 +536,11 @@ export class ComparisonPanelManager implements vscode.Disposable {
       languagesLocked: current.languagesLocked,
     });
     const selection = await this.prepareConnectionPairSelection(requested, "Unlock and Open");
-    if (!selection) {
+    if (intent !== this.modeIntent || !selection) {
       return;
     }
+    this.cancelRequests();
+    this.setSessionSelection(selection, false);
     await this.saveSelection(selection);
     await this.open();
     await this.postState();
@@ -467,15 +598,18 @@ export class ComparisonPanelManager implements vscode.Disposable {
     rightConnectionId: string,
     path: string,
   ): Promise<void> {
+    const intent = ++this.modeIntent;
     const requested = this.normalizeSelection({
       ...this.getSelection(),
       leftConnectionId: favoriteConnectionId,
       rightConnectionId,
     });
     const selection = await this.prepareConnectionPairSelection(requested, "Unlock and Open");
-    if (!selection) {
+    if (intent !== this.modeIntent || !selection) {
       return;
     }
+    this.cancelRequests();
+    this.setSessionSelection(selection, false);
     await this.saveSelection(selection);
     const navigation = this.beginFavoriteNavigation(favoriteConnectionId, path, "left");
     try {
@@ -573,7 +707,7 @@ export class ComparisonPanelManager implements vscode.Disposable {
   private async applySelection(selection: ComparisonSelection): Promise<void> {
     this.warnedInvalidLanguageLock = undefined;
     const previous = this.getSelection();
-    const next = this.normalizeSelection(selection);
+    const next = this.browseMode ? { ...selection, rightConnectionId: undefined, languagesLocked: false } : this.normalizeSelection(selection);
     const sameConnections = previous.leftConnectionId === next.leftConnectionId &&
       previous.rightConnectionId === next.rightConnectionId;
     const changedSides = (["left", "right"] as const).filter((side) =>
@@ -603,6 +737,7 @@ export class ComparisonPanelManager implements vscode.Disposable {
   }
 
   private async handleLanguageSelection(side: TreeSide, requestedLanguage: string): Promise<void> {
+    const intent = this.modeIntent;
     const selection = this.getSelection();
     const connectionId = side === "left"
       ? selection.leftConnectionId
@@ -614,6 +749,7 @@ export class ComparisonPanelManager implements vscode.Disposable {
 
     try {
       const sideLanguages = await this.getLanguages(connectionId);
+      if (intent !== this.modeIntent) return;
       const canonicalLanguage = availableLanguage(sideLanguages, requestedLanguage);
       if (!canonicalLanguage) {
         await this.rejectSelectionChange();
@@ -643,6 +779,7 @@ export class ComparisonPanelManager implements vscode.Disposable {
       }
       const otherLanguages = await this.getLanguages(otherConnectionId);
       const otherLanguage = availableLanguage(otherLanguages, canonicalLanguage);
+      if (intent !== this.modeIntent) return;
       if (otherLanguage) {
         await this.applySelection({
           ...selection,
@@ -657,6 +794,7 @@ export class ComparisonPanelManager implements vscode.Disposable {
         `The language "${canonicalLanguage}" is not configured for ${this.connectionStore.get(otherConnectionId)?.name ?? `the ${otherSide} connection`}.`,
         "Unlock and Select",
       );
+      if (intent !== this.modeIntent) return;
       if (action === "Unlock and Select") {
         await this.applySelection({
           ...selection,
@@ -680,8 +818,10 @@ export class ComparisonPanelManager implements vscode.Disposable {
       await this.rejectSelectionChange();
       return;
     }
+    const intent = this.modeIntent;
     const selection = this.getSelection();
     if (!selection.languagesLocked) {
+      if (intent !== this.modeIntent) return;
       await this.applySelection(this.normalizeSelection({
         ...selection,
         ...(side === "left"
@@ -727,6 +867,7 @@ export class ComparisonPanelManager implements vscode.Disposable {
         `${connection.name} does not have the locked language "${selection.leftLanguage}".`,
         "Unlock and Switch",
       );
+      if (intent !== this.modeIntent) return;
       if (action === "Unlock and Switch") {
         await this.applySelection({
           ...nextSelection,
@@ -745,6 +886,7 @@ export class ComparisonPanelManager implements vscode.Disposable {
   }
 
   private async handleLanguageLockChange(locked: boolean): Promise<void> {
+    const intent = this.modeIntent;
     const selection = this.getSelection();
     if (locked === selection.languagesLocked) {
       await this.rejectSelectionChange();
@@ -768,6 +910,7 @@ export class ComparisonPanelManager implements vscode.Disposable {
       } catch {
         // Unlocking must remain available even when language discovery is temporarily unavailable.
       }
+      if (intent !== this.modeIntent) return;
       await this.applySelection({
         ...selection,
         leftLanguage,
@@ -790,6 +933,7 @@ export class ComparisonPanelManager implements vscode.Disposable {
         this.getLanguages(selection.leftConnectionId),
         this.getLanguages(selection.rightConnectionId),
       ]);
+      if (intent !== this.modeIntent) return;
       if (sameLanguage(selection.leftLanguage, selection.rightLanguage)) {
         const pair = lockedLanguagePair(selection.leftLanguage, leftLanguages, rightLanguages);
         if (pair) {
@@ -825,7 +969,7 @@ export class ComparisonPanelManager implements vscode.Disposable {
           ignoreFocusOut: true,
         },
       );
-      if (!picked) {
+      if (!picked || intent !== this.modeIntent) {
         return;
       }
       await this.applySelection({
@@ -843,6 +987,61 @@ export class ComparisonPanelManager implements vscode.Disposable {
   }
 
   private async handleMessage(message: WebviewMessage): Promise<void> {
+    if (!message || typeof message !== "object") return;
+    if (message.type === "setFieldFallbackMode") {
+      if (message.fallbackMode !== "exact" && message.fallbackMode !== "fallback") return;
+      if (this.pendingLanguageView || message.viewContext !== this.contentSession.revisionId) return;
+      await this.setFieldFallbackMode(message.fallbackMode);
+      return;
+    }
+    if (["loadItemDetails", "openFieldDiff"].includes(String(message.type)) &&
+        message.fallbackRevision !== undefined && message.fallbackRevision !== this.fallbackRevision) return;
+    if (message.viewMode !== undefined && message.viewMode !== (this.browseMode ? "browse" : "compare")) return;
+    // Queued selector changes remain valid within a mode; item actions belong to one displayed session.
+    if (!this.isSelectionMessage(message) && message.viewContext !== undefined && message.viewContext !== this.contentSession?.revisionId) return;
+    if (message.type === "switchMode") {
+      if (message.viewContext === this.contentSession.revisionId) await this.switchMode(message);
+      return;
+    }
+    if (message.type === "cancelModeSwitch") { this.cancelModeSwitch(); return; }
+    if (this.isSelectionMessage(message) || ["navigateItem", "revealItemResult", "loadRoot", "selectBrowseItem", "selectFieldDiffItem", "refreshAll"].includes(String(message.type))) this.cancelModeSwitch();
+    if (message.type === "cancelContentLoads" || (message.type === "cancelBrowseLoads" && this.browseMode)) {
+      this.cancelRequests();
+      await this.clearFieldDiffSelection();
+      await this.postState();
+      await this.panel?.webview.postMessage({ type: "browseLoadsCancelled" });
+      return;
+    }
+    if (this.browseMode && (message.side === "right" || [
+      "swapConnections", "setLanguageLock", "syncSubtree", "copyField", "copyFieldValue",
+      "showDetailedFieldDiff", "selectFieldDiffItem", "openFieldDiff", "loadItemDetails",
+    ].includes(String(message.type)))) return;
+    if (this.browseMode && ["selectBrowseItem", "showBrowseItem", "standardPublish", "tracedPublish",
+      "powerPublish", "runItemTask", "openPublicPage", "copyBrowseIdentity"].includes(String(message.type)) &&
+      message.viewContext !== this.contentSession.revisionId) return;
+    if (this.browseMode && (message.type === "selectBrowseItem" || message.type === "showBrowseItem") &&
+      typeof message.leftItemId === "string" && message.leftItemId.trim() && !this.pendingLanguageView) {
+      this.selectedFieldDiffItem = { mode: "browse", leftItemId: message.leftItemId,
+        leftName: typeof message.leftName === "string" ? message.leftName : undefined };
+      if (message.type === "showBrowseItem" || !this.fieldDiffViewProvider.visible) {
+        await vscode.commands.executeCommand(`${fieldDiffViewId}.focus`, { preserveFocus: message.type === "selectBrowseItem" });
+      }
+      await this.refreshFieldDiffView();
+      return;
+    }
+    if (this.browseMode && message.type === "copyBrowseIdentity" && typeof message.itemId === "string" &&
+      (message.fieldId === "id" || message.fieldId === "path") && !this.pendingLanguageView) {
+      const selection = this.getSelection();
+      if (!selection.leftConnectionId) return;
+      const current = this.contentSession.capture();
+      try {
+        const details = await this.getItemDetails(selection.leftConnectionId, selection.leftLanguage, message.itemId);
+        if (current()) await vscode.env.clipboard.writeText(message.fieldId === "id" ? details.itemId : details.path);
+      } catch (error: unknown) {
+        if (current()) await vscode.window.showErrorMessage(`Unable to copy item identity: ${errorMessage(error)}`);
+      }
+      return;
+    }
     if (message.type === "openPublicPage" && (message.side === "left" || message.side === "right") && typeof message.itemId === "string") {
       if (!this.pendingLanguageView) { await this.openPublicPage(message.side, message.itemId); }
       return;
@@ -886,6 +1085,16 @@ export class ComparisonPanelManager implements vscode.Disposable {
       "showDetailedFieldDiff", "selectFieldDiffItem", "openFieldDiff", "refreshSubtree",
       "refreshItem", "refreshAll", "loadSubtree",
     ].includes(typeof message.type === "string" ? message.type : "")) {
+      return;
+    }
+
+    if (message.type === "editItem") {
+      if (this.pendingLanguageView || message.viewContext !== this.contentSession.revisionId ||
+        (message.side !== "left" && message.side !== "right") || typeof message.itemId !== "string") return;
+      const selection = this.getSelection();
+      const connectionId = message.side === "left" ? selection.leftConnectionId : selection.rightConnectionId;
+      const language = message.side === "left" ? selection.leftLanguage : selection.rightLanguage;
+      if (connectionId) await vscode.commands.executeCommand("xmCloudSync.editItem", { connectionId, itemId: message.itemId, language });
       return;
     }
 
@@ -1170,6 +1379,7 @@ export class ComparisonPanelManager implements vscode.Disposable {
   }
 
   private async runItemTask(message: WebviewMessage): Promise<void> {
+    const current = this.contentSession?.capture() ?? (() => true);
     const selection = this.getSelection();
     const requestedSide = message.side === "left" || message.side === "right"
       ? message.side
@@ -1243,10 +1453,11 @@ export class ComparisonPanelManager implements vscode.Disposable {
           }
         },
       );
+      if (!current()) return;
       if (candidates.length === 0) {
-        throw new Error("Item details could not be loaded for either comparison side.");
+        throw new Error(this.browseMode ? "Item details could not be loaded." : "Item details could not be loaded for either comparison side.");
       }
-      await this.itemTaskRunner.selectAndRun(candidates);
+      await this.itemTaskRunner.selectAndRun(candidates, this.browseMode);
     } catch (error: unknown) {
       await vscode.window.showErrorMessage(
         `Unable to prepare the item task: ${errorMessage(error)}`,
@@ -1620,6 +1831,7 @@ export class ComparisonPanelManager implements vscode.Disposable {
       this.treeLevelCache.clear();
       this.itemDetailsCache.clear();
       this.clearItemIconCaches();
+      await this.postState();
       await this.panel?.webview.postMessage({ type: "itemIconsReset" });
       await this.loadSubtree(rowKey, leftItemId, rightItemId, "refreshAll");
     } finally {
@@ -1950,6 +2162,19 @@ export class ComparisonPanelManager implements vscode.Disposable {
     }
   }
 
+  async handleEditorSaved(connectionId: string, itemId: string): Promise<void> {
+    // Shared and unversioned edits invalidate other cached locales too.
+    const suffix = `:${normalizeItemId(itemId)}`;
+    for (const cache of [this.itemDetailsCache, this.pendingItemDetails]) {
+      for (const key of cache.keys()) {
+        if (key.startsWith(`${connectionId}:`) && (key.endsWith(suffix) || key.endsWith(`${suffix}:fallback`))) cache.delete(key);
+      }
+    }
+    this.fallbackRevision += 1;
+    await this.postState();
+    await this.refreshFieldDiffView();
+  }
+
   private invalidateItemDetails(
     connectionId: string,
     language: string,
@@ -1958,6 +2183,8 @@ export class ComparisonPanelManager implements vscode.Disposable {
     const cacheKey = this.itemDetailsCacheKey(connectionId, language, itemId);
     this.itemDetailsCache.delete(cacheKey);
     this.pendingItemDetails.delete(cacheKey);
+    this.itemDetailsCache.delete(`${cacheKey}:fallback`);
+    this.pendingItemDetails.delete(`${cacheKey}:fallback`);
   }
 
   private selectedFieldDiffItemMatchesPlans(
@@ -1992,10 +2219,23 @@ export class ComparisonPanelManager implements vscode.Disposable {
   }
 
   private async refreshStateAndTrees(): Promise<void> {
+    this.cancelModeSwitch();
     this.cancelRequests();
+    const session = this.contentSession.state;
+    if (session?.mode === "compare" && (!this.connectionStore.get(session.left.connectionId) || !this.connectionStore.get(session.right.connectionId))) {
+      // Never substitute an unrelated endpoint for a deleted comparison connection.
+      this.contentSession.openConnection(session.left);
+    }
+    this.treeLevelCache.clear();
+    this.languageCache.clear();
+    this.itemDetailsCache.clear();
+    this.modeNavigation.clear();
     this.clearItemIconCaches();
+    const current = this.contentSession.capture();
     await this.clearFieldDiffSelection();
-    await this.postState();
+    if (!current()) return;
+    await this.postState(true);
+    if (!current()) return;
     await this.panel?.webview.postMessage({ type: "itemIconsReset" });
     await this.loadInitialTrees();
   }
@@ -2352,6 +2592,7 @@ export class ComparisonPanelManager implements vscode.Disposable {
     side: TreeSide,
     source: "favorite" | "site" = "favorite",
   ): FavoriteNavigation {
+    this.cancelModeSwitch();
     this.lookupController?.abort();
     this.favoriteNavigationGeneration += 1;
     this.resolvePendingFavoriteReveals(false);
@@ -2375,13 +2616,14 @@ export class ComparisonPanelManager implements vscode.Disposable {
   }
 
   private async loadAndPostLanguages(side: TreeSide, connectionId: string): Promise<void> {
+    const current = this.contentSession?.capture() ?? (() => true);
     if (!this.panel) {
       return;
     }
     await this.panel.webview.postMessage({ type: "languagesLoading", side, connectionId });
     try {
       const languages = await this.getLanguages(connectionId);
-      if (!this.panel || !this.isCurrentSelection(side, connectionId, this.sideLanguage(side))) {
+      if (!current() || !this.panel || !this.isCurrentSelection(side, connectionId, this.sideLanguage(side))) {
         return;
       }
       await this.panel.webview.postMessage({
@@ -2391,7 +2633,7 @@ export class ComparisonPanelManager implements vscode.Disposable {
         languages,
       });
     } catch (error: unknown) {
-      if (this.panel) {
+      if (current() && this.panel) {
         await this.panel.webview.postMessage({
           type: "languagesLoadFailed",
           side,
@@ -2403,6 +2645,7 @@ export class ComparisonPanelManager implements vscode.Disposable {
   }
 
   private async getLanguages(connectionId: string): Promise<readonly AuthoringLanguage[]> {
+    const current = this.contentSession?.capture() ?? (() => true);
     const cached = this.languageCache.get(connectionId);
     if (cached) {
       return cached;
@@ -2413,6 +2656,7 @@ export class ComparisonPanelManager implements vscode.Disposable {
     }
     const connection = this.connectionStore.get(connectionId);
     const clientSecret = await this.connectionStore.getClientSecret(connectionId);
+    if (!current()) throw new DOMException("Content selection changed.", "AbortError");
     if (!connection || !clientSecret) {
       throw new Error("The XM Cloud connection or its secret is missing.");
     }
@@ -2426,7 +2670,8 @@ export class ComparisonPanelManager implements vscode.Disposable {
     request = this.authoringClient
       .loadLanguages(connection, clientSecret, controller.signal)
       .then((languages) => {
-        this.languageCache.set(connectionId, languages);
+        throwIfAborted(controller.signal);
+        if (this.pendingLanguages.get(connectionId) === request) this.languageCache.set(connectionId, languages);
         return languages;
       })
       .finally(() => {
@@ -2445,24 +2690,28 @@ export class ComparisonPanelManager implements vscode.Disposable {
     connectionId: string,
     itemId: string,
   ): Promise<void> {
+    const isCurrentSession = this.captureFieldContext();
+    const fallbackRevision = this.fallbackRevision;
     const language = this.sideLanguage(side);
     if (!this.panel || !this.isCurrentSelection(side, connectionId, language)) {
       return;
     }
     await this.panel.webview.postMessage({
       type: "itemDetailsLoading",
+      fallbackRevision,
       side,
       connectionId,
       language,
       itemId,
     });
     try {
-      const details = await this.getItemDetails(connectionId, language, itemId);
-      if (!this.panel || !this.isCurrentSelection(side, connectionId, language)) {
+      const details = await this.getComparisonItemDetails(connectionId, language, itemId);
+      if (!isCurrentSession() || !this.panel || !this.isCurrentSelection(side, connectionId, language)) {
         return;
       }
       await this.panel.webview.postMessage({
         type: "itemDetailsLoaded",
+        fallbackRevision,
         side,
         connectionId,
         language,
@@ -2470,9 +2719,10 @@ export class ComparisonPanelManager implements vscode.Disposable {
         details,
       });
     } catch (error: unknown) {
-      if (this.panel && this.isCurrentSelection(side, connectionId, language)) {
+      if (isCurrentSession() && this.panel && this.isCurrentSelection(side, connectionId, language)) {
         await this.panel.webview.postMessage({
           type: "itemDetailsLoadFailed",
+          fallbackRevision,
           side,
           connectionId,
           language,
@@ -2487,8 +2737,10 @@ export class ComparisonPanelManager implements vscode.Disposable {
     connectionId: string,
     language: string,
     itemId: string,
-  ): Promise<AuthoringItemDetails> {
-    const cacheKey = this.itemDetailsCacheKey(connectionId, language, itemId);
+    fieldFallback = false,
+  ): Promise<ComparisonItemDetails> {
+    const current = this.captureFieldContext();
+    const cacheKey = this.itemDetailsCacheKey(connectionId, language, itemId) + (fieldFallback ? ":fallback" : "");
     const cached = this.itemDetailsCache.get(cacheKey);
     if (cached) {
       return cached;
@@ -2499,6 +2751,7 @@ export class ComparisonPanelManager implements vscode.Disposable {
     }
     const connection = this.connectionStore.get(connectionId);
     const clientSecret = await this.connectionStore.getClientSecret(connectionId);
+    if (!current()) throw new DOMException("Content selection changed.", "AbortError");
     if (!connection || !clientSecret) {
       throw new Error("The XM Cloud connection or its secret is missing.");
     }
@@ -2508,9 +2761,27 @@ export class ComparisonPanelManager implements vscode.Disposable {
       30_000,
     );
     this.requestControllers.add(controller);
-    let request: Promise<AuthoringItemDetails>;
-    request = this.authoringClient
-      .loadItemDetails(connection, clientSecret, itemId, language, controller.signal)
+    let request: Promise<ComparisonItemDetails>;
+    request = (async () => {
+      if (!fieldFallback) return this.authoringClient.loadItemDetails(connection, clientSecret, itemId, language, controller.signal);
+      // Separate reads preserve both observations, without inferring a source from equal text.
+      const exact = await this.authoringClient.loadItemDetails(connection, clientSecret, itemId, language, controller.signal);
+      const exactObservedAt = new Date().toISOString();
+      const effective = await this.authoringClient.loadItemDetails(connection, clientSecret, itemId, language, controller.signal, true);
+      const evidence = comparisonFieldEvidence(exact, effective, exactObservedAt, new Date().toISOString());
+      let itemFallback: ItemFallbackObservation | undefined;
+      if (exact.version === 0) {
+        const metadataSignal = AbortSignal.any([controller.signal, AbortSignal.timeout(5_000)]);
+        try {
+          itemFallback = await observeItemFallback(exact, (locator, locale) =>
+            this.authoringClient.loadItem(connection, clientSecret, locator, locale, undefined, metadataSignal), metadataSignal);
+        } catch {
+          controller.signal.throwIfAborted();
+          itemFallback = { status: "unavailable", chain: [exact.language] };
+        }
+      }
+      return { ...evidence, ...(itemFallback ? { itemFallback } : {}) };
+    })()
       .then((details) => {
         if (this.pendingItemDetails.get(cacheKey) === request) {
           this.itemDetailsCache.set(cacheKey, details);
@@ -2532,6 +2803,28 @@ export class ComparisonPanelManager implements vscode.Disposable {
     return `${connectionId}:${language.toLowerCase()}:${normalizeItemId(itemId)}`;
   }
 
+  private captureFieldContext(): () => boolean {
+    const current = this.contentSession?.capture() ?? (() => true);
+    const revision = this.fallbackRevision;
+    return () => current() && revision === this.fallbackRevision;
+  }
+
+  private getComparisonItemDetails(connectionId: string, language: string, itemId: string): Promise<ComparisonItemDetails> {
+    return this.getItemDetails(connectionId, language, itemId, this.fallbackMode === "fallback");
+  }
+
+  private async setFieldFallbackMode(mode: FieldFallbackMode): Promise<void> {
+    if (mode === this.fallbackMode) return;
+    this.fallbackMode = mode;
+    this.fallbackRevision += 1;
+    this.itemDetailsCache.clear();
+    this.pendingItemDetails.clear();
+    // Invalidate messages already queued by the bottom view, including an Exact→fallback→Exact round trip.
+    await this.fieldDiffViewProvider.clear(this.browseMode ? "browse" : "compare");
+    await this.postState();
+    await this.refreshFieldDiffView();
+  }
+
   private async openFieldDiff(
     leftItemId: string,
     rightItemId: string,
@@ -2541,11 +2834,13 @@ export class ComparisonPanelManager implements vscode.Disposable {
   }
 
   private async clearFieldDiffSelection(): Promise<void> {
+    this.publicPageController?.abort();
     this.selectedFieldDiffItem = undefined;
-    await this.fieldDiffViewProvider.clear();
+    await this.fieldDiffViewProvider.clear(this.browseMode ? "browse" : "compare");
   }
 
   private async openSelectedFieldDiff(fieldId: string): Promise<void> {
+    if (this.browseMode) return;
     const selected = this.selectedFieldDiffItem;
     if (!selected) {
       return;
@@ -2561,7 +2856,7 @@ export class ComparisonPanelManager implements vscode.Disposable {
     fieldId: string,
     direction: "leftToRight" | "rightToLeft",
   ): Promise<void> {
-    if (this.pendingLanguageView) {
+    if (this.browseMode || this.pendingLanguageView || this.fallbackMode === "fallback") {
       return;
     }
     const normalizedFieldId = normalizeItemId(fieldId);
@@ -2569,6 +2864,7 @@ export class ComparisonPanelManager implements vscode.Disposable {
       return;
     }
     this.copyingFieldIds.add(normalizedFieldId);
+    const current = this.captureFieldContext();
     try {
       const selected = this.selectedFieldDiffItem;
       const selection = this.getSelection();
@@ -2596,6 +2892,7 @@ export class ComparisonPanelManager implements vscode.Disposable {
           selected.rightItemId,
         ),
       ]);
+      if (!current()) return;
       const leftField = leftDetails.fields.find(
         (field) => normalizeItemId(field.fieldId) === normalizedFieldId,
       );
@@ -2669,6 +2966,7 @@ export class ComparisonPanelManager implements vscode.Disposable {
       }
       const currentSelection = this.getSelection();
       if (
+        !current() ||
         selected !== this.selectedFieldDiffItem ||
         currentSelection.leftConnectionId !== selection.leftConnectionId ||
         currentSelection.rightConnectionId !== selection.rightConnectionId ||
@@ -2755,20 +3053,21 @@ export class ComparisonPanelManager implements vscode.Disposable {
     }
   }
 
-  private async copySelectedItemId(side: TreeSide, itemId: string): Promise<boolean> {
+  private async copySelectedItemIdentity(side: TreeSide, itemId: string, path?: string): Promise<boolean> {
+    const kind = path === undefined ? "ID" : "path";
     const selectedItemId = side === "left"
       ? this.selectedFieldDiffItem?.leftItemId
       : this.selectedFieldDiffItem?.rightItemId;
     if (!selectedItemId || normalizeItemId(selectedItemId) !== normalizeItemId(itemId)) {
-      await vscode.window.showErrorMessage(`The ${side} item ID is no longer available.`);
+      await vscode.window.showErrorMessage(`The ${side} item ${kind} is no longer available.`);
       return false;
     }
     try {
-      await vscode.env.clipboard.writeText(itemId);
-      this.log.info(`Copied ${side} Field Diff item ID to the clipboard.`);
+      await this.clipboard.writeText(path ?? itemId);
+      this.log.info(`Copied ${side} Field Diff item ${kind} to the clipboard.`);
       return true;
     } catch (error: unknown) {
-      await vscode.window.showErrorMessage(`Unable to copy item ID: ${errorMessage(error)}`);
+      await vscode.window.showErrorMessage(`Unable to copy item ${kind}: ${errorMessage(error)}`);
       return false;
     }
   }
@@ -2778,15 +3077,18 @@ export class ComparisonPanelManager implements vscode.Disposable {
     rightItemId: string | undefined,
     fieldId: string,
   ): Promise<void> {
+    if (this.browseMode) return;
+    const current = this.captureFieldContext();
     const selection = this.getSelection();
     const [leftDetails, rightDetails] = await Promise.all([
       leftItemId && selection.leftConnectionId
-        ? this.getItemDetails(selection.leftConnectionId, selection.leftLanguage, leftItemId)
+        ? this.getComparisonItemDetails(selection.leftConnectionId, selection.leftLanguage, leftItemId)
         : undefined,
       rightItemId && selection.rightConnectionId
-        ? this.getItemDetails(selection.rightConnectionId, selection.rightLanguage, rightItemId)
+        ? this.getComparisonItemDetails(selection.rightConnectionId, selection.rightLanguage, rightItemId)
         : undefined,
     ]);
+    if (!current()) return;
     const normalizedFieldId = normalizeItemId(fieldId);
     const leftField = leftDetails?.fields.find(
       (field) => normalizeItemId(field.fieldId) === normalizedFieldId,
@@ -2834,6 +3136,7 @@ export class ComparisonPanelManager implements vscode.Disposable {
   }
 
   private async openPublicPage(side: TreeSide, itemId: string): Promise<void> {
+    const current = this.contentSession?.capture() ?? (() => true);
     const selection = this.getSelection();
     const connectionId = selection[`${side}ConnectionId`];
     if (!connectionId || this.pendingLanguageView) { return; }
@@ -2841,9 +3144,13 @@ export class ComparisonPanelManager implements vscode.Disposable {
     const timeout = setTimeout(() => controller.abort(), 30_000);
     this.requestControllers.add(controller);
     try {
-      const target = await new PublicPageService(this.connectionStore, this.authoringClient).resolve(connectionId, itemId, selection[`${side}Language`], controller.signal);
-      if (!this.isCurrentSelection(side, connectionId, selection[`${side}Language`])) { return; }
-      if (!target) { await vscode.window.showInformationMessage("Configure Public Page URLs to enable public-page links."); return; }
+      const service = new PublicPageService(this.connectionStore, this.authoringClient);
+      const target = await service.resolve(connectionId, itemId, selection[`${side}Language`], controller.signal);
+      if (!current() || !this.isCurrentSelection(side, connectionId, selection[`${side}Language`])) { return; }
+      if (!target) {
+        if (!service.configured) { await vscode.window.showInformationMessage("Configure Public Page URLs to enable public-page links."); }
+        return;
+      }
       if (!controller.signal.aborted) { await vscode.env.openExternal(vscode.Uri.parse(target.url)); }
     } catch (error: unknown) {
       if (!controller.signal.aborted) { await vscode.window.showInformationMessage(`Public page unavailable: ${errorMessage(error)}`); }
@@ -2851,13 +3158,14 @@ export class ComparisonPanelManager implements vscode.Disposable {
   }
 
   private async refreshFieldDiffView(): Promise<void> {
+    const current = this.captureFieldContext();
     this.publicPageController?.abort();
     if (!this.fieldDiffViewProvider.visible) {
       return;
     }
     const selected = this.selectedFieldDiffItem;
     if (!selected) {
-      await this.fieldDiffViewProvider.clear();
+      await this.fieldDiffViewProvider.clear(this.browseMode ? "browse" : "compare");
       return;
     }
     const selection = this.getSelection();
@@ -2865,14 +3173,14 @@ export class ComparisonPanelManager implements vscode.Disposable {
     try {
       const [leftResult, rightResult] = await Promise.allSettled([
         selected.leftItemId && selection.leftConnectionId
-          ? this.getItemDetails(
+          ? this.getComparisonItemDetails(
               selection.leftConnectionId,
               selection.leftLanguage,
               selected.leftItemId,
             )
           : undefined,
         selected.rightItemId && selection.rightConnectionId
-          ? this.getItemDetails(
+          ? this.getComparisonItemDetails(
               selection.rightConnectionId,
               selection.rightLanguage,
               selected.rightItemId,
@@ -2887,11 +3195,12 @@ export class ComparisonPanelManager implements vscode.Disposable {
       const rightError = rightResult.status === "rejected"
         ? errorMessage(rightResult.reason)
         : undefined;
-      if (selected !== this.selectedFieldDiffItem || !this.fieldDiffViewProvider.visible) {
+      if (!current() || selected !== this.selectedFieldDiffItem || !this.fieldDiffViewProvider.visible) {
         return;
       }
       const snapshot = {
         ...selected,
+        fallbackMode: this.fallbackMode,
         leftConnectionName: selection.leftConnectionId
           ? this.connectionStore.get(selection.leftConnectionId)?.name
           : undefined,
@@ -2917,11 +3226,11 @@ export class ComparisonPanelManager implements vscode.Disposable {
         const details = side === "left" ? leftDetails : rightDetails;
         const connectionId = selection[`${side}ConnectionId`];
         if (!service.configured || !details || !connectionId) { return undefined; }
-        return service.resolve(connectionId, details.itemId, selection[`${side}Language`], controller.signal, details);
+        return service.resolve(connectionId, details.itemId, selection[`${side}Language`], controller.signal, details.comparisonEvidence?.exact ?? details);
       }));
       clearTimeout(timeout);
       this.requestControllers.delete(controller);
-      if (controller.signal.aborted || selected !== this.selectedFieldDiffItem || !this.fieldDiffViewProvider.visible) { return; }
+      if (!current() || controller.signal.aborted || selected !== this.selectedFieldDiffItem || !this.fieldDiffViewProvider.visible) { return; }
       await this.fieldDiffViewProvider.showSnapshot({
         leftPublicPageUrl: pages[0].status === "fulfilled" ? pages[0].value?.url : undefined,
         rightPublicPageUrl: pages[1].status === "fulfilled" ? pages[1].value?.url : undefined,
@@ -2930,7 +3239,7 @@ export class ComparisonPanelManager implements vscode.Disposable {
         ...snapshot,
       });
     } catch (error: unknown) {
-      if (selected === this.selectedFieldDiffItem) {
+      if (current() && selected === this.selectedFieldDiffItem) {
         await this.fieldDiffViewProvider.showError(
           `Unable to load field details: ${errorMessage(error)}`,
         );
@@ -2943,6 +3252,7 @@ export class ComparisonPanelManager implements vscode.Disposable {
       return;
     }
 
+    const current = this.contentSession?.capture() ?? (() => true);
     let selection = this.getSelection();
     if (
       selection.languagesLocked &&
@@ -2956,6 +3266,7 @@ export class ComparisonPanelManager implements vscode.Disposable {
           this.getLanguages(leftConnectionId),
           this.getLanguages(rightConnectionId),
         ]);
+        if (!current()) return;
         const pair = sameLanguage(selection.leftLanguage, selection.rightLanguage)
           ? lockedLanguagePair(selection.leftLanguage, leftLanguages, rightLanguages)
           : undefined;
@@ -2977,6 +3288,7 @@ export class ComparisonPanelManager implements vscode.Disposable {
         }
         this.warnedInvalidLanguageLock = undefined;
       } catch {
+        if (!current()) return;
         await Promise.all([
           this.loadAndPostLanguages("left", leftConnectionId),
           this.loadAndPostLanguages("right", rightConnectionId),
@@ -2992,7 +3304,7 @@ export class ComparisonPanelManager implements vscode.Disposable {
         this.loadTreeLevel(
           "left",
           selection.leftConnectionId,
-          { path: "/" },
+          { path: this.sessionEndpoint("left")?.rootPath ?? "/" },
         ),
       );
     }
@@ -3002,7 +3314,7 @@ export class ComparisonPanelManager implements vscode.Disposable {
         this.loadTreeLevel(
           "right",
           selection.rightConnectionId,
-          { path: "/" },
+          { path: this.sessionEndpoint("right")?.rootPath ?? "/" },
         ),
       );
     }
@@ -3083,11 +3395,12 @@ export class ComparisonPanelManager implements vscode.Disposable {
     requestedItemId?: string,
     cancellationSignal?: AbortSignal,
   ): Promise<AuthoringTreeLevel> {
+    const currentSession = this.contentSession?.capture() ?? (() => true);
     const language = this.sideLanguage(side);
     if (cancellationSignal) {
       throwIfAborted(cancellationSignal);
     }
-    if (!this.panel || !this.isCurrentSelection(side, connectionId, language)) {
+    if (!currentSession() || !this.panel || !this.isCurrentSelection(side, connectionId, language)) {
       throw new DOMException("The comparison selection changed.", "AbortError");
     }
 
@@ -3107,7 +3420,7 @@ export class ComparisonPanelManager implements vscode.Disposable {
       if (cancellationSignal) {
         throwIfAborted(cancellationSignal);
       }
-      if (!this.panel || !this.isCurrentSelection(side, connectionId, language)) {
+      if (!currentSession() || !this.panel || !this.isCurrentSelection(side, connectionId, language)) {
         throw new DOMException("The comparison selection changed.", "AbortError");
       }
       await this.panel.webview.postMessage({
@@ -3129,7 +3442,7 @@ export class ComparisonPanelManager implements vscode.Disposable {
       );
       return level;
     } catch (error: unknown) {
-      if (!isAbortError(error) && !cancellationSignal?.aborted) {
+      if (currentSession() && !isAbortError(error) && !cancellationSignal?.aborted) {
         await this.reportTreeLoadFailure(
           side,
           connectionId,
@@ -3457,6 +3770,7 @@ export class ComparisonPanelManager implements vscode.Disposable {
     locator: AuthoringItemLocator,
     cancellationSignal?: AbortSignal,
   ): Promise<AuthoringTreeLevel> {
+    const current = this.contentSession?.capture() ?? (() => true);
     const cacheKey = this.treeCacheKey(connectionId, language, locator);
     const cached = this.treeLevelCache.get(cacheKey);
     if (cached) {
@@ -3478,6 +3792,7 @@ export class ComparisonPanelManager implements vscode.Disposable {
       throw new Error("The XM Cloud connection no longer exists.");
     }
     const clientSecret = await this.connectionStore.getClientSecret(connectionId);
+    if (!current()) throw new DOMException("Content selection changed.", "AbortError");
     if (!clientSecret) {
       throw new Error("The connection's client secret is missing.");
     }
@@ -3542,6 +3857,12 @@ export class ComparisonPanelManager implements vscode.Disposable {
   }
 
   private getSelection(): ComparisonSelection {
+    const current = this.contentSession?.state;
+    if (current?.mode === "browse") return { leftConnectionId: this.connectionStore.get(current.source.connectionId) ? current.source.connectionId : undefined,
+      leftLanguage: current.source.language, rightConnectionId: undefined, rightLanguage: defaultLanguage, languagesLocked: false };
+    if (current?.mode === "compare") return { leftConnectionId: current.left.connectionId,
+      rightConnectionId: current.right.connectionId, leftLanguage: current.left.language, rightLanguage: current.right.language,
+      languagesLocked: current.languagesLocked };
     const stored = this.workspaceState.get<Partial<ComparisonSelection>>(selectionKey, {});
     return this.normalizeSelection(stored);
   }
@@ -3569,16 +3890,46 @@ export class ComparisonPanelManager implements vscode.Disposable {
     };
   }
 
+  private sessionEndpoint(side: TreeSide): ContentEndpoint | undefined {
+    const session = this.contentSession?.state;
+    return session?.mode === "browse" ? side === "left" ? session.source : undefined : session?.[side];
+  }
+
+  private setSessionSelection(selection: ComparisonSelection, browse: boolean): void {
+    if (!this.contentSession || !selection.leftConnectionId) return;
+    const endpoint = (side: TreeSide): ContentEndpoint => {
+      const previous = this.sessionEndpoint(side);
+      const connectionId = selection[`${side}ConnectionId`]!;
+      return { ...(previous?.connectionId === connectionId ? previous : { rootPath: "/" }), connectionId, language: selection[`${side}Language`] };
+    };
+    const left = endpoint("left");
+    if (browse) this.contentSession.openConnection(left);
+    else if (selection.rightConnectionId) this.contentSession.openCompare(left,
+      endpoint("right"),
+      selection.languagesLocked && sameLanguage(selection.leftLanguage, selection.rightLanguage));
+  }
+
   private async saveSelection(selection: ComparisonSelection): Promise<void> {
-    await this.workspaceState.update(selectionKey, selection);
+    const browse = this.browseMode;
+    this.setSessionSelection(selection, browse);
+    if (!browse) {
+      await this.workspaceState.update(selectionKey, selection);
+      if (selection.leftConnectionId && selection.rightConnectionId) {
+        const preferences = readModePreferences(this.workspaceState.get(modePreferencesKey));
+        await this.workspaceState.update(modePreferencesKey, readModePreferences({ ...preferences,
+          partners: { ...preferences.partners, [selection.leftConnectionId]: { connectionId: selection.rightConnectionId,
+            language: selection.rightLanguage, languagesLocked: selection.languagesLocked } } }));
+      }
+    }
     this.comparisonStateEmitter.fire();
   }
 
-  private async postState(): Promise<void> {
+  private async postState(resetContent = false): Promise<void> {
     if (!this.panel) {
       return;
     }
 
+    this.panel.title = this.browseMode ? "XM Cloud Browse" : "XM Cloud Comparison";
     const connections = this.connectionStore.list().map((connection) => ({
       id: connection.id,
       name: connection.name,
@@ -3587,6 +3938,11 @@ export class ComparisonPanelManager implements vscode.Disposable {
 
     await this.panel.webview.postMessage({
       type: "stateChanged",
+      fallbackMode: this.fallbackMode,
+      fallbackRevision: this.fallbackRevision,
+      resetContent,
+      viewContext: this.contentSession?.revisionId,
+      mode: this.browseMode ? "browse" : "compare",
       connections,
       selection: this.getSelection(),
       textNormalization: vscode.workspace
@@ -3619,6 +3975,8 @@ export class ComparisonPanelManager implements vscode.Disposable {
   }
 
   private cancelRequests(): void {
+    this.modeSwitchPicker?.cancel();
+    this.contentSession?.cancelPending();
     this.lookupController?.abort();
     this.pendingLanguageView = undefined;
     this.itemIconGeneration += 1;
@@ -3652,6 +4010,7 @@ export class ComparisonPanelManager implements vscode.Disposable {
 
   dispose(): void {
     this.cancelRequests();
+    this.contentSession.dispose();
     this.treeLevelCache.clear();
     this.languageCache.clear();
     this.itemDetailsCache.clear();

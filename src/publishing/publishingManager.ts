@@ -30,7 +30,7 @@ import { powerPublishBatches, powerRepairBatches } from "./powerPublishPlanning"
 import { showPowerPublishScopeForm } from "./powerPublishScopeForm";
 import { parseReferenceField } from "./referenceDiscovery";
 import { evaluateRenderedLayout } from "./renderedLayoutVerification";
-import { readPublishingProfiles, readPublishRuns } from "./publishingRunState";
+import { publishingProfilesKey as profilesKey, readPublishingProfiles, readPublishRuns } from "./publishingRunState";
 import { classifyPublishingTrace } from "./publishingTraceConclusion";
 import {
   diagnosticStageIds,
@@ -70,7 +70,6 @@ import {
 } from "./tracedPublishForm";
 
 const runsKey = "sitecoreXmCloudSync.publishRuns.v1";
-const profilesKey = "sitecoreXmCloudSync.publishingProfiles.v1";
 const maximumTracedFieldItems = 200;
 const maximumPowerBatchItems = 20;
 const maximumPowerEdgeVerificationConcurrency = 8;
@@ -2293,55 +2292,14 @@ export class PublishingManager implements vscode.Disposable {
     readonly profile: PublishingSiteProfile;
     readonly edgeToken: string;
   } | undefined> {
-    let profile = this.listProfiles().find((candidate) => candidate.connectionId === connectionId);
-    let edgeToken = await this.connections.getEdgeToken(connectionId);
+    signal.throwIfAborted();
+    const profile = this.listProfiles().find((candidate) => candidate.connectionId === connectionId);
+    const edgeToken = await this.connections.getEdgeToken(connectionId);
     if (profile && edgeToken) {
       return { profile, edgeToken };
     }
-    const endpoint = await vscode.window.showInputBox({
-      title: "Configure traced publishing (1/2)",
-      prompt: "Enter the Experience Edge GraphQL endpoint.",
-      value: profile?.edgeEndpoint ?? "https://edge.sitecorecloud.io/api/graphql/v1",
-      ignoreFocusOut: true,
-      validateInput: validateHttpsUrl,
-    });
-    if (endpoint === undefined) {
-      return undefined;
-    }
-    const suppliedToken = await vscode.window.showInputBox({
-      title: "Configure traced publishing (2/2)",
-      prompt: edgeToken
-        ? "A token is already stored for this connection. Enter a replacement, or leave empty to keep it."
-        : "Enter the Experience Edge API token. It is stored with this connection in VS Code Secret Storage.",
-      password: true,
-      ignoreFocusOut: true,
-      validateInput: (value) =>
-        value || edgeToken ? undefined : "Experience Edge token is required.",
-    });
-    if (suppliedToken === undefined) {
-      return undefined;
-    }
-    edgeToken = suppliedToken || edgeToken;
-    if (!edgeToken) {
-      return undefined;
-    }
-    const tokenApproved = await this.confirmEdgeTokenScope(
-      connectionId,
-      endpoint.trim(),
-      edgeToken,
-      signal,
-    );
-    if (!tokenApproved) {
-      return undefined;
-    }
-    profile = {
-      connectionId,
-      edgeEndpoint: endpoint.trim(),
-      siteName: profile?.siteName,
-      applicationBaseUrl: profile?.applicationBaseUrl,
-    };
-    await this.saveProfile(profile, edgeToken);
-    return { profile, edgeToken };
+    await vscode.commands.executeCommand("xmCloudSync.configurePublishing", connectionId);
+    return undefined;
   }
 
   private async selectSiteName(

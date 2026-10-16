@@ -32,7 +32,7 @@ interface StatusResponse {
       readonly isDone?: unknown;
       readonly isFailed?: unknown;
       readonly processed?: unknown;
-      readonly languages?: readonly { readonly name?: unknown }[];
+      readonly languages?: readonly { readonly name?: unknown }[] | null;
       readonly targetDatabase?: { readonly name?: unknown } | null;
     } | null;
   };
@@ -127,23 +127,24 @@ export class PublishingClient {
       typeof status.processed !== "number" ||
       !Number.isInteger(status.processed) ||
       status.processed < 0 ||
-      !Array.isArray(status.languages) ||
-      status.languages.some(
-        (language) => typeof language?.name !== "string" || language.name.length === 0,
-      ) ||
+      (status.languages !== null && (!Array.isArray(status.languages) ||
+        status.languages.some(
+          (language) => typeof language?.name !== "string" || language.name.length === 0,
+        ))) ||
       (status.targetDatabase !== null &&
         (typeof status.targetDatabase !== "object" ||
           typeof status.targetDatabase.name !== "string" ||
           status.targetDatabase.name.length === 0))
     ) {
-      throw new Error("Authoring API returned invalid publishing status.");
+      throw new Error(`Authoring API returned invalid publishing status: ${invalidStatusFields(status)}. The remote publishing outcome is unknown; check its status before retrying.`);
     }
     return {
       state: status.state,
       isDone: status.isDone,
       isFailed: status.isFailed,
       processed: status.processed,
-      languages: status.languages.map((language) => language.name as string),
+      // Sitecore may omit language metadata while still returning authoritative job state.
+      languages: (status.languages ?? []).map((language) => language.name as string),
       ...(status.targetDatabase === null
         ? {}
         : { targetDatabase: status.targetDatabase.name as string }),
@@ -224,6 +225,28 @@ export class PublishingClient {
     });
     return payload.access_token;
   }
+}
+
+/** Report contract mismatches without copying any remote values into errors or logs. */
+function invalidStatusFields(status: NonNullable<NonNullable<StatusResponse["data"]>["publishingStatus"]>): string {
+  const issues: string[] = [];
+  const describe = (name: string, value: unknown, expected: string): void => {
+    const type = value === null ? "null" : Array.isArray(value) ? "array" : typeof value;
+    issues.push(`${name} expected ${expected}, received ${type}`);
+  };
+  if (typeof status.state !== "string" || !status.state.length) describe("state", status.state, "a non-empty string");
+  if (typeof status.isDone !== "boolean") describe("isDone", status.isDone, "a boolean");
+  if (typeof status.isFailed !== "boolean") describe("isFailed", status.isFailed, "a boolean");
+  if (typeof status.processed !== "number" || !Number.isInteger(status.processed) || status.processed < 0) {
+    describe("processed", status.processed, "a non-negative integer");
+  }
+  if (status.languages !== null && (!Array.isArray(status.languages) || status.languages.some(language => typeof language?.name !== "string" || !language.name.length))) {
+    describe("languages", status.languages, "null or an array of named languages");
+  }
+  if (status.targetDatabase !== null && (typeof status.targetDatabase !== "object" || typeof status.targetDatabase.name !== "string" || !status.targetDatabase.name.length)) {
+    describe("targetDatabase", status.targetDatabase, "null or an object with a non-empty name");
+  }
+  return issues.join("; ");
 }
 
 function throwForErrors(errors: readonly GraphQlError[] | undefined): void {

@@ -1,0 +1,80 @@
+body { color:var(--vscode-foreground); background:var(--vscode-editor-background); font-family:var(--vscode-font-family); padding:16px 24px; max-width:1000px; margin:auto; }
+header { border-bottom:1px solid var(--vscode-panel-border); padding-bottom:16px; }
+h1 { font-size:21px; } h2 { font-size:17px; margin-top:28px; }
+#path, #identity { overflow-wrap:anywhere; } .field { margin:20px 0; } label { font-weight:600; } .meta { color:var(--vscode-descriptionForeground); margin:5px 0; font-size:12px; }
+input, textarea { font:inherit; color:var(--vscode-input-foreground); background:var(--vscode-input-background); border:1px solid var(--vscode-input-border, var(--vscode-panel-border)); padding:7px; box-sizing:border-box; }
+input[type=text], textarea { width:calc(100% - 70px); } textarea { min-height:90px; vertical-align:top; resize:vertical; } button { font:inherit; padding:5px 10px; margin:3px; border:1px solid var(--vscode-button-border, transparent); color:var(--vscode-button-foreground); background:var(--vscode-button-background); cursor:pointer; }
+button:disabled { opacity:.5; cursor:default; } :focus-visible { outline:1px solid var(--vscode-focusBorder); outline-offset:2px; } pre { white-space:pre-wrap; overflow-wrap:anywhere; background:var(--vscode-textCodeBlock-background); padding:10px; max-height:250px; overflow:auto; } [hidden] { display:none !important; }
+
+select { font:inherit; color:var(--vscode-input-foreground); background:var(--vscode-input-background); border:1px solid var(--vscode-input-border, var(--vscode-panel-border)); width:100%; margin-top:6px; }
+.selection-current { overflow-wrap:anywhere; } summary { cursor:pointer; padding:5px; }
+
+.selection-field { position:relative; }
+.selection-controls { display:flex; align-items:center; gap:6px; margin-top:6px; }
+.selection-controls .selection-trigger { flex:1; min-width:0; width:100%; cursor:pointer; text-overflow:ellipsis; }
+.selection-controls button { flex:none; margin:0; }
+.selection-popup { position:fixed; z-index:10; display:flex; flex-direction:column; box-sizing:border-box; border:1px solid var(--vscode-editorWidget-border, var(--vscode-focusBorder)); background:var(--vscode-editorWidget-background, var(--vscode-editor-background)); padding:8px; overflow:hidden; box-shadow:0 4px 12px var(--vscode-widget-shadow); }
+.picker-header { display:flex; align-items:center; gap:4px; flex:none; }
+.picker-source { flex:1; min-width:0; overflow:hidden; white-space:nowrap; text-overflow:ellipsis; color:var(--vscode-descriptionForeground); font-size:12px; }
+.picker-header button, .picker-children { flex:none; background:transparent; color:var(--vscode-foreground); margin:0; padding:2px 7px; }
+.picker-search { flex:none; width:100%; margin:5px 0; }
+.picker-status, .picker-scope { flex:none; margin:3px 0; font-size:12px; overflow-wrap:anywhere; }
+.picker-status:empty { display:none; }
+.picker-results { min-height:0; overflow:auto; overscroll-behavior:contain; padding:2px; }
+.picker-row { display:flex; min-width:0; align-items:stretch; }
+.picker-choice { display:flex; align-items:center; gap:8px; flex:1; min-width:0; width:100%; text-align:left; margin:0; padding:7px; background:transparent; color:var(--vscode-foreground); }
+.picker-choice:hover, .picker-children:hover, .picker-header button:hover { background:var(--vscode-list-hoverBackground); }
+.picker-choice[aria-disabled=true] { cursor:default; }
+.picker-choice-text { flex:1; min-width:0; }
+.picker-choice-name, .picker-choice-path { display:block; overflow:hidden; white-space:nowrap; text-overflow:ellipsis; }
+.picker-choice-path, .picker-choice-state { color:var(--vscode-descriptionForeground); font-size:12px; }
+.picker-choice-state { flex:none; }
+.picker-group { color:var(--vscode-descriptionForeground); font-size:12px; padding:6px 7px 2px; }
+.selection-popup :focus-visible { outline-offset:-1px; }
+.field-info { position:relative; display:inline-block; vertical-align:middle; margin-left:5px; }
+.field-info-button { padding:0 4px; margin:0; background:transparent; color:var(--vscode-descriptionForeground); }
+.field-info-content { display:none; position:absolute; z-index:3; top:100%; left:0; min-width:280px; width:max-content; max-width:min(600px,70vw); padding:10px; background:var(--vscode-editorHoverWidget-background, var(--vscode-editor-background)); border:1px solid var(--vscode-editorHoverWidget-border, var(--vscode-panel-border)); box-shadow:0 3px 8px var(--vscode-widget-shadow); overflow-wrap:anywhere; }
+.field-info:hover .field-info-content, .field-info:focus-within .field-info-content, .field-info[data-open=true] .field-info-content { display:block; }
+
+.field-info-content { max-height:300px; overflow:auto; }
+.field-stored-value { white-space:pre-wrap; }
+
+.field-controls { display:flex; align-items:flex-start; gap:6px; margin-top:6px; }
+.field-controls input:not([type=checkbox]), .field-controls textarea { flex:1; min-width:0; }
+.field-controls button { flex:none; margin:0; }
+
+.field-section { margin-top:20px; border-top:1px solid var(--vscode-panel-border); }
+.field-section > summary { font-size:17px; font-weight:600; padding:10px 0; }
+.field-section > .field { margin-left:12px; }
+
+.multiple-selected { list-style:none; padding:3px; margin:6px 0; max-height:320px; overflow:auto; }
+.multiple-selected li { display:flex; align-items:center; gap:6px; min-height:32px; margin:2px 0; border-top:2px solid transparent; border-bottom:2px solid transparent; background:var(--vscode-list-inactiveSelectionBackground, transparent); }
+.multiple-selected li > span { flex:1; min-width:0; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.multiple-selected button { flex:none; margin:1px; padding:3px 7px; background:transparent; color:var(--vscode-foreground); }
+.multiple-selected button:hover { background:var(--vscode-toolbar-hoverBackground); }
+.multiple-selected .reorder-handle { cursor:grab; user-select:none; touch-action:none; }
+.multiple-selected .reorder-handle:active { cursor:grabbing; }
+.multiple-selected .drop-before { border-top-color:var(--vscode-focusBorder); }
+.multiple-selected .drop-after { border-bottom-color:var(--vscode-focusBorder); }
+.multiple-selected.dragging { outline:1px solid var(--vscode-panel-border); }
+.reorder-hint { display:none; } .field:has(.reorder-handle:focus) .reorder-hint { display:block; }
+.visually-hidden { position:absolute; width:1px; height:1px; padding:0; margin:-1px; overflow:hidden; clip-path:inset(50%); white-space:nowrap; }
+.name-value-list { display: grid; gap: 4px; margin: 6px 0; }
+.name-value-row { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 2fr) auto; gap: 6px; }
+.name-value-row input { min-width: 0; width: 100%; box-sizing: border-box; }
+.structured-error:empty { display: none; }
+.link-form { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px 12px; margin: 12px 12px 16px; }
+.link-property { display: flex; flex-direction: column; gap: 4px; min-width: 0; font-size: 12px; font-weight: normal; color: var(--vscode-descriptionForeground); }
+.link-property input { width: 100%; min-width: 0; font-size: var(--vscode-font-size); }
+@media (max-width: 500px) { .link-form { grid-template-columns: minmax(0, 1fr); } }
+.link-header { display:flex; align-items:center; gap:8px; margin-top:6px; flex-wrap:wrap; }
+.link-types { display:inline-flex; border:1px solid var(--vscode-panel-border); border-radius:3px; overflow:hidden; }
+.link-types button { margin:0; padding:4px 7px; border:0; border-right:1px solid var(--vscode-panel-border); background:transparent; color:var(--vscode-foreground); font-size:11px; }
+.link-types button:last-child { border-right:0; }
+.link-types button:hover { background:var(--vscode-toolbar-hoverBackground); }
+.link-types button[aria-checked=true] { background:var(--vscode-button-background); color:var(--vscode-button-foreground); }
+.link-types button:focus-visible { outline-offset:-1px; }
+.link-destination { display:flex; align-items:flex-end; gap:6px; margin-top:6px; }
+.link-destination .link-property, .link-destination .selection-trigger { flex:1; min-width:0; width:100%; }
+.link-expand { flex:none; padding:5px; margin:0 0 1px; background:transparent; color:var(--vscode-foreground); }
+.link-summary { white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }

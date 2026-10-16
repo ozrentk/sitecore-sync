@@ -12,6 +12,51 @@ import {
 
 const signal = new AbortController().signal;
 
+test("comparison fallback is opt-in for both field queries and preserves requested locale and version zero", async () => {
+  for (const fallback of [false, true]) {
+    const runtime = new QueuedHttpRuntime([tokenResponse(), jsonResponse({ data: { item: {
+      itemId: "item-id", name: "Home", path: "/sitecore/Home", language: { name: "en-NZ" }, version: 0,
+      template: { templateId: "template", name: "Page" }, fields: null,
+    } } }), jsonResponse({ data: { item: { fields: null } } })]);
+    const item = await new AuthoringContentClient(noOpLogger, runtime)
+      .loadItemDetails(testConnection, "secret", "item-id", "en-NZ", signal, fallback);
+    strictEqual(item.version, 0);
+    for (const index of [1, 2]) {
+      const request = requestBody(runtime, index);
+      match(String(request.query), new RegExp(`withLanguageFallback: ${fallback}`));
+      deepStrictEqual((request.variables as { where: unknown }).where, { database: "master", itemId: "item-id", language: "en-NZ" });
+    }
+  }
+});
+
+test("fallback field reads reject outer locale and identity mismatches", async () => {
+  for (const wrong of [{ itemId: "wrong", language: { name: "en-NZ" } }, { itemId: "item-id", language: { name: "en" } }]) {
+    const runtime = new QueuedHttpRuntime([tokenResponse(), jsonResponse({ data: { item: {
+      ...wrong, version: 1, fields: { nodes: [], pageInfo: { hasNextPage: false } },
+    } } }), jsonResponse({ data: { item: { fields: null } } })]);
+    await rejects(new AuthoringContentClient(noOpLogger, runtime)
+      .loadItemDetails(testConnection, "secret", "item-id", "en-NZ", signal, true), /different item, locale or version/u);
+  }
+});
+
+test("fallback pagination preserves its policy and rejects numbered-version drift", async () => {
+  for (const nextVersion of [1, 2]) {
+    const page = (version: number, more: boolean) => jsonResponse({ data: { item: {
+      itemId: "item-id", name: "Home", path: "/sitecore/Home", language: { name: "en-NZ" }, version,
+      template: { templateId: "template", name: "Page" },
+      fields: { nodes: [], pageInfo: { hasNextPage: more, endCursor: more ? "next" : null } },
+    } } });
+    const runtime = new QueuedHttpRuntime([tokenResponse(), page(1, true),
+      jsonResponse({ data: { item: { fields: null } } }), page(nextVersion, false)]);
+    const read = new AuthoringContentClient(noOpLogger, runtime)
+      .loadItemDetails(testConnection, "secret", "item-id", "en-NZ", signal, true);
+    if (nextVersion === 2) await rejects(read, /different item, locale or version/u);
+    else strictEqual((await read).version, 1);
+    match(String(requestBody(runtime, 3).query), /withLanguageFallback: true/u);
+    strictEqual((requestBody(runtime, 3).variables as { after: string }).after, "next");
+  }
+});
+
 function treeItem(itemId: string, name: string, path: string) {
   return { itemId, name, displayName: `${name} display`, path, hasChildren: true };
 }
@@ -519,4 +564,135 @@ test("exact lookup distinguishes an absent item from a malformed response", asyn
   await rejects(missing.loadTreeLevel(testConnection, "secret", { path: "/missing" }, "en", signal), AuthoringItemNotFoundError);
   const malformed = new AuthoringContentClient(noOpLogger, new QueuedHttpRuntime([tokenResponse(), jsonResponse({ data: {} })]));
   await rejects(malformed.loadTreeLevel(testConnection, "secret", { path: "/missing" }, "en", signal), error => error instanceof Error && !(error instanceof AuthoringItemNotFoundError));
+});
+
+
+test("version contract validation skips execution and rejects malformed or unsupported contracts", async () => {
+  const input = { itemId: "item-id", language: "en-NZ" };
+  for (const payload of [{ data: { __typename: "Mutation" } }, { data: {} }, { errors: [{ message: "Unknown type" }] }]) {
+    const runtime = new QueuedHttpRuntime([tokenResponse(), jsonResponse(payload)]);
+    const task = new AuthoringContentClient(noOpLogger, runtime).validateAddItemVersion(testConnection, "secret", input, signal);
+    if ("data" in payload && payload.data?.__typename) { await task; } else { await rejects(task); }
+    const body = requestBody(runtime, 1);
+    match(String(body.query), /@skip\(if: \$validateOnly\)/u);
+    deepStrictEqual(body.variables, { input: { database: "master", ...input }, validateOnly: true });
+    strictEqual(runtime.requests.length, 2);
+  }
+});
+
+test("version creation validates identity, language and version and never retries a failed write", async () => {
+  for (const item of [null, { itemId: "other", language: { name: "en" }, version: 1 },
+    { itemId: "item-id", language: { name: "fr" }, version: 1 },
+    { itemId: "item-id", language: { name: "en" }, version: 0 }]) {
+    const runtime = new QueuedHttpRuntime([tokenResponse(), jsonResponse({ data: { addItemVersion: { item } } })]);
+    await rejects(new AuthoringContentClient(noOpLogger, runtime).addItemVersion(testConnection, "secret", { itemId: "item-id", language: "en" }, signal));
+    strictEqual((requestBody(runtime, 1).variables as { validateOnly: boolean }).validateOnly, false);
+    strictEqual(runtime.requests.length, 2);
+  }
+  const failed = new QueuedHttpRuntime([tokenResponse(), jsonResponse({}, 503)]);
+  await rejects(new AuthoringContentClient(noOpLogger, failed).addItemVersion(testConnection, "secret", { itemId: "item-id", language: "en" }, signal));
+  strictEqual(failed.requests.length, 2); deepStrictEqual(failed.waits, []);
+});
+
+test("field reset sends reset true while literal empty update sends false", async () => {
+  for (const reset of [true, false]) {
+    const runtime = new QueuedHttpRuntime([tokenResponse(), jsonResponse({ data: { updateItem: null } })]);
+    const client = new AuthoringContentClient(noOpLogger, runtime);
+    const input = { itemId: "item-id", language: "en", version: 1 };
+    await rejects(reset ? client.resetItemField(testConnection, "secret", { ...input, fieldName: "Title" }, signal)
+      : client.updateItemFields(testConnection, "secret", { ...input, fields: { Title: "" } }, signal));
+    deepStrictEqual((requestBody(runtime, 1).variables as { input: unknown }).input,
+      { database: "master", ...input, fields: [{ name: "Title", value: "", reset }] });
+    strictEqual(runtime.requests.length, 2);
+  }
+});
+
+
+test("new version and reset read back the exact acknowledged locale and version", async () => {
+  for (const reset of [true, false]) {
+    const item = { itemId: "item-id", name: "Test", displayName: "Test", path: "/sitecore/content/Test", hasChildren: false,
+      language: { name: "en" }, version: 1, template: { templateId: "template-id", name: "Page" }, versions: [],
+      fields: { nodes: [], pageInfo: { hasNextPage: false, endCursor: null } } };
+    const runtime = new QueuedHttpRuntime([tokenResponse(),
+      jsonResponse({ data: { [reset ? "updateItem" : "addItemVersion"]: { item } } }),
+      jsonResponse({ data: { item } }), jsonResponse({ data: { item } })]);
+    const client = new AuthoringContentClient(noOpLogger, runtime);
+    const input = { itemId: "item-id", language: "en" };
+    const result = reset ? await client.resetItemField(testConnection, "secret", { ...input, version: 1, fieldName: "Title" }, signal)
+      : await client.addItemVersion(testConnection, "secret", input, signal);
+    strictEqual(result.version, 1); strictEqual(result.language, "en");
+    deepStrictEqual((requestBody(runtime, 2).variables as { where: unknown }).where,
+      { database: "master", itemId: "item-id", language: "en", version: 1 });
+  }
+  const runtime = new QueuedHttpRuntime([]);
+  await rejects(new AuthoringContentClient(noOpLogger, runtime).addItemVersion(testConnection, "secret", { itemId: "item-id", language: "en" }, AbortSignal.abort()));
+  strictEqual(runtime.requests.length, 0);
+});
+
+
+test("editor exact reads reject wrong numbered version and mutation never reads latest or retries", async () => {
+  const runtime = new QueuedHttpRuntime([tokenResponse(), jsonResponse({ data: { item: {
+    itemId: "item-id", language: { name: "en" }, version: 3, fields: null,
+  } } }), jsonResponse({ data: { item: { fields: null } } })]);
+  await rejects(new AuthoringContentClient(noOpLogger, runtime).loadItem(testConnection, "secret", { itemId: "item-id" }, "en", 2, signal, false, true), /different item, locale or version/);
+  const successful = new QueuedHttpRuntime([tokenResponse(), jsonResponse({ data: { updateItem: { item: { itemId: "item-id", language: { name: "en" }, version: 2 } } } })]);
+  await new AuthoringContentClient(noOpLogger, successful).updateEditorFields(testConnection, "secret", { itemId: "item-id", language: "en", version: 2, fields: { Title: "" } }, signal);
+  strictEqual(successful.requests.length, 2);
+  deepStrictEqual((requestBody(successful, 1).variables as { input: unknown }).input, { database: "master", itemId: "item-id", language: "en", version: 2, fields: [{ name: "Title", value: "", reset: false }] });
+  const failure = new QueuedHttpRuntime([tokenResponse(), jsonResponse({}, 503)]);
+  await rejects(new AuthoringContentClient(noOpLogger, failure).updateEditorFields(testConnection, "secret", { itemId: "item-id", language: "en", version: 2, fields: { Title: "text" } }, signal));
+  strictEqual(failure.requests.length, 2); deepStrictEqual(failure.waits, []);
+});
+
+
+test("editor latest read pins field classification and rejects mismatched classification evidence", async () => {
+  for (const metadataVersion of [2, 3]) {
+    const runtime = new QueuedHttpRuntime([tokenResponse(), jsonResponse({ data: { item: {
+      itemId: "item-id", language: { name: "en" }, version: 2, name: "Item", path: "/sitecore/content/Item",
+      template: { templateId: "template", name: "Component" }, fields: null,
+    } } }), jsonResponse({ data: { item: { itemId: "item-id", language: { name: "en" }, version: metadataVersion, fields: null } } })]);
+    const result = new AuthoringContentClient(noOpLogger, runtime).loadItem(testConnection, "secret", { itemId: "item-id" }, "en", undefined, signal, false, true);
+    if (metadataVersion === 3) await rejects(result, /classification returned a different/);
+    else strictEqual((await result).version, 2);
+    deepStrictEqual((requestBody(runtime, 2).variables as { where: unknown }).where, { database: "master", itemId: "item-id", language: "en", version: 2 });
+    match(String(requestBody(runtime, 2).query), /withLanguageFallback: false/);
+  }
+});
+
+test("selection queries preserve locale and enforce paging limits without returning partial choices", async () => {
+  const root = { ...treeItem("root-id", "Root", "/sitecore/content/Root"), language: { name: "en-AU" } };
+  const child = { ...treeItem("child-id", "Child", root.path + "/Child"), language: { name: "en-AU" } };
+  const page = (more: boolean) => jsonResponse({ data: { item: { ...root, children: { nodes: [child], pageInfo: { hasNextPage: more, endCursor: more ? "next" : null } } } } });
+  const runtime = new QueuedHttpRuntime([tokenResponse(), page(true), page(false)]);
+  await rejects(new AuthoringContentClient(noOpLogger, runtime).loadTreeLevel(testConnection, "secret", { itemId: "root-id" }, "en-AU", signal, 1), /limit/);
+  match(String(requestBody(runtime, 1).query), /language/);
+  strictEqual((requestBody(runtime, 2).variables as { after: string }).after, "next");
+  for (const patch of [{ language: { name: "en" } }, { itemId: "wrong" }]) {
+    const bad = new QueuedHttpRuntime([tokenResponse(), jsonResponse({ data: { item: { ...root, ...patch } } })]);
+    await rejects(new AuthoringContentClient(noOpLogger, bad).loadSelectionItem(testConnection, "secret", { itemId: "root-id" }, "en-AU", signal), /different item or locale/);
+  }
+  const good = new QueuedHttpRuntime([tokenResponse(), jsonResponse({ data: { item: root } })]);
+  strictEqual((await new AuthoringContentClient(noOpLogger, good).loadSelectionItem(testConnection, "secret", { path: root.path }, "en-AU", signal)).itemId, "root-id");
+  deepStrictEqual((requestBody(good, 1).variables as { where: unknown }).where, { database: "master", path: root.path, language: "en-AU" });
+});
+
+test("field titles prefer localized Title then English, never a value label", async () => {
+  const item = (itemId: string, value: string) => ({ itemId, path: "/sitecore/templates/Test/Data/Field", title: { value } });
+  const runtime = new QueuedHttpRuntime([tokenResponse(), jsonResponse({ data: {
+    local0: item("one", "Localized title"), english0: item("one", "English title"),
+    local1: item("two", ""), english1: item("two", "Muted"), local2: null, english2: null,
+  } })]);
+  const titles = await new AuthoringContentClient(noOpLogger, runtime).loadFieldTitles(testConnection, "secret", ["one", "two", "three"], "en-AU", signal);
+  deepStrictEqual([...titles], [["one", "Localized title"], ["two", "Muted"]]);
+  const request = requestBody(runtime, 1);
+  match(String(request.query), /field\(name: "Title"\)/u);
+  strictEqual((request.variables as Record<string, { language: string }>).local0.language, "en-AU");
+  strictEqual((request.variables as Record<string, { language: string }>).english0.language, "en");
+});
+
+test("field title reads reject unrelated identities and oversized batches", async () => {
+  const runtime = new QueuedHttpRuntime([tokenResponse(), jsonResponse({ data: { local0: { itemId: "wrong", path: "/sitecore/templates/Test", title: { value: "Wrong" } } } })]);
+  const client = new AuthoringContentClient(noOpLogger, runtime);
+  await rejects(client.loadFieldTitles(testConnection, "secret", ["one"], "en", signal), /Invalid field title identity/u);
+  await rejects(client.loadFieldTitles(testConnection, "secret", Array(33).fill("one"), "en", signal), /Too many/u);
 });

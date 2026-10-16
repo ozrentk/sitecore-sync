@@ -1,4 +1,13 @@
-const vscode = acquireVsCodeApi();
+const api = acquireVsCodeApi();
+const vscode = { postMessage(message) {
+  if (["navigateItem", "revealItemResult", "loadRoot", "refreshAll", "selectConnection", "selectLanguage"].includes(message.type)) modeRestoration = undefined;
+  if (state.mode === "browse") {
+    if (message.type === "loadItemDetails") return;
+    if (message.type === "selectFieldDiffItem") message = { ...message, type: "selectBrowseItem" };
+    if (message.type === "showDetailedFieldDiff") message = { ...message, type: "showBrowseItem" };
+  }
+  api.postMessage(state.viewContext === undefined ? message : { ...message, viewContext: state.viewContext, viewMode: state.mode, fallbackRevision: state.fallbackRevision });
+} };
 
 function emptyTreeState(connectionId, language) {
   return {
@@ -11,6 +20,9 @@ function emptyTreeState(connectionId, language) {
 }
 
 const state = {
+  fallbackMode: "exact",
+  fallbackRevision: 0,
+  mode: "compare",
   connections: [],
   selection: {},
   languages: {
@@ -51,6 +63,11 @@ const leftLanguageSelect = document.getElementById("left-language");
 const rightLanguageSelect = document.getElementById("right-language");
 const swapButton = document.getElementById("swap");
 const languageLock = document.getElementById("language-lock");
+const fieldFallbackMode = document.getElementById("field-fallback-mode");
+fieldFallbackMode.addEventListener("click", () => {
+  fieldFallbackMode.disabled = true;
+  vscode.postMessage({ type: "setFieldFallbackMode", fallbackMode: state.fallbackMode === "fallback" ? "exact" : "fallback" });
+});
 const workspace = document.getElementById("workspace");
 const languageSwitchStatus = document.getElementById("language-switch-status");
 const languageSwitchText = document.getElementById("language-switch-text");
@@ -59,6 +76,94 @@ const languageSwitchStatusRight = document.getElementById("language-switch-statu
 const languageSwitchTextRight = document.getElementById("language-switch-text-right");
 const languageSwitchRetryRight = document.getElementById("language-switch-retry-right");
 
+document.getElementById("mode-browse").addEventListener("click", () => requestMode("browse"));
+document.getElementById("mode-compare").addEventListener("click", () => requestMode("compare"));
+document.getElementById("content-cancel").addEventListener("click", () => vscode.postMessage({ type: "cancelContentLoads" }));
+const modeSnapshots = new Map();
+let modeRestoration;
+function modeSnapshotKey(mode, selection) {
+  return JSON.stringify([mode, selection.leftConnectionId, selection.leftLanguage,
+    mode === "compare" ? selection.rightConnectionId : undefined, mode === "compare" ? selection.rightLanguage : undefined]);
+}
+function visitModePairs(visit) {
+  if (!state.trees.left.root && !state.trees.right.root) return;
+  refreshLoadedItemIndexes();
+  const seen = new Set();
+  const walk = pair => {
+    if (seen.has(pair.key)) return;
+    seen.add(pair.key); visit(pair);
+    for (const child of pairChildren(pair.left?.children ?? [], pair.right?.children ?? [])) walk(child);
+  };
+  walk(createPair(state.trees.left.root, state.trees.right.root, "root"));
+}
+function captureModeNavigation() {
+  const result = { scroll: workspace.scrollTop, windowScroll: window.scrollY, sides: {} };
+  const displayedRoot = findLoadedPair(state.rootRowKey);
+  for (const side of ["left", "right"]) {
+    const tree = JSON.parse(JSON.stringify({ ...state.trees[side], root: displayedRoot?.[side] || state.trees[side].root }));
+    tree.loading = false; clearNodeLoadingState(tree.root); clearNodeDetails(tree.root);
+    result.sides[side] = { tree, expanded: [], selected: undefined };
+  }
+  visitModePairs(pair => {
+    for (const side of ["left", "right"]) if (pair[side]) {
+      if (state.expandedRows.has(pair.key)) result.sides[side].expanded.push(normalizeItemId(pair[side].itemId));
+      if (state.selectedRowKey === pair.key) result.sides[side].selected = normalizeItemId(pair[side].itemId);
+    }
+  });
+  return result;
+}
+function requestMode(mode) {
+  if (mode === state.mode) { vscode.postMessage({ type: "cancelModeSwitch" }); return; }
+  const snapshot = captureModeNavigation();
+  const navigation = {};
+  for (const side of ["left", "right"]) navigation[side] = {
+    rootPath: snapshot.sides[side].tree.root?.path || "/", selectedItemId: snapshot.sides[side].selected,
+  };
+  vscode.postMessage({ type: "switchMode", mode, navigation });
+}
+function restoreModeNavigation(previous) {
+  const cached = modeSnapshots.get(modeSnapshotKey(state.mode, state.selection));
+  const retained = previous.sides.left;
+  const right = cached?.sides.right || [...modeSnapshots.values()].reverse().flatMap(snapshot => Object.values(snapshot.sides))
+    .find(value => value.tree.connectionId === state.selection.rightConnectionId && value.tree.language === state.selection.rightLanguage);
+  const sides = { left: retained, right: state.mode === "compare" ? right : undefined };
+  for (const side of ["left", "right"]) {
+    const value = sides[side];
+    if (!value || value.tree.connectionId !== state.selection[`${side}ConnectionId`] || value.tree.language !== state.selection[`${side}Language`]) {
+      sides[side] = undefined; continue;
+    }
+    state.trees[side] = JSON.parse(JSON.stringify(value.tree));
+  }
+  modeRestoration = { sides, scroll: previous.scroll, windowScroll: previous.windowScroll };
+  applyModeRestoration();
+}
+function applyModeRestoration() {
+  const pending = modeRestoration;
+  if (!pending || !state.trees.left.root || (state.mode === "compare" && !state.trees.right.root)) return;
+  let waiting = false;
+  let selected;
+  visitModePairs(pair => {
+    for (const side of ["left", "right"]) {
+      const id = pair[side] && normalizeItemId(pair[side].itemId);
+      if (!id) continue;
+      if (pending.sides[side]?.expanded.includes(id)) {
+        state.expandedRows.add(pair.key);
+        for (const node of [pair.left, pair.right]) if (node?.hasChildren && !node.childrenLoaded && !node.error) waiting = true;
+        loadMissingPairLevels(pair);
+      }
+      if (side === "left" && pending.sides.left?.selected === id) selected = pair.key;
+    }
+  });
+  if (waiting) return;
+  modeRestoration = undefined;
+  state.selectedRowKey = selected;
+  const pair = findLoadedPair(state.selectedRowKey);
+  if (pair) vscode.postMessage({ type: "selectFieldDiffItem", leftItemId: pair.left?.itemId, rightItemId: pair.right?.itemId,
+    leftName: pair.left?.displayName || pair.left?.name, rightName: pair.right?.displayName || pair.right?.name });
+  render();
+  workspace.scrollTop = pending.scroll || 0;
+  window.scrollTo?.(0, pending.windowScroll || 0);
+}
 const navigationInput = document.getElementById("item-navigation-input");
 const navigationMode = document.getElementById("item-navigation-mode");
 const navigationStatus = document.getElementById("item-navigation-status");
@@ -144,6 +249,22 @@ function normalizedFieldValue(value) {
   return state.textNormalization === "lineEndings"
     ? value.replace(/\r\n?|\n/g, "\n")
     : value;
+}
+
+// Presentation only: a configured item candidate is not verified per-field provenance.
+function fallbackSourceHint(details) {
+  const observation = details?.itemFallback;
+  const candidate = observation?.candidate;
+  const chain = observation?.chain;
+  const validLocale = value => typeof value === "string" && /^[a-z]{2,8}(?:-[a-z0-9]{1,8})*$/iu.test(value);
+  if (details?.version !== 0 || !validLocale(details.language) || observation?.status !== "candidate" || !validLocale(candidate?.language)
+    || !Number.isInteger(candidate.version) || candidate.version < 1 || !Array.isArray(chain) || chain.length < 2
+    || !chain.every(validLocale) || chain[0].toLowerCase() !== details.language?.toLowerCase()
+    || chain.at(-1).toLowerCase() !== candidate.language.toLowerCase()) {
+    return { label: "source language unknown", tooltip: "The source language of this field has not been verified." };
+  }
+  return { label: `expected source: ${candidate.language}`,
+    tooltip: `Configured candidate, not verified per-field provenance.\nFallback chain: ${chain.join(" → ")}` };
 }
 
 function fieldSource(field) {
@@ -236,6 +357,11 @@ function renderOptions(select, selectedId) {
   }
 
   select.disabled = false;
+  if (!connectionById(selectedId)) {
+    const option = document.createElement("option");
+    option.value = ""; option.textContent = "Choose a connection"; option.selected = true; option.disabled = true;
+    select.append(option);
+  }
   for (const connection of state.connections) {
     const option = document.createElement("option");
     option.value = connection.id;
@@ -272,7 +398,7 @@ function renderLanguageOptions(side, select, selectedLanguage) {
     option.selected = language.name.toLowerCase() === selectedLanguage?.toLowerCase();
     select.append(option);
   }
-  select.disabled = languageState.loading;
+  select.disabled = languageState.loading || !connectionById(state.selection[`${side}ConnectionId`]);
   select.title = languageState.error || "Select content language";
 }
 
@@ -302,6 +428,7 @@ function requestChildren(side, node) {
 }
 
 function requestItemDetails(side, node) {
+  if (state.mode === "browse") return;
   const connectionId = state.trees[side].connectionId;
   if (
     connectionId &&
@@ -529,8 +656,10 @@ function loadMissingPairLevels(pair) {
 function createRootStatus(side) {
   const tree = state.trees[side];
   const status = document.createElement("div");
-  status.className = "root-status";
-  if (tree.error) {
+  status.className = `root-status ${side}`;
+  if (!connectionById(tree.connectionId)) {
+    status.textContent = "Choose a connection to load content.";
+  } else if (tree.error) {
     const message = document.createElement("span");
     message.className = "error-text";
     message.textContent = tree.error;
@@ -577,6 +706,7 @@ function createLegendGroup(flags, kind) {
 }
 
 function togglePairExpansion(pair) {
+  vscode.postMessage({ type: "cancelModeSwitch" });
   cancelLanguageRestoration();
   if (!pairCanExpand(pair) || isPairRefreshing(pair)) {
     return;
@@ -592,6 +722,7 @@ function togglePairExpansion(pair) {
 }
 
 function expandPairItem(pair) {
+  vscode.postMessage({ type: "cancelModeSwitch" });
   cancelLanguageRestoration();
   if (
     !pairCanExpand(pair) ||
@@ -608,6 +739,7 @@ function expandPairItem(pair) {
 }
 
 function collapsePairItem(pair) {
+  vscode.postMessage({ type: "cancelModeSwitch" });
   cancelLanguageRestoration();
   if (!state.expandedRows.has(pair.key) || isPairRefreshing(pair)) {
     return;
@@ -621,7 +753,7 @@ function findLoadedPairContext(rowKey) {
   refreshLoadedItemIndexes();
   const leftRoot = state.trees.left.root;
   const rightRoot = state.trees.right.root;
-  if (!leftRoot || !rightRoot) {
+  if (!leftRoot || (state.mode !== "browse" && !rightRoot)) {
     return undefined;
   }
 
@@ -974,6 +1106,7 @@ function createContextMenuSeparator() {
 }
 
 function showContextMenu(event, pair, clickedSide, forceDisabled = false) {
+  if (state.mode === "browse") clickedSide = "left";
   event.preventDefault();
   closeContextMenu();
 
@@ -1073,11 +1206,11 @@ function showContextMenu(event, pair, clickedSide, forceDisabled = false) {
   const detailedDiff = document.createElement("button");
   detailedDiff.className = "context-menu-item";
   detailedDiff.type = "button";
-  detailedDiff.textContent = "Show Detailed Field Diff";
+  detailedDiff.textContent = state.mode === "browse" ? "Show Item Details" : "Show Detailed Field Diff";
   detailedDiff.disabled = disabled || (!pair.left && !pair.right);
   detailedDiff.title = detailedDiff.disabled
     ? "Field details are unavailable while this item is locked."
-    : "Open the Field Diff panel for this item.";
+    : state.mode === "browse" ? "Open read-only Item Details." : "Open the Field Diff panel for this item.";
   detailedDiff.addEventListener("click", () => {
     cancelLanguageRestoration();
     state.selectedRowKey = pair.key;
@@ -1104,6 +1237,17 @@ function showContextMenu(event, pair, clickedSide, forceDisabled = false) {
       leftPath: pair.left?.path,
       rightPath: pair.right?.path,
     });
+    closeContextMenu();
+  });
+
+  const editItem = document.createElement("button");
+  editItem.className = "context-menu-item";
+  editItem.type = "button";
+  editItem.textContent = "Edit…";
+  const editSide = state.mode === "browse" ? "left" : clickedSide;
+  editItem.disabled = disabled || !editSide || !pair[editSide];
+  editItem.addEventListener("click", () => {
+    if (editSide && pair[editSide]) vscode.postMessage({ type: "editItem", side: editSide, itemId: pair[editSide].itemId });
     closeContextMenu();
   });
 
@@ -1153,7 +1297,7 @@ function showContextMenu(event, pair, clickedSide, forceDisabled = false) {
   openPage.type = "button";
   openPage.textContent = "Open public page";
   openPage.disabled = disabled || !clickedItem;
-  openPage.title = "Resolve and preview the public URL for this side's page or owning page.";
+  openPage.title = "Open the public URL for this item or its owning page.";
   openPage.addEventListener("click", () => {
     vscode.postMessage({ type: "openPublicPage", side: clickedSide, itemId: clickedItem?.itemId });
     closeContextMenu();
@@ -1231,7 +1375,26 @@ function showContextMenu(event, pair, clickedSide, forceDisabled = false) {
     : clickedSide === "right"
       ? [syncRightToLeft]
       : [syncLeftToRight, syncRightToLeft];
-  menu.append(
+  if (state.mode === "browse") {
+    runTask.title = "Select a matching workspace task for this item.";
+    addFavorite.title = "Add this path to the browsed connection's favorites.";
+    publishTrigger.title = clickedItem ? `Publish ${clickedItem.path} from the browsed connection.` : "Choose an item to publish.";
+    const identityActions = ["id", "path"].map(fieldId => {
+      const action = document.createElement("button");
+      action.className = "context-menu-item";
+      action.type = "button";
+      action.textContent = fieldId === "id" ? "Copy item ID" : "Copy item path";
+      action.disabled = disabled || !pair.left;
+      action.addEventListener("click", () => {
+        vscode.postMessage({ type: "copyBrowseIdentity", itemId: pair.left?.itemId, fieldId });
+        closeContextMenu();
+      });
+      return action;
+    });
+    menu.append(editItem, detailedDiff, publishMenu, runTask, ...identityActions, addFavorite,
+      createContextMenuSeparator(), itemAction, expandLoaded, load, refreshItem, refreshSubtree);
+  } else menu.append(
+    editItem,
     detailedDiff,
     publishMenu,
     addFavorite,
@@ -1251,8 +1414,8 @@ function showContextMenu(event, pair, clickedSide, forceDisabled = false) {
   contextMenu = menu;
 
   const bounds = menu.getBoundingClientRect();
-  menu.style.left = `${Math.max(4, Math.min(event.clientX, window.innerWidth - bounds.width - 4))}px`;
-  menu.style.top = `${Math.max(4, Math.min(event.clientY, window.innerHeight - bounds.height - 4))}px`;
+  menu.style.left = `${Math.max(4, Math.min(event.clientX || 0, window.innerWidth - bounds.width - 4))}px`;
+  menu.style.top = `${Math.max(4, Math.min(event.clientY || 0, window.innerHeight - bounds.height - 4))}px`;
   (activeSubtreeLoad ? menu.firstElementChild : itemAction).focus();
 }
 
@@ -1361,7 +1524,7 @@ function createItemCell(node, side, depth, pair) {
   const tooltipLines = [
     node.path,
     `Item ID: ${node.itemId}`,
-    `Field comparison: ${fieldComparisonStatus(pair)}`,
+    ...(state.mode === "browse" ? [] : [`Field comparison: ${fieldComparisonStatus(pair)}`]),
   ];
   if (displayName !== node.name) {
     tooltipLines.push(`Item name: ${node.name}`);
@@ -1385,7 +1548,7 @@ function createItemCell(node, side, depth, pair) {
       `Standard Template fields: ${standardTemplateFields.length}`,
       `Using Standard Values: ${standardValueCount}`,
       `Populated Standard Template overrides: ${populatedStandardOverrides}`,
-      `Equal Standard Template fields hidden by default: ${hiddenEqualStandardFields}`,
+      ...(state.mode === "browse" ? [] : [`Equal Standard Template fields hidden by default: ${hiddenEqualStandardFields}`]),
     );
   }
   cell.title = tooltipLines.join("\n");
@@ -1486,7 +1649,7 @@ function createTemplateRow(pair, depth) {
   return row;
 }
 
-function fieldTooltip(field) {
+function fieldTooltip(field, details) {
   if (!field) {
     return "Field is missing.";
   }
@@ -1494,13 +1657,14 @@ function fieldTooltip(field) {
     `Field ID: ${field.fieldId}`,
     `Type: ${field.type}`,
     `Scope: ${field.scope.toLowerCase()}`,
-    `Source: ${fieldSource(field)}`,
+    `Source: ${fieldSource(field)}${field.containsFallbackValue ? ` · ${fallbackSourceHint(details).label}` : ""}`,
+    field.containsFallbackValue ? fallbackSourceHint(details).tooltip : undefined,
     field.sectionName ? `Section: ${field.sectionName}` : undefined,
     `Value: ${field.value || "(empty)"}`,
   ].filter(Boolean).join("\n");
 }
 
-function createFieldCell(field, side, depth, fieldPair) {
+function createFieldCell(field, side, depth, fieldPair, details) {
   const cell = document.createElement("button");
   cell.type = "button";
   cell.className = `comparison-cell detail-cell field-cell ${side}`;
@@ -1539,7 +1703,15 @@ function createFieldCell(field, side, depth, fieldPair) {
   const value = document.createElement("span");
   value.className = "field-value";
   value.textContent = field.value || "(empty)";
-  cell.title = fieldTooltip(field);
+  if (field.containsFallbackValue) {
+    const source = document.createElement("span");
+    source.className = "field-provenance";
+    const hint = fallbackSourceHint(details);
+    source.textContent = `fallback · ${hint.label}`;
+    source.title = hint.tooltip;
+    name.append(source);
+  }
+  cell.title = fieldTooltip(field, details);
   if (fieldPair.flags.includes("fieldTypeMismatch")) {
     const type = document.createElement("span");
     type.className = "field-type";
@@ -1576,8 +1748,8 @@ function createFieldRow(fieldPair, itemPair, depth) {
     badge.title = flag.replace(/^field/, "Field ").replace(/Mismatch$/, " differs");
     control.append(badge);
   }
-  const leftCell = createFieldCell(fieldPair.left, "left", depth, fieldPair);
-  const rightCell = createFieldCell(fieldPair.right, "right", depth, fieldPair);
+  const leftCell = createFieldCell(fieldPair.left, "left", depth, fieldPair, itemPair.left?.details);
+  const rightCell = createFieldCell(fieldPair.right, "right", depth, fieldPair, itemPair.right?.details);
   const canDiff = fieldPair.flags.length &&
     (fieldPair.left?.textual || fieldPair.right?.textual) &&
     itemPair.left && itemPair.right;
@@ -1639,7 +1811,7 @@ function createRowControl(pair, refreshing, refreshRoot) {
     const expanded = state.expandedRows.has(pair.key);
     const loading = pairLoading(pair) || refreshRoot;
     disclosure.textContent = loading ? "" : expanded ? "▾" : "▸";
-    disclosure.title = expanded ? "Collapse both sides" : "Expand both sides";
+    disclosure.title = state.mode === "browse" ? (expanded ? "Collapse item" : "Expand item") : (expanded ? "Collapse both sides" : "Expand both sides");
     disclosure.setAttribute("aria-label", disclosure.title);
     disclosure.setAttribute("aria-expanded", String(expanded));
     disclosure.disabled = refreshing;
@@ -1654,12 +1826,12 @@ function createRowControl(pair, refreshing, refreshRoot) {
     disclosure.setAttribute("aria-hidden", "true");
   }
 
-  const warning = createOperationalWarning(pair);
+  const warning = state.mode === "browse" ? undefined : createOperationalWarning(pair);
   control.append(disclosure);
   if (warning) {
     control.append(warning);
   }
-  control.append(createDifferenceBadges(pair.flags));
+  if (state.mode !== "browse") control.append(createDifferenceBadges(pair.flags));
   return control;
 }
 
@@ -1696,7 +1868,7 @@ function renderPair(pair, depth, ancestorRefreshing = false) {
   row.setAttribute("role", "treeitem");
   row.setAttribute("aria-level", String(depth + 1));
   row.dataset.rowKey = pair.key;
-  if (pair.flags.length) {
+  if (state.mode !== "browse" && pair.flags.length) {
     row.classList.add("different");
   } else {
     row.classList.add("same");
@@ -1741,14 +1913,28 @@ function renderPair(pair, depth, ancestorRefreshing = false) {
         : undefined;
     showContextMenu(event, pair, clickedSide, refreshing);
   });
-  row.append(
+  if (state.mode === "browse") {
+    row.append(createRowControl(pair, refreshing, refreshRoot), createItemCell(pair.left, "left", depth, pair));
+    row.addEventListener("keydown", event => {
+      if (event.key === "ArrowRight") { event.preventDefault(); expandPairItem(pair); }
+      if (event.key === "ArrowLeft") { event.preventDefault(); collapsePairItem(pair); }
+      if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+        event.preventDefault();
+        const rows = [...workspace.querySelectorAll(".comparison-row .comparison-cell.left")];
+        rows[rows.indexOf(row.querySelector(".comparison-cell.left")) + (event.key === "ArrowDown" ? 1 : -1)]?.focus();
+      }
+      if (event.key === "ContextMenu" || (event.shiftKey && event.key === "F10")) {
+        event.preventDefault(); showContextMenu(event, pair, "left", refreshing);
+      }
+    });
+  } else row.append(
     createItemCell(pair.left, "left", depth, pair),
     createRowControl(pair, refreshing, refreshRoot),
     createItemCell(pair.right, "right", depth, pair),
   );
   fragment.append(row);
 
-  if (!refreshing && state.detailExpandedRows.has(pair.key)) {
+  if (state.mode !== "browse" && !refreshing && state.detailExpandedRows.has(pair.key)) {
     for (const side of ["left", "right"]) {
       const node = pair[side];
       if (node) {
@@ -1798,9 +1984,9 @@ function createComparisonWorkspace() {
   const tree = document.createElement("div");
   tree.className = "paired-tree";
   tree.setAttribute("role", "tree");
-  tree.setAttribute("aria-label", "XM Cloud structural comparison");
+  tree.setAttribute("aria-label", state.mode === "browse" ? "XM Cloud content tree" : "XM Cloud structural comparison");
 
-  if (!leftRoot || !rightRoot) {
+  if (!leftRoot || (state.mode !== "browse" && !rightRoot)) {
     const rootStatuses = document.createElement("div");
     rootStatuses.className = "root-statuses";
     rootStatuses.append(
@@ -1833,14 +2019,30 @@ function createComparisonWorkspace() {
 }
 
 function render() {
+  const browse = state.mode === "browse";
+  document.getElementById("mode-browse").setAttribute("aria-pressed", String(browse));
+  document.getElementById("mode-compare").setAttribute("aria-pressed", String(!browse));
+  document.getElementById("content-cancel").hidden = !["left", ...(browse ? [] : ["right"])].some(side =>
+    state.trees[side].loading || state.languages[side].loading || (state.trees[side].root && subtreeStructureIsLoading(state.trees[side].root))) &&
+    state.subtreeLoadOperations.size === 0 && state.refreshOperations.size === 0;
+  document.body.classList.toggle("browse", browse);
+  rightSelect.closest(".selector").hidden = browse;
+  swapButton.closest(".toolbar-actions").hidden = false;
+  swapButton.hidden = browse;
+  languageLock.hidden = browse;
+  leftSelect.setAttribute("aria-label", browse ? "XM Cloud connection" : "Left XM Cloud connection");
+  leftLanguageSelect.setAttribute("aria-label", browse ? "Content language" : "Left content language");
+  document.getElementById("item-navigation").title = browse ? "Search the entire browsed connection." : "Search the left connection first, then the right if no match exists.";
   refreshLoadedItemIndexes();
   renderOptions(leftSelect, state.selection.leftConnectionId);
   renderOptions(rightSelect, state.selection.rightConnectionId);
   renderLanguageOptions("left", leftLanguageSelect, state.selection.leftLanguage);
   renderLanguageOptions("right", rightLanguageSelect, state.selection.rightLanguage);
   swapButton.disabled = state.connections.length < 1;
-  languageLock.checked = state.selection.languagesLocked === true;
+  languageLock.setAttribute("aria-pressed", String(state.selection.languagesLocked === true));
   languageLock.disabled = !state.selection.leftConnectionId || !state.selection.rightConnectionId;
+  fieldFallbackMode.setAttribute("aria-pressed", String(state.fallbackMode === "fallback"));
+  fieldFallbackMode.disabled = Boolean(state.languageSwitch);
 
   updateLanguageSwitchStatus();
   if (state.connections.length < 1) {
@@ -1927,7 +2129,7 @@ function finishBackgroundLanguageSwitch() {
   const visit = (pair) => {
     if (visited.has(pair.key)) { return; }
     visited.add(pair.key);
-    if (state.detailExpandedRows.has(pair.key) || pair.key === state.selectedRowKey) {
+    if (state.mode !== "browse" && (state.detailExpandedRows.has(pair.key) || pair.key === state.selectedRowKey)) {
       for (const side of ["left", "right"]) {
         const node = pair[side];
         if (!node) { continue; }
@@ -2002,6 +2204,7 @@ function captureLanguageTreeState() {
 }
 
 function cancelLanguageRestoration() {
+  modeRestoration = undefined;
   if (state.languageSwitch) {
     state.languageSwitch = undefined;
     vscode.postMessage({ type: "languageViewReady", comparisonKey: comparisonLanguageKey() });
@@ -2155,7 +2358,7 @@ function updateTreeConnections() {
     selectedRowKey: state.selectedRowKey,
     rootRowKey: state.rootRowKey,
   };
-  const canPrepare = sameConnections && languageChanged && previous.trees.left.root && previous.trees.right.root;
+  const canPrepare = sameConnections && languageChanged && previous.trees.left.root && (state.mode === "browse" || previous.trees.right.root);
   const returningToDisplayed = canPrepare && ["left", "right"].every((side) =>
     previous.trees[side].language === state.selection[`${side}Language`],
   );
@@ -2343,6 +2546,7 @@ function applyLanguagesMessage(message, status) {
 }
 
 function applyItemDetailsMessage(message, status) {
+  if (message.fallbackRevision !== undefined && message.fallbackRevision !== state.fallbackRevision) return;
   const tree = state.trees[message.side];
   if (
     !tree ||
@@ -2432,8 +2636,8 @@ swapButton.addEventListener("click", () => {
   vscode.postMessage({ type: "swapConnections" });
 });
 
-languageLock.addEventListener("change", () => {
-  vscode.postMessage({ type: "setLanguageLock", locked: languageLock.checked });
+languageLock.addEventListener("click", () => {
+  vscode.postMessage({ type: "setLanguageLock", locked: state.selection.languagesLocked !== true });
 });
 
 window.addEventListener("message", (event) => {
@@ -2507,11 +2711,62 @@ window.addEventListener("message", (event) => {
     });
     return;
   } else if (message?.type === "stateChanged") {
+    if (state.fallbackMode !== (message.fallbackMode || "exact") ||
+        (message.fallbackRevision !== undefined && state.fallbackRevision !== message.fallbackRevision)) {
+      clearNodeDetails(state.trees.left.root);
+      clearNodeDetails(state.trees.right.root);
+    }
+    state.fallbackMode = message.fallbackMode || "exact";
+    state.fallbackRevision = message.fallbackRevision ?? 0;
     if (JSON.stringify(state.selection) !== JSON.stringify(message.selection)) { clearItemLookupUi(); }
+    const mode = message.mode || "compare";
+    const previousMode = state.mode;
+    const previous = state.mode !== mode && !message.resetContent ? captureModeNavigation() : undefined;
+    if (message.resetContent) {
+      modeSnapshots.clear(); modeRestoration = undefined; clearItemLookupUi();
+      for (const side of ["left", "right"]) {
+        state.trees[side] = emptyTreeState(undefined);
+        state.languages[side] = { connectionId: undefined, values: [], loading: false };
+        navigationRetainedNodes[side].clear();
+      }
+    }
+    if (previous) {
+      modeSnapshots.set(modeSnapshotKey(state.mode, state.selection), previous);
+      while (modeSnapshots.size > 8) modeSnapshots.delete(modeSnapshots.keys().next().value);
+      modeRestoration = undefined;
+    }
+    if (state.mode !== mode || message.resetContent) {
+      closeContextMenu(); clearItemLookupUi();
+      state.languageSwitch = undefined; cancelLanguageRestoration();
+      state.selectedRowKey = undefined; state.rootRowKey = undefined;
+      state.expandedRows.clear(); state.detailExpandedRows.clear();
+      state.refreshOperations.clear(); state.subtreeLoadOperations.clear(); state.syncOperations.clear();
+    }
+    if (mode === "browse" && state.mode !== mode) clearNodeDetails(state.trees.left.root);
+    state.mode = mode;
+    state.viewContext = message.viewContext;
     state.connections = message.connections;
     state.selection = message.selection;
     state.textNormalization = message.textNormalization || "none";
     updateTreeConnections();
+    if (previous && previousMode !== mode) {
+      state.languageSwitch = undefined; cancelLanguageRestoration();
+      restoreModeNavigation(previous);
+    }
+  } else if (message?.type === "requestCompareMode") {
+    requestMode("compare");
+    return;
+  } else if (message?.type === "browseLoadsCancelled") {
+    modeRestoration = undefined;
+    for (const language of Object.values(state.languages)) language.loading = false;
+    for (const tree of Object.values(state.trees)) {
+      tree.loading = false; clearNodeLoadingState(tree.root);
+      if (!tree.root) tree.error = "Loading cancelled.";
+    }
+    state.subtreeLoadOperations.clear();
+    state.refreshOperations.clear();
+    cancelLanguageRestoration();
+    if (state.languageSwitch) state.languageSwitch.failed = true;
   } else if (message?.type === "languagesLoading") {
     applyLanguagesMessage(message, "loading");
   } else if (message?.type === "languagesLoaded") {
@@ -2583,6 +2838,7 @@ window.addEventListener("message", (event) => {
     return;
   }
   if (["stateChanged", "treeLoaded", "treeLoadFailed", "itemDetailsLoaded", "itemDetailsLoadFailed"].includes(message?.type)) {
+    applyModeRestoration();
     advanceLanguageRestoration();
     finishBackgroundLanguageSwitch();
   }

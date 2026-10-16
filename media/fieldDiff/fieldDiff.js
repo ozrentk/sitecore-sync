@@ -1,4 +1,6 @@
-const vscode = acquireVsCodeApi();
+const api = acquireVsCodeApi();
+const vscode = { getState: () => api.getState(), setState: value => api.setState(value),
+  postMessage: message => api.postMessage({ ...message, contextId: state.contextId }) };
 const persistedVisibility = vscode.getState()?.visibility ?? {};
 
 function visibilityMode(value, allowed, fallback) {
@@ -6,6 +8,14 @@ function visibilityMode(value, allowed, fallback) {
 }
 
 const state = {
+  fallbackMode: "exact",
+  mode: "compare",
+  contextId: undefined,
+  browseVisibility: {
+    content: visibilityMode(api.getState()?.browseVisibility?.content, ["hidden", "all"], "all"),
+    standard: visibilityMode(api.getState()?.browseVisibility?.standard, ["hidden", "all"], "all"),
+    system: visibilityMode(api.getState()?.browseVisibility?.system, ["hidden", "all"], "hidden"),
+  },
   snapshot: undefined,
   loadingSelection: undefined,
   error: undefined,
@@ -27,9 +37,30 @@ const state = {
 
 const content = document.getElementById("content");
 const visibilityGroups = document.querySelectorAll(".visibility-options");
+const fieldFallbackMode = document.getElementById("field-fallback-mode");
+fieldFallbackMode.addEventListener("click", () => {
+  fieldFallbackMode.disabled = true;
+  vscode.postMessage({ type: "setFieldFallbackMode", fallbackMode: state.fallbackMode === "fallback" ? "exact" : "fallback" });
+});
 
 function normalizeId(value) {
   return value.replace(/[{}-]/g, "").toLowerCase();
+}
+
+// Presentation only: a configured item candidate is not verified per-field provenance.
+function fallbackSourceHint(details) {
+  const observation = details?.itemFallback;
+  const candidate = observation?.candidate;
+  const chain = observation?.chain;
+  const validLocale = value => typeof value === "string" && /^[a-z]{2,8}(?:-[a-z0-9]{1,8})*$/iu.test(value);
+  if (details?.version !== 0 || !validLocale(details.language) || observation?.status !== "candidate" || !validLocale(candidate?.language)
+    || !Number.isInteger(candidate.version) || candidate.version < 1 || !Array.isArray(chain) || chain.length < 2
+    || !chain.every(validLocale) || chain[0].toLowerCase() !== details.language?.toLowerCase()
+    || chain.at(-1).toLowerCase() !== candidate.language.toLowerCase()) {
+    return { label: "source language unknown", tooltip: "The source language of this field has not been verified." };
+  }
+  return { label: `expected source: ${candidate.language}`,
+    tooltip: `Configured candidate, not verified per-field provenance.\nFallback chain: ${chain.join(" → ")}` };
 }
 
 function fieldSource(field) {
@@ -48,7 +79,8 @@ function normalizedValue(value) {
 
 function createPair(left, right) {
   const flags = [];
-  if (!left) flags.push("Only right");
+  if (state.mode === "browse") { /* A single item has no comparison flags. */ }
+  else if (!left) flags.push("Only right");
   else if (!right) flags.push("Only left");
   else {
     if (left.name !== right.name || left.label !== right.label) flags.push("Name");
@@ -88,15 +120,16 @@ function fieldCategory(pair) {
 }
 
 function pairIsVisible(pair) {
-  const mode = state.visibility[fieldCategory(pair)];
+  const mode = (state.mode === "browse" ? state.browseVisibility : state.visibility)[fieldCategory(pair)];
   if (mode === "hidden") return false;
   return mode === "all" || pair.flags.length > 0;
 }
 
 function updateVisibilityControls() {
   for (const group of visibilityGroups) {
-    const selectedMode = state.visibility[group.dataset.category];
+    const selectedMode = (state.mode === "browse" ? state.browseVisibility : state.visibility)[group.dataset.category];
     for (const button of group.querySelectorAll("button[data-mode]")) {
+      button.hidden = state.mode === "browse" ? button.dataset.mode === "differences" : button.classList.contains("browse-only");
       button.setAttribute("aria-pressed", String(button.dataset.mode === selectedMode));
     }
   }
@@ -114,10 +147,30 @@ function metaLine(details, error) {
   return `${details.path} · ${details.template.name} · latest version ${details.version}`;
 }
 
+function identityCopyButton(side, details, kind) {
+  const copy = document.createElement("button");
+  const value = kind === "id" ? details.itemId : details.path;
+  const label = kind === "id" ? "ID" : "path";
+  copy.type = "button";
+  copy.className = "identity-copy";
+  copy.dataset[kind === "id" ? "copyItemId" : "copyItemPath"] = side;
+  copy.dataset.itemId = details.itemId;
+  copy.dataset.copyValue = value;
+  copy.textContent = value;
+  copy.title = state.mode === "browse" ? `Copy item ${label}` : `Copy ${side} item ${label}`;
+  copy.setAttribute("aria-label", `${copy.title} ${value}`);
+  copy.setAttribute("aria-live", "polite");
+  copy.addEventListener("click", () => {
+    copy.disabled = true;
+    vscode.postMessage({ type: kind === "id" ? "copyItemId" : "copyItemPath", side, itemId: details.itemId });
+  });
+  return copy;
+}
+
 function createSummary(snapshot) {
   const summary = document.createElement("section");
   summary.className = "summary paired-grid";
-  for (const side of ["left", "right"]) {
+  for (const side of state.mode === "browse" ? ["left"] : ["left", "right"]) {
     const details = snapshot[`${side}Details`];
     const cell = document.createElement("div");
     cell.className = `summary-cell ${side}`;
@@ -129,7 +182,21 @@ function createSummary(snapshot) {
     );
     const meta = document.createElement("span");
     const error = snapshot[`${side}Error`];
-    meta.textContent = metaLine(details, error);
+    if (details && !error) {
+      const context = document.createElement("span");
+      context.textContent = ` · ${details.template.name} · latest version ${details.version}`;
+      meta.append(identityCopyButton(side, details, "path"), context);
+    } else meta.textContent = metaLine(details, error);
+    if (details?.comparisonEvidence && details.version === 0) {
+      const observation = details.itemFallback;
+      const note = document.createElement("span");
+      note.className = "item-fallback-note";
+      note.textContent = observation?.candidate
+        ? `Configured fallback candidate: ${observation.chain.join(" → ")} (v${observation.candidate.version})`
+        : "No local version; fallback source unverified.";
+      note.title = "Values are returned by Authoring for the requested locale. The configured candidate is not confirmed item or field provenance.";
+      meta.append(note);
+    }
     if (error) {
       meta.classList.add("error");
     }
@@ -138,17 +205,7 @@ function createSummary(snapshot) {
     if (details) {
       const label = document.createElement("span");
       label.textContent = "ID";
-      const copy = document.createElement("button");
-      copy.type = "button";
-      copy.dataset.copyItemId = side;
-      copy.dataset.itemId = details.itemId;
-      copy.textContent = details.itemId;
-      copy.title = `Copy ${side} item ID`;
-      copy.setAttribute("aria-label", `Copy ${side} item ID ${details.itemId}`);
-      copy.addEventListener("click", () => {
-        copy.disabled = true;
-        vscode.postMessage({ type: "copyItemId", side, itemId: details.itemId });
-      });
+      const copy = identityCopyButton(side, details, "id");
       itemId.append(label, copy);
     }
     cell.append(title, meta, itemId);
@@ -157,7 +214,8 @@ function createSummary(snapshot) {
     if (publicUrl && details) {
       const openPage = document.createElement("button");
       openPage.type = "button";
-      openPage.textContent = `Open ${side} page`;
+      openPage.className = "public-page";
+      openPage.textContent = state.mode === "browse" ? "Open public page" : `Open ${side} page`;
       openPage.title = publicUrl;
       openPage.addEventListener("click", () => vscode.postMessage({ type: "openPublicPage", side, itemId: details.itemId }));
       cell.append(openPage);
@@ -167,7 +225,7 @@ function createSummary(snapshot) {
       cell.append(unavailable);
     }
     summary.append(cell);
-    if (side === "left") summary.append(document.createElement("div"));
+    if (side === "left" && state.mode !== "browse") summary.append(document.createElement("div"));
   }
   return summary;
 }
@@ -183,7 +241,7 @@ function scopeMarker(field) {
   return marker;
 }
 
-function createFieldCell(field, pair) {
+function createFieldCell(field, pair, details) {
   const cell = document.createElement("div");
   cell.className = "field-cell";
   if (!field) {
@@ -210,9 +268,13 @@ function createFieldCell(field, pair) {
   const metadata = document.createElement("div");
   metadata.className = "metadata";
   metadata.textContent = `${field.type} · ${field.scope.toLowerCase()} · ${fieldSource(field)}`;
+  const sourceHint = field.containsFallbackValue ? fallbackSourceHint(details) : undefined;
+  if (sourceHint) metadata.textContent += ` · ${sourceHint.label}`;
   metadata.title = `Field ID: ${field.fieldId}${field.sectionName ? `\nSection: ${field.sectionName}` : ""}`;
-  const value = document.createElement("pre");
-  value.textContent = field.value || "(empty)";
+  if (sourceHint) metadata.title += `\n${sourceHint.tooltip}`;
+  const structured = ["image", "file", "rich text"].includes(field.type.toLowerCase());
+  const value = structured ? renderReadOnlyField(field) : document.createElement("pre");
+  if (!structured) value.textContent = typeof field.value !== "string" ? "Value unavailable" : field.value === "" ? "(empty)" : field.value;
   cell.append(heading, metadata, value);
   if (pair.flags.length && (pair.left?.textual || pair.right?.textual)) {
     cell.classList.add("diff-launch");
@@ -227,13 +289,17 @@ function createFieldCell(field, pair) {
 function createFieldRow(pair) {
   const row = document.createElement("section");
   row.className = `field-row paired-grid${pair.flags.length ? " different" : ""}`;
+  if (state.mode === "browse") {
+    row.append(createFieldCell(pair.left, pair, state.snapshot?.leftDetails));
+    return row;
+  }
   const differences = document.createElement("div");
   differences.className = "differences";
   for (const flag of pair.flags) {
     const badge = document.createElement("span");
     badge.className = "badge difference";
     badge.textContent = flag;
-    if (flag === "Value" && pair.left && pair.right) {
+    if (flag === "Value" && pair.left && pair.right && state.snapshot?.fallbackMode !== "fallback") {
       const transfer = document.createElement("div");
       transfer.className = "value-transfer";
       const leftToRight = document.createElement("button");
@@ -269,11 +335,36 @@ function createFieldRow(pair) {
       differences.append(badge);
     }
   }
-  row.append(createFieldCell(pair.left, pair), differences, createFieldCell(pair.right, pair));
+  row.append(createFieldCell(pair.left, pair, state.snapshot?.leftDetails), differences, createFieldCell(pair.right, pair, state.snapshot?.rightDetails));
   return row;
 }
 
+function emptyFieldsMessage(snapshot, totalFields) {
+  if (totalFields) return `All ${totalFields} returned field(s) are hidden by the current filters.`;
+  if (state.mode !== "browse") return "No fields were returned for either item.";
+  if (snapshot.leftError) return "Fields are unavailable because item details could not be loaded.";
+  const details = snapshot.leftDetails;
+  if (!details) return "Item details are unavailable.";
+  const versions = (details.availableVersions ?? []).map(version => `${version.language} (v${version.version})`).join(", ");
+  return `Authoring returned no fields for ${details.language} (version ${details.version}). ${snapshot.fallbackMode === "fallback" ? "Fallback was requested; Authoring returned no values." : "Language fallback is not applied."}${versions ? ` Available versions: ${versions}.` : ""}`;
+}
+
+function showAllBrowseFields() {
+  state.browseVisibility = { content: "all", standard: "all", system: "all" };
+  persistVisibility();
+  render();
+}
+
+function persistVisibility() {
+  vscode.setState({ ...vscode.getState(), visibility: { ...state.visibility }, browseVisibility: { ...state.browseVisibility } });
+}
+
 function render() {
+  fieldFallbackMode.hidden = false;
+  fieldFallbackMode.setAttribute("aria-pressed", String(state.fallbackMode === "fallback"));
+  fieldFallbackMode.disabled = state.contextId === undefined || Boolean(state.loadingSelection);
+  document.getElementById("details-title").textContent = state.mode === "browse" ? "Item Details · read-only" : "Field visibility";
+  document.body.classList.toggle("browse", state.mode === "browse");
   updateVisibilityControls();
   if (state.error) {
     content.innerHTML = `<p class="state error"></p>`;
@@ -281,23 +372,31 @@ function render() {
     return;
   }
   if (state.loadingSelection) {
-    content.innerHTML = `<p class="state">Loading field details…</p>`;
+    content.innerHTML = state.mode === "browse" ? `<p class="state">Loading item details…</p>` : `<p class="state">Loading field details…</p>`;
     return;
   }
   if (!state.snapshot) {
-    content.innerHTML = `<p class="state">Right-click an item in the comparison and choose <strong>Show Detailed Field Diff</strong>.</p>`;
+    content.innerHTML = state.mode === "browse" ? `<p class="state">Select an item to inspect its read-only details.</p>` : `<p class="state">Right-click an item in the comparison and choose <strong>Show Detailed Field Diff</strong>.</p>`;
     return;
   }
-  const pairs = pairFields(
+  const allPairs = pairFields(
     state.snapshot.leftDetails?.fields ?? [],
     state.snapshot.rightDetails?.fields ?? [],
-  ).filter(pairIsVisible);
+  );
+  const pairs = allPairs.filter(pairIsVisible);
   const fragment = document.createDocumentFragment();
   fragment.append(createSummary(state.snapshot));
   if (!pairs.length) {
     const empty = document.createElement("p");
     empty.className = "state";
-    empty.textContent = "No fields match the current filters.";
+    empty.textContent = emptyFieldsMessage(state.snapshot, allPairs.length);
+    if (state.mode === "browse" && allPairs.length) {
+      const showAll = document.createElement("button");
+      showAll.type = "button";
+      showAll.textContent = "Show all fields";
+      showAll.addEventListener("click", showAllBrowseFields);
+      empty.append(document.createTextNode(" "), showAll);
+    }
     fragment.append(empty);
   } else {
     for (const pair of pairs) fragment.append(createFieldRow(pair));
@@ -309,21 +408,25 @@ for (const group of visibilityGroups) {
   group.addEventListener("click", (event) => {
     const button = event.target.closest("button[data-mode]");
     if (!button) return;
-    state.visibility[group.dataset.category] = button.dataset.mode;
-    vscode.setState({
-      ...vscode.getState(),
-      visibility: { ...state.visibility },
-    });
+    (state.mode === "browse" ? state.browseVisibility : state.visibility)[group.dataset.category] = button.dataset.mode;
+    persistVisibility();
     render();
   });
 }
 window.addEventListener("message", (event) => {
   const message = event.data;
+  if (["itemIdCopyFinished", "itemPathCopyFinished"].includes(message?.type) && message.contextId !== state.contextId) return;
+  if (message?.mode) state.mode = message.mode;
+  if (message?.contextId !== undefined) state.contextId = message.contextId;
+  if (message?.fallbackMode === "exact" || message?.fallbackMode === "fallback") state.fallbackMode = message.fallbackMode;
   if (message?.type === "loading") {
+    state.snapshot = undefined;
+    state.copyingFieldIds.clear();
     state.loadingSelection = message.selection;
     state.error = undefined;
   } else if (message?.type === "snapshot") {
     state.snapshot = message.snapshot;
+    state.fallbackMode = message.snapshot.fallbackMode ?? state.fallbackMode;
     state.loadingSelection = undefined;
     state.error = undefined;
   } else if (message?.type === "error") {
@@ -337,22 +440,22 @@ window.addEventListener("message", (event) => {
   } else if (message?.type === "copyFinished" && typeof message.fieldId === "string") {
     state.copyingFieldIds.delete(normalizeId(message.fieldId));
   } else if (
-    message?.type === "itemIdCopyFinished" &&
+    (message?.type === "itemIdCopyFinished" || message?.type === "itemPathCopyFinished") &&
     (message.side === "left" || message.side === "right")
   ) {
-    const button = document.querySelector(`[data-copy-item-id="${message.side}"]`);
-    if (button instanceof HTMLButtonElement) {
+    const attribute = message.type === "itemPathCopyFinished" ? "data-copy-item-path" : "data-copy-item-id";
+    const button = document.querySelector(`[${attribute}="${message.side}"]`);
+    if (button instanceof HTMLButtonElement && button.dataset.itemId === message.itemId) {
       button.disabled = false;
-      if (message.copied === true) {
-        const itemId = button.dataset.itemId || button.textContent;
-        button.textContent = `✓ ${itemId}`;
-        button.classList.add("copied");
-        window.setTimeout(() => {
-          button.textContent = itemId;
-          button.classList.remove("copied");
-        }, 1200);
-      }
+      const value = button.dataset.copyValue;
+      button.textContent = message.copied === true ? `✓ ${value}` : "⚠ Copy failed";
+      button.classList.toggle("copied", message.copied === true);
+      window.setTimeout(() => {
+        button.textContent = value;
+        button.classList.remove("copied");
+      }, 1200);
     }
+    return;
   }
   render();
 });
