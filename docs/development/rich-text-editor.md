@@ -1,6 +1,6 @@
 # Rich Text editor development guide for agents
 
-Status: implementation guidance, reviewed 2026-10-16. **0.46.0 adds HTML source editing; 0.47.0 adds the guarded basic visual profile below.** The latest published release, 0.45.0, is read-only. Experiments demonstrate bounded feasibility, not authorization to widen the implemented visual profile.
+Status: implementation guidance, reviewed 2026-10-16. **0.46.0 adds HTML source editing; 0.47.0 adds the guarded basic visual profile; 0.48.0 extends it to nested spans and safe alignment.** The latest published release, 0.45.0, is read-only. Experiments demonstrate bounded feasibility, not authorization to widen the implemented visual profile.
 
 Read this document before changing Rich Text rendering, editing, serialization, mode switching or save integration. Follow repository `AGENTS.md` and the current user's scope. This guide does not authorize releases, remote pushes, Sitecore mutations or new features outside the assigned task.
 
@@ -14,9 +14,17 @@ Read this document before changing Rich Text rendering, editing, serialization, 
 
 ## Architectural decision and evidence
 
-### Implemented basic visual profile (0.47.0)
+### Nested-span increment (0.48.0)
 
-The custom Tiptap schema admits explicit paragraphs/headings, bold/italic/underline and hard breaks. `src/editor/richTextAdmission.ts` uses parse5 source locations/errors to reject missing tokens, implied repairs and duplicate attributes before projection. `webview/richTextVisual.ts` compares the normalized model export with an independent parsed source structure before enabling editing. Original attribute tokens are retained. Every changed transaction is re-admitted, with ordered opaque-fragment and attributed-element inventories preventing silent loss. Unknown markup, comments, managed identities/links, nested spans, repeated marks, lists and tables stay HTML-only. Do not widen this list just because the research schema supports more shapes.
+Spans are recursive inline nodes, never flattened into a single mark. Import retains exact opening/closing tokens and nested children; export preserves that hierarchy. Every span, even one without attributes, participates in the protected inventory together with its span ancestry. Commands that duplicate, remove or reparent protected wrappers are rejected. Existing identity/managed-reference guards still apply, including IDs on spans. Direct repeated same-type marks and unsupported container structures remain gated.
+
+`safeTextAlignment` recognizes only a single literal `text-align` declaration with an enum value. Rendering emits a validated `data-rt-align` value, mapped by bundled CSS selectors scoped under `.richtext-visual`. It never copies original `style` or `class` into trusted DOM. Combined declarations, comments, CSS variables/functions and `!important` remain unprojected; their exact original attributes survive export. A website class such as `theme-primary` is preserved data, not an appearance promise or an instruction to load external CSS.
+
+The supplied regression fixture is `test/fixtures/richTextSpans.ts`. Exercise both spans, nesting, formatting apply/remove across boundaries, protected split/join, plain/rejected formatted paste, exact entry restoration, Save/backup and mode switches when extending this profile. Entity spellings and raw line endings are distinct from parsed text/spacing; unchanged entry raw stays exact, while actual visual edits retain the previously documented lexical-normalization policy.
+
+### Basic visual foundation (0.47.0)
+
+The original 0.47.0 Tiptap profile admitted explicit paragraphs/headings, bold/italic/underline and hard breaks. `src/editor/richTextAdmission.ts` uses parse5 source locations/errors to reject missing tokens, implied repairs and duplicate attributes before projection. `webview/richTextVisual.ts` compares the normalized model export with an independent parsed source structure before enabling editing. Original attribute tokens are retained. Every changed transaction is re-admitted, with ordered opaque-fragment and attributed-element inventories preventing silent loss. Unknown markup, comments, managed identities/links, directly repeated marks, lists and tables stay HTML-only; nested spans are covered by the 0.48.0 increment above. Do not widen support just because the research schema supports more shapes.
 
 Raw HTML remains authoritative. Untouched entry/exit and host undo preserve its exact string; actual visual changes explicitly permit entity/text-newline canonicalization and requested formatting-wrapper changes. CSS and images remain inert data in the trusted visual surface; original CSS is never applied to host chrome. Use the separate isolated Preview for styling. Formatted paste and drag/drop are refused; plain-text insertion goes through the same transaction guard. No visual ProseMirror history plug-in is installed: history belongs to VS Code.
 

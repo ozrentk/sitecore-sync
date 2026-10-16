@@ -34,3 +34,14 @@ No live Sitecore reads/writes, page changes or publication were needed. All comm
 The added locked closure has 20 packages, all MIT or BSD-2-Clause; [license texts are retained](../../THIRD_PARTY_NOTICES.md). `npm ls` confirms shared ProseMirror model/state/view installations rather than duplicate runtimes. Browser dependencies are locally bundled under `out/webview/`, without a CDN or paid service.
 
 The npm production audit reported existing advisories for `fast-uri` 3.1.6 (high) and `qs` 6.15.3 (moderate), reached through the existing MCP SDK dependencies. Both exact versions were already present on `develop` before this work; no advisory was reported for the added visual-editor closure. These findings are recorded for a separate dependency/security follow-up, not silently fixed or declared irrelevant here. This is dependency advisory evidence, not an exploitability assessment.
+
+## Nested-span increment (0.48.0)
+
+The supplied finance HTML is retained in `test/fixtures/richTextSpans.ts`, including both spans, `theme-primary`, literal centered alignment, H6/H2 levels, entity spellings, spacing and the nonbreaking-space paragraph. Recursive inline nodes preserve spans rather than flattening them into marks. Protected inventories include all spans and their span ancestry. Literal single-declaration alignment on paragraphs/headings/spans is mapped to scoped bundled CSS; original classes/style text never enter trusted DOM.
+
+- Full unit suite: **437 passed**; strict extension/test/webview type checks passed.
+- Full VS Code 1.100.0 suite: **111 passed**, without a B31 exception. Regressions cover the exact fixture, typing in a span, nested formatting apply/remove, inherited-mark removal, plain paste, protected split/join, Visual/HTML switching, host undo/redo and a visual-export snapshot through Save, exact Undo after Save and backup restoration.
+- Isolated Edge real-keyboard checks edited text inside both supplied spans and nested spans, applied/removed formatting across their boundaries, and verified split/join guards. Source classes/styles, heading levels and the blank paragraph survived; no external requests were observed. A screenshot was inspected for centered heading/body alignment and unaffected host chrome.
+- Unit checks reject identity-bearing/duplicate-ID spans, excessive nesting and unsafe/combined alignment expressions. Unsupported content stays HTML-editable; no new table, link-destination, media or formatted-paste capability is claimed.
+
+No dependencies changed beyond the extension version. No live Sitecore writes were performed. Operating-system IME, screen-reader/high-contrast and live save acceptance remain outstanding. Successful runs do not close the independently intermittent B31 issue.

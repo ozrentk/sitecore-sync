@@ -5,6 +5,11 @@ export const visualLimit = 262144;
 export interface VisualAdmission { readonly document: JSONContent; readonly signature: string; readonly opaque: readonly string[] }
 const escapeText = (text: string): string => text.replace(/&/gu, "&amp;").replace(/</gu, "&lt;").replace(/>/gu, "&gt;");
 
+// Only a single literal declaration is projected. All other CSS remains inert raw data.
+export function safeTextAlignment(style: string): string | null {
+  return /^\s*text-align\s*:\s*(left|right|center|justify|start|end)\s*;?\s*$/iu.exec(style)?.[1].toLowerCase() ?? null;
+}
+
 /** Source locations are checked before building a disposable visual projection. */
 export function admitVisual(raw: string): VisualAdmission {
   if (raw.length > visualLimit) throw new Error("Visual editing is limited to 262,144 characters. Use HTML.");
@@ -38,12 +43,16 @@ export function admitVisual(raw: string): VisualAdmission {
         throw new Error("Identity, managed references or active attributes require HTML editing.");
       const loc = child.sourceCodeLocation!;
       if (!loc.startTag || (!["img", "br"].includes(tag) && !loc.endTag)) throw new Error("Explicit opening and closing tags are required for Visual.");
-      const attrs = { open: raw.slice(loc.startOffset, loc.startTag.endOffset), close: loc.endTag ? raw.slice(loc.endTag.startOffset, loc.endOffset) : "", tag };
+      const attrs = { open: raw.slice(loc.startOffset, loc.startTag.endOffset), close: loc.endTag ? raw.slice(loc.endTag.startOffset, loc.endOffset) : "", tag,
+        align: safeTextAlignment(child.attrs.find(attribute => attribute.name === "style")?.value ?? "") };
       if (tag === "img" || (tag === "style" && !inline)) {
         const original = raw.slice(loc.startOffset, loc.endOffset); opaque.push(original);
         result.push({ type: tag === "style" ? "stylesheet" : inline ? "inlineImage" : "blockImage", attrs: { raw: original }, marks });
       } else if (tag === "br" && inline) result.push({ type: "hardBreak", attrs, marks });
-      else if (["strong", "b", "em", "i", "u"].includes(tag) && inline) {
+      else if (tag === "span" && inline) {
+        result.push({ type: "span", attrs, marks,
+          content: children(child, loc.startTag.endOffset, loc.endTag!.startOffset, true, [], depth + 1) });
+      } else if (["strong", "b", "em", "i", "u"].includes(tag) && inline) {
         const type = ["strong", "b"].includes(tag) ? "bold" : ["em", "i"].includes(tag) ? "italic" : "underline";
         if (marks.some(mark => mark.type === type)) throw new Error("Repeated nested formatting is HTML-only.");
         result.push(...children(child, loc.startTag.endOffset, loc.endTag!.startOffset, true, [...marks, { type, attrs }], depth + 1));
@@ -71,12 +80,15 @@ export function htmlSignature(raw: string): string {
 
 export function protectedAttributes(raw: string): string {
   const attributes: unknown[] = [];
-  function visit(node: P.ChildNode): void {
+  function visit(node: P.ChildNode, spanParents: unknown[] = []): void {
     if (!("tagName" in node)) return;
-    if (node.attrs.length) attributes.push([node.tagName, node.attrs.map(a => [a.name, a.value])]);
-    node.childNodes.forEach(visit);
+    const descriptor = [node.tagName, node.attrs.map(a => [a.name, a.value])];
+    // Even an unstyled span is meaningful structure. Preserve nesting through commands.
+    if (node.tagName === "span") attributes.push([descriptor, spanParents]);
+    else if (node.attrs.length) attributes.push(descriptor);
+    node.childNodes.forEach(child => visit(child, node.tagName === "span" ? [...spanParents, descriptor] : spanParents));
   }
-  parseFragment(raw).childNodes.forEach(visit);
+  parseFragment(raw).childNodes.forEach(node => visit(node));
   return JSON.stringify(attributes);
 }
 
@@ -87,7 +99,7 @@ export function exportVisual(node: JSONContent): string {
   if (node.type === "text") value = escapeText(node.text ?? "");
   else if (["gap", "stylesheet", "inlineImage", "blockImage"].includes(node.type ?? "")) value = String(node.attrs?.raw ?? "");
   else {
-    const tag = node.type === "heading" ? String(node.attrs?.tag ?? "h2") : node.type === "hardBreak" ? "br" : "p";
+    const tag = node.type === "heading" ? String(node.attrs?.tag ?? "h2") : node.type === "hardBreak" ? "br" : node.type === "span" ? "span" : "p";
     value = String(node.attrs?.open || `<${tag}>`) + content() + String(node.attrs?.close || (tag === "br" ? "" : `</${tag}>`));
   }
   return value;

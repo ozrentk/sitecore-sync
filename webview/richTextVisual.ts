@@ -5,14 +5,18 @@ import { keymap } from "@tiptap/pm/keymap";
 import { admitVisual, exportVisual, htmlSignature, protectedAttributes } from "../src/editor/richTextAdmission";
 
 interface Callbacks { change(raw: string): void; history(action: string): void; error(message: string): void }
-const attributes = () => ({ open: { default: "" }, close: { default: "" }, tag: { default: "p" } });
+const attributes = () => ({ open: { default: "" }, close: { default: "" }, tag: { default: "p" }, align: { default: null } });
+const alignment = (value: unknown): Record<string, string> => typeof value === "string" && /^(?:left|right|center|justify|start|end)$/u.test(value)
+  ? { "data-rt-align": value } : {};
 const opaqueNames = ["gap", "stylesheet", "inlineImage", "blockImage"];
 const nodes = [
   Node.create({ name: "doc", topNode: true, content: "block*" }),
   Node.create({ name: "text", group: "inline" }),
-  Node.create({ name: "paragraph", group: "block", content: "inline*", addAttributes: attributes, renderHTML: () => ["p", 0] }),
+  Node.create({ name: "paragraph", group: "block", content: "inline*", addAttributes: attributes, renderHTML: ({ node }) => ["p", alignment(node.attrs.align), 0] }),
   Node.create({ name: "heading", group: "block", content: "inline*", addAttributes: attributes,
-    renderHTML: ({ node }) => [/^h[1-6]$/u.test(node.attrs.tag) ? node.attrs.tag : "h2", 0] }),
+    renderHTML: ({ node }) => [/^h[1-6]$/u.test(node.attrs.tag) ? node.attrs.tag : "h2", alignment(node.attrs.align), 0] }),
+  Node.create({ name: "span", group: "inline", inline: true, content: "inline*", defining: true, addAttributes: attributes,
+    renderHTML: ({ node }) => ["span", alignment(node.attrs.align), 0] }),
   Node.create({ name: "hardBreak", group: "inline", inline: true, selectable: false, addAttributes: attributes, renderHTML: () => ["br"] }),
   ...opaqueNames.map(name => Node.create({ name, group: name === "inlineImage" ? "inline" : "block", inline: name === "inlineImage", atom: true,
     selectable: false, draggable: false, addAttributes: () => ({ raw: { default: "" } }),

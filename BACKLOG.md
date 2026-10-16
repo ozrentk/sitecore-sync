@@ -178,7 +178,13 @@ Use this file as the single backlog inventory. Add newly agreed work here, prese
 - Media Library references without URLs resolve names/paths only. SVG/private/custom-CDN previews remain unavailable with retained evidence; no URL guessing, uploads, asset selection, Content Hub credentials, Rich Text editor or publishing expansion.
 - Read-only Dev evidence verified Content Hub mappings and a public JPEG. Isolated tests cover security boundaries, stale results, connection changes, raw preservation and failed previews. No Sitecore mutations. B27 remains separate.
 
-### Rich Text basic Visual implementation (0.47.0)
+### Rich Text nested-span increment (0.48.0)
+
+- The supplied centered finance-content example now fits the bounded Visual profile. Recursive inline span nodes preserve nesting, classes and original style tokens through text/formatting edits; heading levels, spacing and the blank paragraph are retained.
+- Only literal single-declaration text alignment is projected using scoped bundled rules. No arbitrary CSS/classes are applied to editor chrome or fetched externally. Identity-bearing markup stays HTML-only; span loss/duplication/reparenting and attributed-block split/join remain guarded.
+- Richer containers, repeated direct formatting, lists/tables, managed references, formatted paste and visual media remain separate work. Native IME/accessibility and live Sitecore save acceptance remain outstanding.
+
+### Rich Text basic Visual implementation details (0.47.0)
 
 - Custom Tiptap paragraphs/headings, basic emphasis, line breaks and plain-text paste now use the HTML source draft and existing persistence/history pipeline. Token-aware admission and transaction guards keep unsupported content HTML-only and retain opaque CSS/images and protected attributes.
 - Remaining work includes richer spans/containers, managed links/identity policies, lists/tables, visual media editing, formatted paste, broader accessibility/native IME acceptance and site-specific content profiles. Styling is displayed in isolated Preview, never applied to trusted visual-editor chrome.

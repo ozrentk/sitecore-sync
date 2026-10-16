@@ -88,3 +88,9 @@ select { font:inherit; color:var(--vscode-input-foreground); background:var(--vs
 .richtext-visual [data-opaque] { color: var(--vscode-descriptionForeground); font-style: italic; user-select: none; }
 .richtext-visual [data-opaque="gap"] { display: none; }
 .richtext-visual img.ProseMirror-separator { display: inline; border: none; margin: 0; width: 0; height: 0; }
+.richtext-visual [data-rt-align="left"] { text-align: left; }
+.richtext-visual [data-rt-align="right"] { text-align: right; }
+.richtext-visual [data-rt-align="center"] { text-align: center; }
+.richtext-visual [data-rt-align="justify"] { text-align: justify; }
+.richtext-visual [data-rt-align="start"] { text-align: start; }
+.richtext-visual [data-rt-align="end"] { text-align: end; }

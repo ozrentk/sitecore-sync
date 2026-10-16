@@ -234,7 +234,7 @@ function renderHtmlSource(row, field) {
     button.addEventListener("click", () => { if (!blocked) visualSources.get(field.id)?.command(name); }); tools.append(button);
   }
   const hint = document.createElement("p"); hint.className = "meta";
-  hint.textContent = "Basic visual formatting. Stored CSS is preserved but shown only in Preview. Use plain-text paste; edit other markup in HTML.";
+  hint.textContent = "Basic formatting and safe text alignment. Other stored styling appears in Preview. Plain-text paste only.";
   const clear = document.createElement("button"); clear.textContent = "Clear"; clear.type = "button";
   clear.title = "Store an explicit empty value; does not reset to inherited or Standard Values";
   const control = document.createElement("textarea"); control.id = field.id; control.className = "html-source";

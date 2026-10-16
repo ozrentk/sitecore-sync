@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { strictEqual } from "node:assert/strict";
 import type { IntegrationTest } from "./testSupport";
+import { financeHtml } from "../fixtures/richTextSpans";
 
 export const richTextVisualTests: readonly IntegrationTest[] = [{
   name: "basic visual webview edits, rejects metadata loss, freezes and returns to exact raw HTML through host history",
@@ -63,6 +64,37 @@ export const richTextVisualTests: readonly IntegrationTest[] = [{
           clipboard.setData("text/html",'<p onclick="bad()">loss</p>');
           document.querySelector(".tiptap").dispatchEvent(new ClipboardEvent("paste",{clipboardData:clipboard,bubbles:true,cancelable:true}));
           await wait();assert(htmlSources.get("html").read()==="<p>paste word</p>","Formatted paste is rejected without partial text insertion");
+          const finance=${JSON.stringify(financeHtml)};
+          show(finance);await wait();
+          assert(visualSources.has("html")&&htmlSources.get("html").read()===finance,"Exact finance sample admitted without rewriting");
+          assert(getComputedStyle(document.querySelector(".tiptap h6")).textAlign==="center","Safe alignment projection");
+          assert(!document.querySelector(".tiptap [style],.tiptap .theme-primary"),"Original CSS/classes stay out of trusted DOM");
+          visualSources.get("html").restore({from:2,to:2});document.execCommand("insertText",false,"New ");await wait();
+          assert(htmlSources.get("html").read().includes('<span class="theme-primary">New Paying For Your Grenadier</span>'),"Typing inside span retains wrapper");
+          const spanEdit=htmlSources.get("html").read();
+          button("HTML").click();await wait();assert(document.getElementById("html").value===htmlSourceTools.normalize(spanEdit),"Edited span enters HTML unchanged");
+          button("Visual").click();await wait();show(finance,{id:"html"});await wait();
+          assert(htmlSources.get("html").read()===finance,"Undo restores exact finance entry source and entities");
+          show(spanEdit,{id:"html"});await wait();assert(htmlSources.get("html").read()===spanEdit,"Redo restores span edit");
+          const nested='<p>AA<span class="x">BB<span style="text-align: center;">CC</span>DD</span>EE</p>';
+          show(nested);await wait();visualSources.get("html").restore({from:1,to:15});
+          visualSources.get("html").command("bold");await wait();
+          assert(htmlSources.get("html").read()==='<p><strong>AA</strong><span class="x"><strong>BB</strong><span style="text-align: center;"><strong>CC</strong></span><strong>DD</strong></span><strong>EE</strong></p>',"Formatting crosses span boundaries without flattening");
+          visualSources.get("html").command("bold");await wait();assert(htmlSources.get("html").read()===nested,"Remove formatting restores exact nested entry");
+          visualSources.get("html").restore({from:8,to:8});
+          const plain=new DataTransfer();plain.setData("text/plain","X");
+          document.querySelector(".tiptap").dispatchEvent(new ClipboardEvent("paste",{clipboardData:plain,bubbles:true,cancelable:true}));await wait();
+          assert(htmlSources.get("html").read().includes('>CXC</span>'),"Paste edits nested text while retaining structure");
+          const beforeSplit=htmlSources.get("html").read();
+          document.querySelector(".tiptap").dispatchEvent(new KeyboardEvent("keydown",{key:"Enter",code:"Enter",bubbles:true,cancelable:true}));await wait();
+          assert(htmlSources.get("html").read()===beforeSplit,"Span split cannot duplicate or flatten wrappers");
+          const attributed='<p style="text-align:center">one</p><p style="text-align:center">two</p>';
+          show(attributed);await wait();visualSources.get("html").restore({from:6,to:6});
+          document.querySelector(".tiptap").dispatchEvent(new KeyboardEvent("keydown",{key:"Backspace",code:"Backspace",bubbles:true,cancelable:true}));await wait();
+          assert(htmlSources.get("html").read()===attributed,"Join cannot remove attributed block");
+          show('<p><strong>AA<span class="x">BB</span>CC</strong></p>');await wait();
+          visualSources.get("html").restore({from:1,to:9});visualSources.get("html").command("bold");await wait();
+          assert(htmlSources.get("html").read()==='<p>AA<span class="x">BB</span>CC</p>',"Remove inherited formatting across span boundary");
           api.postMessage({type:"visual-test",ok:true,edited});
         })().catch(error=>api.postMessage({type:"visual-test",error:String(error)}));
       `);
