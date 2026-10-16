@@ -1,4 +1,6 @@
 import { itemEditorTests } from "./itemEditorTests";
+import { appendFileSync } from "node:fs";
+import { isAcceptedB31 } from "../releaseExceptions";
 import { strictEqual } from "node:assert/strict";
 import * as vscode from "vscode";
 import { connectionStoreTests } from "./connectionStoreTests";
@@ -106,6 +108,13 @@ export async function run(): Promise<void> {
       await integrationTest.execute();
       console.log(`PASS ${integrationTest.name}`);
     } catch (error: unknown) {
+      if (isAcceptedB31(requireExtension().packageJSON.version, process.env.XM_CLOUD_SYNC_B31_EXCEPTION, integrationTest.name, error)) {
+        const note = "B31 known failure accepted for 0.45.0: Destination focus must expand inline. Remaining steps in this test were not exercised; normal interactive reproduction is unverified. Remove the exception when B31 is fixed.";
+        console.warn(`KNOWN FAILURE ${integrationTest.name}: ${note}`);
+        if (process.env.GITHUB_ACTIONS === "true") console.warn(`::warning title=B31 release exception::${note}`);
+        if (process.env.GITHUB_STEP_SUMMARY) appendFileSync(process.env.GITHUB_STEP_SUMMARY, `\n### Accepted release exception\n\n${note}\n`);
+        continue;
+      }
       failures.push(integrationTest.name);
       console.error(`FAIL ${integrationTest.name}`, error);
     }

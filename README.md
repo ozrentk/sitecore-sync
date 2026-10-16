@@ -312,6 +312,8 @@ A `vMAJOR.MINOR.PATCH` tag push runs the same validation and packaging as CI, in
 
 The workflow uses its built-in GitHub token, so no personal access token or Marketplace credential is required. For a local scan on Windows, run `./scripts/scan-secrets.ps1 -Mode History` and, after packaging, `./scripts/scan-secrets.ps1 -Mode Package`. These scans use redacted output and cannot guarantee detection of every secret format.
 
+For the `v0.45.0` tag only, CI explicitly accepts B31's exact General Link destination-focus assertion failure. The test still runs; an accepted failure produces a warning and job-summary entry, and its remaining steps are not exercised. All other failures remain blocking. Ordinary branch tests have no exception. Local reproduction can opt in with `XM_CLOUD_SYNC_B31_EXCEPTION=0.45.0`; the harness also requires extension version 0.45.0. Remove this temporary exception when B31 is fixed. The GitHub release notes disclose the coverage gap.
+
 ## Build an installable extension
 
 ```powershell
