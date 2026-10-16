@@ -1,5 +1,7 @@
 # Direct ProseMirror compatibility spike
 
+[Research index](README.md) · [User documentation](../README.md)
+
 2026-10-16. Follow-up to [the Tiptap/CodeMirror spike](richtext-compatibility-spike.md). Research only: no production changes, Sitecore writes, release or VSIX.
 
 ## Decision
