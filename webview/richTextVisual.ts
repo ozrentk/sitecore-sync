@@ -1,17 +1,19 @@
 import { Editor, Node, Mark, Extension, type JSONContent } from "@tiptap/core";
 import { Plugin, TextSelection } from "@tiptap/pm/state";
-import { baseKeymap, toggleMark } from "@tiptap/pm/commands";
+import { baseKeymap } from "@tiptap/pm/commands";
 import { keymap } from "@tiptap/pm/keymap";
 import type { Transaction } from "@tiptap/pm/state";
 import { CellSelection } from "@tiptap/pm/tables";
 import { tableExtensions } from "./richTextTables";
+import { blockExtensions } from "./richTextBlocks";
+import { richCommands, richTextCommand, activeRichCommand } from "../src/editor/richTextCommands";
 import { tableCommand } from "../src/editor/richTextTableCommands";
 import { beginRichLink, richLinkCommand, type RichLinkSession } from "../src/editor/richTextLinkCommands";
 import type { RichLinkDestination } from "../src/editor/richTextLinks";
 import { admitVisual, exportVisual, htmlSignature, protectedAttributes } from "../src/editor/richTextAdmission";
 
-interface Callbacks { change(raw: string): void; history(action: string): void; error(message: string): void }
-const attributes = () => ({ open: { default: "" }, close: { default: "" }, tag: { default: "p" }, align: { default: null } });
+interface Callbacks { change(raw: string): void; history(action: string): void; error(message: string): void; selection?(): void }
+const attributes = () => ({ open: { default: "" }, close: { default: "" }, tag: { default: "p" }, align: { default: null }, before: { default: "" }, tail: { default: "" } });
 const alignment = (value: unknown): Record<string, string> => typeof value === "string" && /^(?:left|right|center|justify|start|end)$/u.test(value)
   ? { "data-rt-align": value } : {};
 const opaqueNames = ["gap", "stylesheet", "inlineImage", "blockImage"];
@@ -36,12 +38,18 @@ const marks = [["bold", "strong"], ["italic", "em"], ["underline", "u"]].map(([n
 
 export function createVisual(element: HTMLElement, initial: string, callbacks: Callbacks) {
   const admission = admitVisual(initial);
-  if (initial && !admission.document.content?.some(node => ["paragraph", "heading", "tableShell", "tableWrapper"].includes(node.type ?? "")))
+  if (initial && !admission.document.content?.some(node => ["paragraph", "heading", "tableShell", "tableWrapper", "bulletList", "orderedList", "blockquote"].includes(node.type ?? "")))
     throw new Error("No editable paragraph, heading or table is present. Use HTML.");
   let authorizedTableTransaction: Transaction | undefined;
   let authorizedLinkTransaction: Transaction | undefined;
   let authorizedLinkInventory: string | undefined;
   let linkSession: RichLinkSession | undefined;
+  let authorizedCommand: Transaction | undefined;
+  let authorizedCommandInventory: string | undefined;
+  let structuralCommand = false;
+  let retainedOpaque = admission.opaque;
+  let validatedDoc: unknown;
+  let validatedOpaque: readonly string[] = admission.opaque;
   let current = initial; let destroyed = false; let composing = false;
   const reject = (message: string): false => { callbacks.error(message); return false; };
   const guard = Extension.create({ name: "sourceGuard", priority: 1000,
@@ -52,9 +60,11 @@ export function createVisual(element: HTMLElement, initial: string, callbacks: C
           const raw = exportVisual(transaction.doc.toJSON() as JSONContent);
           const next = admitVisual(raw);
           const structural = transaction === authorizedTableTransaction;
-          const expected = transaction === authorizedLinkTransaction ? authorizedLinkInventory : protectedAttributes(current, structural);
-          if (JSON.stringify(next.opaque) !== JSON.stringify(admission.opaque) || protectedAttributes(raw, structural) !== expected)
+          const expected = transaction === authorizedCommand ? authorizedCommandInventory : transaction === authorizedLinkTransaction ? authorizedLinkInventory : protectedAttributes(current, structural);
+          const opaque = (values: readonly string[]) => transaction === authorizedCommand && structuralCommand ? values.filter(value => !/^\s*$/u.test(value)) : values;
+          if (JSON.stringify(opaque(next.opaque)) !== JSON.stringify(opaque(retainedOpaque)) || protectedAttributes(raw, structural) !== expected)
             return reject("This operation would change protected metadata or opaque content. Use HTML.");
+          validatedDoc = transaction.doc; validatedOpaque = next.opaque;
           return true;
         } catch (error) { return reject(error instanceof Error ? error.message : "This operation is outside the visual profile. Use HTML."); }
       },
@@ -82,18 +92,29 @@ export function createVisual(element: HTMLElement, initial: string, callbacks: C
       "Mod-z": () => { if (!composing) callbacks.history("undo"); return true; },
       "Mod-y": () => { if (!composing) callbacks.history("redo"); return true; },
       "Mod-Shift-z": () => { if (!composing) callbacks.history("redo"); return true; },
-      "Mod-b": (state, dispatch) => toggleMark(state.schema.marks.bold)(state, dispatch),
-      "Mod-i": (state, dispatch) => toggleMark(state.schema.marks.italic)(state, dispatch),
-      "Mod-u": (state, dispatch) => toggleMark(state.schema.marks.underline)(state, dispatch),
+      "Mod-b": () => execute("bold"), "Mod-i": () => execute("italic"), "Mod-u": () => execute("underline"),
+      "Mod-Alt-0": () => execute("paragraph"),
+      ...Object.fromEntries([1,2,3,4,5,6].map(level => [`Mod-Alt-${level}`, () => execute(`h${level}`)])),
+      "Mod-Shift-7": () => execute("orderedList"), "Mod-Shift-8": () => execute("bulletList"),
       "Shift-Enter": (state, dispatch) => { dispatch?.(state.tr.replaceSelectionWith(state.schema.nodes.hardBreak.create())); return true; },
       ...baseKeymap,
+      Enter: state => {
+        if (!activeRichCommand(state, "listItem")) return baseKeymap.Enter(state, editor.view.dispatch, editor.view);
+        return execute(state.selection.$from.parent.content.size ? "splitListItem" : "outdent");
+      },
+      Tab: state => activeRichCommand(state, "listItem") ? execute("indent") : false,
+      "Shift-Tab": state => activeRichCommand(state, "listItem") ? execute("outdent") : false,
+      Backspace: state => activeRichCommand(state, "listItem") && state.selection.empty && state.selection.$from.parent.isTextblock && state.selection.$from.parentOffset === 0
+        ? execute("outdent") : baseKeymap.Backspace(state, editor.view.dispatch, editor.view),
     })]; },
   });
-  const editor = new Editor({ element, extensions: [...nodes, ...marks, ...tableExtensions, guard], content: initial === "" ? { type: "doc", content: [{ type: "paragraph" }] } : admission.document,
+  const editor: Editor = new Editor({ element, extensions: [...nodes, ...marks, ...tableExtensions, ...blockExtensions, guard], content: initial === "" ? { type: "doc", content: [{ type: "paragraph" }] } : admission.document,
     enableInputRules: false, enablePasteRules: false, injectCSS: false,
     editorProps: { attributes: { role: "textbox", "aria-label": "Rich Text visual editor", "aria-multiline": "true", spellcheck: "false" } },
+    onTransaction: () => callbacks.selection?.(),
     onUpdate: ({ editor: active }) => {
       const document = active.getJSON();
+      if (active.state.doc === validatedDoc) retainedOpaque = validatedOpaque;
       const next = JSON.stringify(document) === baseline ? initial : exportVisual(document);
       if (next !== current) { current = next; callbacks.error(""); callbacks.change(current); }
     },
@@ -102,6 +123,22 @@ export function createVisual(element: HTMLElement, initial: string, callbacks: C
   if (initial !== "" && htmlSignature(exportVisual(editor.getJSON())) !== admission.signature) {
     editor.destroy(); throw new Error("Visual import would normalize the document structure. Use HTML.");
   }
+  function execute(name: string): boolean {
+    if (!editor.isEditable) return true;
+    try {
+      if (richCommands.includes(name as typeof richCommands[number])) {
+        authorizedCommand = richTextCommand(editor.state, name);
+        structuralCommand = ["bulletList", "orderedList", "indent", "outdent", "blockquote", "splitListItem"].includes(name);
+        authorizedCommandInventory = protectedAttributes(exportVisual(authorizedCommand.doc.toJSON()));
+        editor.view.dispatch(authorizedCommand);
+      } else { authorizedTableTransaction = tableCommand(editor.state, name); editor.view.dispatch(authorizedTableTransaction); }
+      editor.view.focus();
+    } catch (error) { callbacks.error(error instanceof Error ? error.message : "Command unavailable."); }
+    finally { authorizedCommand = undefined; authorizedCommandInventory = undefined; structuralCommand = false; authorizedTableTransaction = undefined; }
+    return true;
+  }
+  let statusState = editor.state;
+  const statuses = new Map<string, { enabled: boolean; active: boolean; reason: string }>();
   return {
     read: () => current,
     beginLink() {
@@ -120,13 +157,21 @@ export function createVisual(element: HTMLElement, initial: string, callbacks: C
         linkSession = undefined; editor.view.focus();
       } finally { authorizedLinkTransaction = undefined; authorizedLinkInventory = undefined; }
     },
-    command(name: string) { if (editor.isEditable && ["bold", "italic", "underline"].includes(name)) {
-      editor.view.focus(); toggleMark(editor.schema.marks[name])(editor.state, editor.view.dispatch);
-    } else if (editor.isEditable) {
-      try { authorizedTableTransaction = tableCommand(editor.state, name); editor.view.dispatch(authorizedTableTransaction); editor.view.focus(); }
-      catch (error) { callbacks.error(error instanceof Error ? error.message : "Table operation unavailable."); }
-      finally { authorizedTableTransaction = undefined; }
-    } },
+    command: execute,
+    status(name: string) {
+      if (!editor.isEditable) return { enabled: false, active: false, reason: "Editing is frozen." };
+      if (statusState !== editor.state) { statuses.clear(); statusState = editor.state; }
+      const existing = statuses.get(name); if (existing) return existing;
+      const active = activeRichCommand(editor.state, name);
+      let result;
+      try {
+        if (name === "link") beginRichLink(editor.state);
+        else if (richCommands.includes(name as typeof richCommands[number])) richTextCommand(editor.state, name, true);
+        else tableCommand(editor.state, name);
+        result = { enabled: true, active, reason: "" };
+      } catch (error) { result = { enabled: false, active, reason: error instanceof Error ? error.message : "Unavailable for this selection." }; }
+      statuses.set(name, result); return result;
+    },
     focus() { editor.commands.focus(); },
     selection() { const selection = editor.state.selection; return { from: selection.from, to: selection.to,
       ...(selection instanceof CellSelection ? { anchorCell: selection.$anchorCell.pos, headCell: selection.$headCell.pos } : {}) }; },

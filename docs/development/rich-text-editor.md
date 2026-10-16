@@ -1,6 +1,6 @@
 # Rich Text editor development guide for agents
 
-Status: implementation guidance, reviewed 2026-10-16. **0.46.0 adds HTML source editing; 0.47.0 adds the guarded basic visual profile; 0.48.0 extends it to nested spans and safe alignment; 0.49.0 adds bounded table editing; 0.50.0 adds managed links.** The latest published release, 0.45.0, is read-only. Experiments demonstrate bounded feasibility, not authorization to widen the implemented visual profile.
+Status: implementation guidance, reviewed 2026-10-16. **0.46.0 adds HTML source editing; 0.47.0 adds the guarded basic visual profile; 0.48.0 extends it to nested spans and safe alignment; 0.49.0 adds bounded table editing; 0.50.0 adds managed links; 0.51.0 adds bounded formatting/list/quote commands.** The latest published release, 0.45.0, is read-only. Experiments demonstrate bounded feasibility, not authorization to widen the implemented visual profile.
 
 Read this document before changing Rich Text rendering, editing, serialization, mode switching or save integration. Follow repository `AGENTS.md` and the current user's scope. This guide does not authorize releases, remote pushes, Sitecore mutations or new features outside the assigned task.
 
@@ -13,6 +13,18 @@ Read this document before changing Rich Text rendering, editing, serialization, 
 5. Reuse the ordinary item editor's draft, undo, backup, conflict, journal and save flow. Do not create a separate Rich Text mutation path.
 
 ## Architectural decision and evidence
+
+### Command completeness increment (0.51.0)
+
+Read the [command profile and limits](../item-editor.md#formatting-commands-lists-and-quotes-0510). `richTextCommands.ts` constructs a single transaction and independently checks text, protected attributes and admission. The controller authorizes that exact transaction only. Paragraph/heading/alignment changes modify only the requested semantic tokens; other commands compare protected inventories. Do not replace these checks with a reusable guard bypass or merely compare two exports from the same adapter.
+
+`richTextBlocks.ts` supplies custom lists, list items, quotes and synthetic inline `listText`. Retain original before/tail whitespace tokens and inline LI content without inventing paragraphs on import. Explicit lifting or block-type changes may promote inline LI text to a paragraph/heading. LI permits one text block followed by nested lists; do not widen it to mixed blocks without independent edit tests. Identity-bearing new families, multi-paragraph items and lists inside table cells remain HTML-only. Existing table/link policies still apply.
+
+Only an explicit structural command may move whitespace-only opaque gaps into container tokens. The controller updates its retained opaque inventory after the accepted document change; ordinary subsequent edits must match that inventory exactly. Stylesheets and images are never exempted. Test pretty-printed paragraph wrapping followed by typing, not just initial serialization. Structural indentation may move; raw/no-op switching remains exact.
+
+Availability uses cached editor-state results and a disposable text-compacted projection to avoid parsing large text repeatedly. It must never replace the real command document or authoritative draft: execution rechecks full text and admission. Test active/mixed states, disabled reasons, actual keyboard/pointer interactions and large fields. Clear formatting is plain B/I/U only; arbitrary CSS, attributed mark loss and partial inherited-wrapper changes remain refused. Do not silently interpret Clear as deleting links or styles.
+
+The new regression tests live in `test/unit/richTextCommands.test.ts`, the real Rich Text webview suite and the existing provider Save/backup fixture. Keep host history, freeze/composition, stale link sessions, exact locale and conflict protections intact. Broader styling/media (3D), formatted paste and native IME/accessibility/live-save acceptance remain separate work.
 
 ### Managed links — 3C (0.50.0)
 

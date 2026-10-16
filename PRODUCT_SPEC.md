@@ -595,7 +595,9 @@ Rich Text uses a read-only sandboxed iframe with an opaque origin and no sandbox
 
 Item Details uses the same Image/File metadata, raw-value and Rich Text display; asset loading/resolution remains in the item editor. Text diff and field transfer semantics remain unchanged. The live Dev sample confirmed Content Hub image attributes (`dam-id`, `dam-content-type`, `thumbnailsrc`, `src`, alt and dimensions); a supplied public JPEG passed the read-only loader using system certificate trust. Media Library URL responses, private assets, Files and failure/security behavior were exercised with isolated fixtures, not live writes.
 
-### Rich Text source and bounded visual editing (0.46.0–0.49.0)
+### Rich Text source and bounded visual editing (0.46.0–0.51.0)
+
+The 0.51.0 command increment adds paragraph/heading selection, literal alignment, bounded bullet/numbered lists, list indentation/outdent, quotes and plain-mark clearing alongside B/I/U. Reflect active/mixed selection and disabled reasons; keyboard equivalents use the same guarded commands. Retain raw tokens, nested spans/links, opaque CSS/images, native history and existing Save/backup/freeze/conflict guarantees. List items admit one inline/paragraph/heading text block plus nested lists; mixed multi-block items, list/cell restructuring and metadata-destructive operations remain HTML-only. Only explicit structural commands may relocate inter-block whitespace; no-op mode switches remain exact. No arbitrary CSS, media editing, page/fallback-source editing or publishing is added. See [the command profile](docs/item-editor.md#formatting-commands-lists-and-quotes-0510).
 
 The 0.49.1 correction adds a visible Insert table action that creates a 2×2 grid after the current top-level block, focuses the first cell and preserves existing content. Reject nonempty selections rather than replacing them, and never nest a table. Existing row/column controls resize the new table.
 

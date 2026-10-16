@@ -20,11 +20,11 @@ export function admitVisual(raw: string): VisualAdmission {
   let count = 0;
   const opaque: string[] = [];
   const identities = new Set<string>();
-  function children(parent: P.ParentNode, start: number, end: number, inline: boolean, marks: NonNullable<JSONContent["marks"]> = [], depth = 0): JSONContent[] {
+  function children(parent: P.ParentNode, start: number, end: number, inline: boolean, marks: NonNullable<JSONContent["marks"]> = [], depth = 0, sourceNodes = parent.childNodes): JSONContent[] {
     if (depth > 40) throw new Error("Markup is too deeply nested for Visual. Use HTML.");
     let cursor = start;
     const result: JSONContent[] = [];
-    for (const child of parent.childNodes) {
+    for (const child of sourceNodes) {
       if (++count > 5000) throw new Error("Markup has too many nodes for Visual. Use HTML.");
       const location = child.sourceCodeLocation;
       if (!location || location.startOffset !== cursor) throw new Error("The HTML parser changed the source structure. Use HTML.");
@@ -34,7 +34,7 @@ export function admitVisual(raw: string): VisualAdmission {
         if (inline) { if (text) result.push({ type: "text", text, marks }); }
         else if (/^\s*$/u.test(text)) {
           const original = raw.slice(location.startOffset, location.endOffset);
-          if (!("tagName" in parent) || !["div", "table", "thead", "tbody", "tfoot", "tr", "colgroup"].includes(parent.tagName)) opaque.push(original);
+          if (!("tagName" in parent) || !["div", "table", "thead", "tbody", "tfoot", "tr", "colgroup", "ul", "ol", "li", "blockquote"].includes(parent.tagName)) opaque.push(original);
           result.push({ type: "gap", attrs: { raw: original } });
         } else throw new Error("Top-level text needs an explicit paragraph. Use HTML.");
         continue;
@@ -55,7 +55,35 @@ export function admitVisual(raw: string): VisualAdmission {
       if (!loc.startTag || (!["img", "br", "col"].includes(tag) && !loc.endTag)) throw new Error("Explicit opening and closing tags are required for Visual (including table sections). Use HTML.");
       const attrs = { open: raw.slice(loc.startOffset, loc.startTag.endOffset), close: loc.endTag ? raw.slice(loc.endTag.startOffset, loc.endOffset) : "", tag,
         align: safeTextAlignment(child.attrs.find(attribute => attribute.name === "style")?.value ?? "") };
-      if (!inline && tableElement) {
+      if (!inline && ["ul", "ol", "li", "blockquote"].includes(tag)) {
+        const parentTag = "tagName" in parent ? parent.tagName : "";
+        if (tag === "li" && !["ul", "ol"].includes(parentTag)) throw new Error("List items require an explicit list. Use HTML.");
+        let content: JSONContent[];
+        const extra: Record<string, unknown> = {};
+        if (tag === "li" && !child.childNodes.some(node => "tagName" in node && /^(?:p|h[1-6])$/u.test(node.tagName))) {
+          const nested = child.childNodes.findIndex(node => "tagName" in node && ["ul", "ol"].includes(node.tagName));
+          const boundary = nested < 0 ? loc.endTag!.startOffset : child.childNodes[nested].sourceCodeLocation!.startOffset;
+          const text = children(child, loc.startTag.endOffset, boundary, true, [], depth + 1, nested < 0 ? child.childNodes : child.childNodes.slice(0, nested));
+          content = [{ type: "listText", content: text }, ...(nested < 0 ? [] : children(child, boundary, loc.endTag!.startOffset, false, [], depth + 1, child.childNodes.slice(nested)))];
+        } else content = children(child, loc.startTag.endOffset, loc.endTag!.startOffset, false, [], depth + 1);
+        let prefix = "";
+        content = content.filter(node => {
+          if (node.type === "gap") { prefix += String(node.attrs?.raw ?? ""); return false; }
+          node.attrs = { ...node.attrs, before: prefix }; prefix = ""; return true;
+        });
+        extra.tail = prefix;
+        const lists = ["bulletList", "orderedList"];
+        if (["ul", "ol"].includes(tag) && (!content.length || content.some(node => node.type !== "listItem"))) throw new Error("Lists require explicit list items. Use HTML.");
+        if (tag === "li" && (!content.length || !["paragraph", "heading", "listText"].includes(content[0].type!) || content.slice(1).some(node => !lists.includes(node.type!))))
+          throw new Error("A list item supports one text block followed by nested lists. Use HTML for mixed blocks.");
+        if (tag === "blockquote" && (!content.length || content.some(node => !["paragraph", "heading", ...lists, "blockquote"].includes(node.type!)))) throw new Error("Blockquotes support paragraphs, headings and lists. Use HTML for other content.");
+        if (tag === "ol") {
+          const start = child.attrs.find(a => a.name === "start")?.value ?? "1";
+          if (!/^-?\d{1,6}$/u.test(start)) throw new Error("Unsupported ordered-list start. Use HTML.");
+          extra.order = Number(start); extra.reversed = child.attrs.some(a => a.name === "reversed");
+        }
+        result.push({ type: tag === "ul" ? "bulletList" : tag === "ol" ? "orderedList" : tag === "li" ? "listItem" : "blockquote", attrs: { ...attrs, ...extra }, content });
+      } else if (!inline && tableElement) {
         const parentTag = "tagName" in parent ? parent.tagName : "";
         const allowed: Record<string, string[]> = { table: ["caption", "colgroup", "thead", "tbody", "tfoot"], thead: ["tr"], tbody: ["tr"], tfoot: ["tr"], tr: ["td", "th"], colgroup: ["col"], div: ["table"] };
         if (tableTags.includes(tag) && tag !== "table" && !allowed[parentTag]?.includes(tag)) throw new Error(`Unexpected table element <${tag}>. Use HTML.`);
@@ -147,7 +175,7 @@ export function htmlSignature(raw: string): string {
   return JSON.stringify(parseFragment(raw).childNodes.map(describe));
 }
 
-export function protectedAttributes(raw: string, structuralTableEdit = false, ignoreLinks = false): string {
+export function protectedAttributes(raw: string, structuralTableEdit = false, ignoreLinks = false, structuralBlocks = false): string {
   const attributes: unknown[] = [];
   function visit(node: P.ChildNode, spanParents: unknown[] = []): void {
     if (!("tagName" in node)) return;
@@ -156,7 +184,7 @@ export function protectedAttributes(raw: string, structuralTableEdit = false, ig
     const descriptor = [node.tagName, retained.map(a => [a.name, a.value])];
     // Even an unstyled span is meaningful structure. Preserve nesting through commands.
     if (node.tagName === "span") attributes.push([descriptor, spanParents]);
-    else if (node.tagName === "a" || retained.length || (!structuralTableEdit && ["table", "caption", "thead", "tbody", "tfoot", "tr", "td", "th", "colgroup", "col"].includes(node.tagName))) attributes.push(descriptor);
+    else if (node.tagName === "a" || retained.length || (!structuralBlocks && ["ul", "ol", "li", "blockquote"].includes(node.tagName)) || (!structuralTableEdit && ["table", "caption", "thead", "tbody", "tfoot", "tr", "td", "th", "colgroup", "col"].includes(node.tagName))) attributes.push(descriptor);
     node.childNodes.forEach(child => visit(child, node.tagName === "span" ? [...spanParents, descriptor] : spanParents));
   }
   parseFragment(raw).childNodes.forEach(node => visit(node));
@@ -169,11 +197,11 @@ export function exportVisual(node: JSONContent): string {
   let value: string;
   const content = (): string => exportChildren(node.content ?? []);
   if (node.type === "doc") return content();
-  if (node.type === "cellText") return content();
+  if (node.type === "cellText" || node.type === "listText") return String(node.attrs?.before ?? "") + content();
   if (node.type === "text") value = escapeText(node.text ?? "");
   else if (["gap", "stylesheet", "inlineImage", "blockImage"].includes(node.type ?? "")) value = String(node.attrs?.raw ?? "");
   else {
-    const tableTypes: Record<string, string> = { tableWrapper: "div", tableShell: "table", tableGrid: "tbody", tableRow: "tr", tableCell: "td", tableHeader: "th", caption: "caption", colgroup: "colgroup", col: "col" };
+    const tableTypes: Record<string, string> = { tableWrapper: "div", tableShell: "table", tableGrid: "tbody", tableRow: "tr", tableCell: "td", tableHeader: "th", caption: "caption", colgroup: "colgroup", col: "col", bulletList: "ul", orderedList: "ol", listItem: "li", blockquote: "blockquote" };
     const tag = tableTypes[node.type ?? ""] ? String(node.attrs?.tag || tableTypes[node.type!]) : node.type === "heading" ? String(node.attrs?.tag ?? "h2") : node.type === "hardBreak" ? "br" : node.type === "span" ? "span" : node.type === "richLink" ? "a" : "p";
     let open = String(node.attrs?.open || `<${tag}>`);
     if (node.type === "tableCell" || node.type === "tableHeader") {

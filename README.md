@@ -26,7 +26,7 @@ Before starting, [install the extension and have your CM URL and automation-clie
 | Configure connections, sites or public-page URLs | [Connections](docs/connections.md) |
 | Browse, search, use favorites or compare items | [Browse and Compare](docs/browse-and-compare.md) |
 | Edit supported fields and save changes | [Item editor](docs/item-editor.md) |
-| Edit Rich Text HTML, nested spans, tables, links or supported visual formatting | [Rich Text editing](docs/item-editor.md#rich-text-html-source) |
+| Edit Rich Text HTML, headings, lists, quotes, tables, links and supported formatting | [Rich Text editing](docs/item-editor.md#rich-text-html-source) |
 | Transfer a field or subtree | [Transfers](docs/transfers.md) |
 | Publish and trace content delivery | [Publishing](docs/publishing.md) |
 | Manage queued work and operation sequences | [Operations](docs/operations.md) |

@@ -23,7 +23,7 @@ test("token-aware admission refuses malformed, identity-sensitive and unsupporte
     '<p><span id="anchor">identity</span><span id="anchor">duplicate</span></p>',
     '<p onclick="x()">event</p>', '<script>x()</script>', '<iframe src="x"></iframe>',
     '<p><strong>a<strong>b</strong></strong></p>', '<p><small>unsupported</small></p>',
-    '<ul><li>list</li></ul>', '<table><tr><td>table</td></tr></table>', '<!--comment--><p>x</p>',
+    '<ul><li>list</ul>', '<table><tr><td>table</td></tr></table>', '<!--comment--><p>x</p>',
     '<p>\u0000</p>', 'text', 'x'.repeat(262145),
     '<p>' + '<span>'.repeat(41) + 'deep' + '</span>'.repeat(41) + '</p>',
   ]) throws(() => admitVisual(raw), Error, raw.slice(0, 50));
