@@ -1,0 +1,17 @@
+{
+  "name": "xm-sync-richtext-compatibility-spike",
+  "private": true,
+  "type": "module",
+  "scripts": { "test": "node --test compatibility.test.mjs draft.test.mjs" },
+  "dependencies": {
+    "@tiptap/core": "3.32.0",
+    "@tiptap/starter-kit": "3.32.0",
+    "@tiptap/extension-table": "3.32.0",
+    "@tiptap/extension-image": "3.32.0",
+    "@tiptap/extension-text-align": "3.32.0",
+    "@tiptap/extension-text-style": "3.32.0",
+    "@codemirror/state": "6.7.6",
+    "@codemirror/view": "6.43.14",
+    "@codemirror/lang-html": "6.4.12"
+  }
+}
