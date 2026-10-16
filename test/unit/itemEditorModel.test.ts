@@ -60,7 +60,7 @@ test("editor validates calendar/time/integer values without browser timezone con
   strictEqual(Boolean(readOnlyReason(item(field("Datetime", "20261014T123456")), field("Datetime", "20261014T123456"))), true);
 });
 test("unsupported/system/fallback and absent versions cannot produce writes", () => {
-  for (const f of [field("Rich Text"), field("Image"), { ...field(), containsFallbackValue: true }, { ...field(), name: "__Title" }]) {
+  for (const f of [field("Image"), { ...field("Rich Text"), containsFallbackValue: true }, { ...field(), containsFallbackValue: true }, { ...field(), name: "__Title" }]) {
     throws(() => planChanges({ ...state(), base: item(f) }));
   }
   throws(() => planChanges({ ...state(), target: { ...state().target, version: 0 }, base: { ...item(), version: 0 } }));

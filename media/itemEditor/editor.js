@@ -10,6 +10,10 @@ let cancelDrag;
 const linkOpen = new Map();
 const assetRequests = new Map();
 let assetRequestId = 0;
+const htmlSources = new Map();
+const htmlModes = new Map();
+const htmlSelections = new Map();
+let freezeGeneration = 0;
 document.addEventListener("keydown", event => { if (event.key === "Escape") { cancelDrag?.(); activePicker?.close(); } });
 document.addEventListener("keydown", event => {
   if ((event.ctrlKey || event.metaKey) && !event.altKey && !event.target.matches("input, textarea") && ["z", "y"].includes(event.key.toLowerCase())) {
@@ -62,28 +66,29 @@ window.addEventListener("message", event => {
     return;
   }
   if (state.type === "unfreeze") {
+    freezeGeneration++;
     revision = state.revision; blocked = false;
     for (const [control, disabled] of frozenControls) control.disabled = disabled;
     frozenControls = [];
+    for (const [id, source] of htmlSources) {
+      const control = document.getElementById(id);
+      send("change", { id, input: source.read(), clear: control?.dataset.explicitClear === "true" });
+    }
     document.getElementById("status").textContent = state.error;
     return;
   }
   if (state.type === "freeze") {
-    cancelDrag?.();
-    activePicker?.close(false);
-    blocked = true;
-    const drafts = {};
-    for (const control of document.querySelectorAll("[data-field-id]")) {
-      const input = control.type === "checkbox" ? (control.checked ? "1" : "") : control.value;
-      const clear = control.dataset.explicitClear === "true";
-      if (input !== control.dataset.original || clear) drafts[control.dataset.fieldId] = { input, clear };
-    }
-    frozenControls = [...document.querySelectorAll("input, textarea, select, button")].map(control => [control, control.disabled]);
-    for (const [control] of frozenControls) control.disabled = true;
-    api.postMessage({ type: "frozen", id: state.id, drafts });
+    void freezeInputs(state);
     return;
   }
   if (state.type !== "state") return;
+  freezeGeneration++;
+  for (const [id, source] of htmlSources) {
+    const control = document.getElementById(id);
+    if (control) htmlSelections.set(id, { start: control.selectionStart, end: control.selectionEnd, scroll: control.scrollTop });
+    source.dispose();
+  }
+  htmlSources.clear();
   cancelDrag?.();
   activePicker?.close(false);
   selectionRequests.clear();
@@ -138,6 +143,8 @@ window.addEventListener("message", event => {
       }
       if (field.selectionKind && !["checklist", "multilist", "treelist", "treelistex"].includes(field.selectionKind)) row.append(selectionLabel(field));
       row.append(value);
+    } else if (field.kind === "html") {
+      renderHtmlSource(row, field);
     } else if (field.kind === "namevalues") {
       renderNameValues(row, field);
     } else if (field.kind === "generallink") {
@@ -179,8 +186,79 @@ window.addEventListener("message", event => {
   if (state.focus) {
     const handle = [...document.querySelectorAll("[data-reorder-field]")].find(control => control.dataset.reorderField === state.focus.id && control.dataset.reorderValue === state.focus.value);
     (handle || document.getElementById(state.focus.id))?.focus();
+    const source = document.getElementById(state.focus.id);
+    const selection = htmlSelections.get(state.focus.id);
+    if (source?.classList.contains("html-source") && selection) {
+      source.setSelectionRange(selection.start, selection.end); source.scrollTop = selection.scroll;
+    }
   }
 });
+async function freezeInputs(state) {
+  const generation = ++freezeGeneration;
+  cancelDrag?.(); activePicker?.close(false); blocked = true;
+  try {
+    // Blur commits IME when supported. Otherwise wait, and refuse Save if it does not finish.
+    await Promise.all([...htmlSources.values()].map(source => source.finishComposition()));
+    if (generation !== freezeGeneration) return;
+    const drafts = {};
+    for (const control of document.querySelectorAll("[data-field-id]")) {
+      const input = htmlSources.get(control.dataset.fieldId)?.read() ?? (control.type === "checkbox" ? (control.checked ? "1" : "") : control.value);
+      const clear = control.dataset.explicitClear === "true";
+      if (input !== control.dataset.original || clear) drafts[control.dataset.fieldId] = { input, clear };
+    }
+    frozenControls = [...document.querySelectorAll("input, textarea, select, button")].map(control => [control, control.disabled]);
+    for (const [control] of frozenControls) control.disabled = true;
+    api.postMessage({ type: "frozen", id: state.id, revision, drafts });
+  } catch {
+    if (generation === freezeGeneration) api.postMessage({ type: "frozen", id: state.id, revision, error: true });
+  }
+}
+function renderHtmlSource(row, field) {
+  const actions = document.createElement("div"); actions.className = "html-source-actions";
+  const html = document.createElement("button"); html.textContent = "HTML"; html.type = "button";
+  const preview = document.createElement("button"); preview.textContent = "Preview"; preview.type = "button";
+  const clear = document.createElement("button"); clear.textContent = "Clear"; clear.type = "button";
+  clear.title = "Store an explicit empty value; does not reset to inherited or Standard Values";
+  const control = document.createElement("textarea"); control.id = field.id; control.className = "html-source";
+  control.spellcheck = false; control.wrap = "off"; control.setAttribute("aria-label", field.label + " HTML source");
+  control.dataset.fieldId = field.id; control.dataset.original = field.original; control.dataset.explicitClear = String(field.clear);
+  const error = document.createElement("p"); error.className = "meta"; error.setAttribute("role", "status");
+  const display = document.createElement("div"); display.className = "html-source-preview";
+  const source = createHtmlSource(control, field.clear ? "" : field.input, {
+    error: message => { error.textContent = message; },
+    change: input => {
+      control.dataset.explicitClear = "false";
+      send("change", { id: field.id, input, clear: false }); document.getElementById("status").textContent = "Unsaved changes";
+    },
+    history: action => { if (!blocked) send(action); },
+  });
+  htmlSources.set(field.id, source);
+  const mode = value => {
+    source.read(); htmlModes.set(field.id, value);
+    control.hidden = value !== "html"; display.hidden = value !== "preview";
+    html.setAttribute("aria-pressed", String(value === "html")); preview.setAttribute("aria-pressed", String(value === "preview"));
+    display.replaceChildren();
+    if (value === "preview") {
+      const raw = source.read();
+      display.append(renderReadOnlyField({ raw, presentation: { kind: "richtext", status: raw ? "populated" : "empty" } }, { sourceMode: true }));
+    }
+  };
+  html.addEventListener("click", () => { mode("html"); control.focus(); });
+  preview.addEventListener("click", async () => {
+    try { await source.finishComposition(); if (row.isConnected && !blocked) mode("preview"); }
+    catch { error.textContent = "Finish composing HTML before opening Preview."; }
+  });
+  clear.addEventListener("click", () => {
+    if (blocked) return;
+    source.replace("", false); control.dataset.explicitClear = "true";
+    send("change", { id: field.id, input: "", clear: true }); mode("html"); control.focus();
+    document.getElementById("status").textContent = "Unsaved changes";
+  });
+  for (const button of [html, preview, clear]) button.disabled = blocked;
+  control.disabled = blocked;
+  actions.append(html, preview, clear); row.append(actions, control, display, error);
+  mode(htmlModes.get(field.id) || "html");
+}
 function selectionLabel(field) {
   const label = document.createElement("p"); label.className = "selection-current"; label.id = field.id; label.setAttribute("role", "status");
   label.dataset.selectionLabel = field.id;

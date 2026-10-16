@@ -7,7 +7,8 @@ globalThis.renderReadOnlyField = function (field, options = {}) {
   const compact = ["image", "file"].includes(presentation.kind) && options.information;
   const information = compact || box;
   const note = text => { const p = document.createElement("p"); p.className = "readonly-note"; p.textContent = text; box.append(p); return p; };
-  note(compact ? "Read-only" : `Read-only${field.reason ? `: ${field.reason}` : ""}`);
+  if (!options.sourceMode) note(compact ? "Read-only" : `Read-only${field.reason ? `: ${field.reason}` : ""}`);
+  const sourceLocation = options.sourceMode ? "The complete HTML is available in HTML mode." : "Original HTML is available below.";
   if (compact) {
     compact.querySelector(".field-stored-value")?.remove();
     const reason = document.createElement("p"); reason.textContent = field.reason || "Editing is not supported for this field type."; compact.append(reason);
@@ -69,9 +70,9 @@ globalThis.renderReadOnlyField = function (field, options = {}) {
       preview.src = `data:text/html;charset=utf-8,${encodeURIComponent(html)}`;
       box.append(preview);
       if (!content.textContent.trim()) note("The stored HTML is populated but has no displayable text in this preview.");
-      if (truncated) note("Preview limited to bounded content; the complete original HTML is available below.");
-      note("Isolated preview. Scripts, links and external resources are blocked; original HTML is available below.");
-    } else note("Preview unavailable: HTML exceeds the preview size limit. Original HTML is available below.");
+      if (truncated) note(`Preview limited to bounded content. ${sourceLocation}`);
+      note(`Isolated preview. Scripts, links and external resources are blocked. ${sourceLocation}`);
+    } else note(`Preview unavailable: HTML exceeds the preview size limit. ${sourceLocation}`);
   }
   if (["image", "file"].includes(presentation.kind) && (presentation.source || presentation.mediaId)) {
     const status = note(options.requestAsset ? "Preview not loaded." : "Asset preview is available in the item editor when the stored URL is supported.");
@@ -100,6 +101,7 @@ globalThis.renderReadOnlyField = function (field, options = {}) {
       });
     }
   }
+  if (options.sourceMode) return box;
   const source = document.createElement("details"); source.className = "readonly-source";
   source.open = presentation.kind === "raw" || Boolean(presentation.notice);
   const title = document.createElement("summary"); title.textContent = presentation.kind === "richtext" ? "HTML source (unchanged)" : "Stored value (unchanged)";

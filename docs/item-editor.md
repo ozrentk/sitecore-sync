@@ -18,10 +18,20 @@ Right-click an ordinary content or component datasource item in **Browse**, or o
 | Name Value List | Read/write valid encoded rows. |
 | General Link | Read/write supported ordinary links; custom/DAM destinations stay protected. |
 | Image, File | Read-only metadata and on-demand supported previews. |
-| Rich Text | Read-only sandboxed preview and original HTML. |
+| Rich Text | Read/write HTML source with a read-only sandboxed preview; no visual editing yet. |
 | Other or unsupported field representations | Read-only; the reason remains visible. |
 
 Eligibility also depends on an existing exact-locale version, valid metadata and the editor's page/system/fallback protections. A supported type alone does not make every field writable.
+
+## Rich Text HTML source
+
+Eligible ordinary-item Rich Text fields open in **HTML** mode. Edit the source directly, use **Preview** to inspect the current draft, and use the ordinary **Save** workflow. Preview is read-only, script-free and isolated; it blocks external requests and navigation. It is not a website preview or a visual editor. Item Details remains read-only.
+
+Opening a field or switching between HTML and Preview does not serialize or change its source. The raw draft preserves comments, malformed markup, attributes, whitespace and mixed CRLF/LF/lone-CR line endings. The textarea displays normalized line breaks while retaining the original raw string separately. Newly typed line breaks use the nearest preceding convention, then the first existing convention, or LF. Pasted/dropped plain text preserves the string supplied by the browser; external clipboard software may itself normalize text. Drops insert at the current selection. **Clear** stores an explicit empty value.
+
+Source editing is limited to 1,048,576 UTF-16 code units per field. Larger stored values remain read-only, and an oversized edit is rejected without truncating the draft. The preview has a separate 262,144-character limit and structural limits; an unavailable preview never alters source. Scripts and unsupported display content remain in the raw draft but cannot execute in Preview.
+
+Save synchronizes pending edits and composition input with the current panel/revision before freezing the controls. If composition cannot finish, Save stops and preserves the draft. Native Undo/Redo, backup, conflicts, journaled non-retried writes and numbered-version readback use the same item-editor pipeline. Server-side rewriting is not silently normalized away to claim a successful exact readback.
 
 ## Basic values and clearing
 
@@ -33,7 +43,7 @@ Datetime controls display **UTC**, with no browser-local conversion, and write S
 
 **Save** (also Ctrl+S) requires native confirmation before contacting Sitecore, including when autosave invokes it. The warning explains shared/unversioned impact and explicit overrides. The editor checks identity, numbered version, template and changed-field values/metadata again before writing, then reads back the same version. This is not an atomic compare-and-set: concurrent server edits can still occur between requests. No mutation is retried automatically. An uncertain or partial save preserves the draft and exposes **Check save outcome**; unresolved outcomes block further writes. Save failures identify the operation stage and safe error details; raw server responses are omitted. **Revert** reloads the pinned version and discards the draft, not the remote write.
 
-VS Code custom-document dirty tabs, close/save/discard prompts and backups protect drafts. Content snapshots and save journals are stored locally in the extension's global storage, with dirty backups managed by VS Code; they contain item content, not credentials. Draft edits participate in VS Code Undo/Redo; each completed reorder is one edit. Undo after Save changes the draft only and needs another confirmed Save to affect Sitecore. Revert reloads content and ends the previous draft history; backups preserve draft values, not the full undo history. Rich Text and media remain read-only; system fields and page presentation editing are unsupported. Missing exact-locale versions and fallback-derived fields are read-only; choosing another existing locale is explicit, never an inferred fallback write. Page-tree editing and publishing from the editor are not available; use [tree publishing](publishing.md).
+VS Code custom-document dirty tabs, close/save/discard prompts and backups protect drafts. Content snapshots and save journals are stored locally in the extension's global storage, with dirty backups managed by VS Code; they contain item content, not credentials. Draft edits participate in VS Code Undo/Redo; each completed reorder is one edit. Undo after Save changes the draft only and needs another confirmed Save to affect Sitecore. Revert reloads content and ends the previous draft history; backups preserve draft values, not the full undo history. Rich Text supports HTML source editing; media remains read-only. System fields and page presentation editing are unsupported. Missing exact-locale versions and fallback-derived fields are read-only; choosing another existing locale is explicit, never an inferred fallback write. Page-tree editing and publishing from the editor are not available; use [tree publishing](publishing.md).
 
 ## Field labels, groups and information
 

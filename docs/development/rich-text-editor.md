@@ -1,6 +1,6 @@
 # Rich Text editor development guide for agents
 
-Status: implementation guidance, reviewed 2026-10-16. **Rich Text is currently read-only in the shipped extension.** The experiments demonstrate feasibility; they are not a production editor or authorization to enable writes.
+Status: implementation guidance, reviewed 2026-10-16. **The 0.46.0 implementation adds HTML source editing; visual editing remains deferred.** The latest published release, 0.45.0, is read-only. Experiments demonstrate bounded feasibility, not production visual support or authorization to widen writes.
 
 Read this document before changing Rich Text rendering, editing, serialization, mode switching or save integration. Follow repository `AGENTS.md` and the current user's scope. This guide does not authorize releases, remote pushes, Sitecore mutations or new features outside the assigned task.
 
@@ -103,6 +103,7 @@ Inspect these current locations before changing behavior; follow renamed symbols
 | `src/editor/itemEditorModel.ts` | `FieldDraft`, exact serialization, eligibility, changed-only `planChanges`, save/reconciliation logic |
 | `src/editor/itemEditorProvider.ts` | Custom document, `recordEdit`, native undo/redo, backup, panel lifecycle, revision/freeze/save coordination |
 | `media/itemEditor/editor.js` and `editor.css` | Field controls, message handling, focus, freeze/unfreeze, rendering |
+| `media/itemEditor/htmlSource.js` | Raw source controller, normalized textarea projection, exact clipboard splicing, composition synchronization |
 | `src/comparison/fieldDiffView.ts` and `media/fieldDiff/` | Read-only Item Details/Field Diff integration; do not accidentally enable writes here |
 | `scripts/spikes/richtext/` and `scripts/spikes/prosemirror/` | Isolated research fixtures, not production adapters |
 
@@ -114,7 +115,7 @@ Integrate local editing history with VS Code custom-document history; do not run
 
 ## Implementation order and acceptance
 
-1. Implement exact draft/source editing, host history, backup and freeze/save guarantees.
+1. Retain the HTML source implementation's exact raw draft, host history, backup and freeze/save guarantees. Its raw string is separate from the textarea's LF projection; never replace it with `textarea.value` during Save. Source-only edits do not require visual admission and must never pass through a visual serializer.
 2. Implement the raw-token/semantic admission gate and safe HTML-only fallback.
 3. Add the custom Tiptap schema and command policies for a named content profile. Keep unsupported structures/operations gated.
 4. Add isolated CSS editing, managed references, media controls and complex tables only with their own tests and security/accessibility review.

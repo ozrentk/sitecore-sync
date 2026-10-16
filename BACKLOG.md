@@ -164,9 +164,15 @@ Use this file as the single backlog inventory. Add newly agreed work here, prese
 - Media Library references without URLs resolve names/paths only. SVG/private/custom-CDN previews remain unavailable with retained evidence; no URL guessing, uploads, asset selection, Content Hub credentials, Rich Text editor or publishing expansion.
 - Read-only Dev evidence verified Content Hub mappings and a public JPEG. Isolated tests cover security boundaries, stale results, connection changes, raw preservation and failed previews. No Sitecore mutations. B27 remains separate.
 
+### Rich Text HTML source implementation (0.46.0)
+
+- Adds HTML source editing and isolated read-only Preview for eligible ordinary-item fields. Raw source stays authoritative; mixed newlines, no-op mode switches, native history, pending-input freeze, backup and the existing Save pipeline are covered by synthetic tests.
+- B24/B25 remain partial: Tiptap visual editing and token-aware admission, managed reference/identity policies, media, complex tables and fallback/page editing remain separate work. No live Sitecore writes are part of this implementation.
+- B31 remains an independent integration failure; its v0.45.0 release exception is not extended.
+
 ### Rich Text editing compatibility spike (2026-10-16)
 
-- Current implementation guidance: [Rich Text editor development guide](docs/development/rich-text-editor.md). The [custom-adapter follow-up](docs/research/custom-richtext-compatibility-spike.md) closes tested structural gaps in both Tiptap and direct ProseMirror; Tiptap remains preferred. Rich Text writes remain unimplemented, with identity/command policies and production integration still required.
+- Current implementation guidance: [Rich Text editor development guide](docs/development/rich-text-editor.md). The [custom-adapter follow-up](docs/research/custom-richtext-compatibility-spike.md) closes tested structural gaps in both Tiptap and direct ProseMirror; Tiptap remains preferred. The subsequent HTML-source step is recorded below; visual identity/command policies and production integration remain required.
 
 - [Evidence and proposed implementation split](docs/research/richtext-compatibility-spike.md): conditional go for MIT Tiptap + CodeMirror with exact raw HTML drafts and HTML-only fallback; no-go for unrestricted stock HTML round-tripping.
 - Four read-only live Dev samples and 14 synthetic fixtures expose custom-attribute loss, table/CSS changes, link defaults, strict-CSP alignment loss and default source newline normalization. No content writes or editing capability delivered.
