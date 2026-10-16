@@ -1,4 +1,5 @@
 import { parseMultipleSelection, validateMultipleSelection, validateReorder } from "./multipleSelection";
+import { newRichLinkTargets } from "./richTextLinks";
 import { fieldPresentation, fieldAssetUrl, fieldPreviewFailure } from "../sitecore/fieldPresentation";
 import { isMultipleSelection } from "./singleSelection";
 import { orderEditorFields } from "./fieldOrder";
@@ -245,8 +246,9 @@ export class ItemEditorProvider implements vscode.CustomEditorProvider<ItemDocum
     if (typeof message.id !== "string" || typeof message.request !== "string" || message.request.length > 100
       || (message.parent !== undefined && !isGuid(message.parent))) return;
     const original = doc.state.base.fields.find(f => normalizeId(f.fieldId) === message.id);
-    if (!original || (!selectionKind(original) && !isGeneralLink(original)) || readOnlyReason(doc.state.base, original)) return;
-    const field = isGeneralLink(original) ? linkSelectionField(original) : original;
+    if (!original || (!selectionKind(original) && !isGeneralLink(original) && fieldKind(original) !== "html") || readOnlyReason(doc.state.base, original)) return;
+    const richText = fieldKind(original) === "html";
+    const field = richText ? { ...original, type: "Droptree", selectionSource: "/sitecore/content", value: "" } : isGeneralLink(original) ? linkSelectionField(original) : original;
     const id = message.id;
     doc.selections.get(id)?.abort();
     const controller = new AbortController(); doc.selections.set(id, controller);
@@ -260,7 +262,7 @@ export class ItemEditorProvider implements vscode.CustomEditorProvider<ItemDocum
       if (!secret) throw new Error("Missing credentials.");
       const io = selectionIO(this.client, connection, secret, doc.state.target.language, signal, doc.state.target.itemId);
       const page = await loadSelectionPage(field, io, message.parent as string | undefined);
-      const choices = isGeneralLink(original) ? [{ ...page.parent, hasChildren: false }, ...page.choices].filter(choice => /^\/sitecore\/content(?:\/|$)/iu.test(choice.path)) : page.choices;
+      const choices = isGeneralLink(original) || richText ? [{ ...page.parent, hasChildren: false }, ...page.choices].filter(choice => /^\/sitecore\/content(?:\/|$)/iu.test(choice.path)) : page.choices;
       let currentLabel = field.value ? "Unresolved or outside allowed Source (original value preserved)" : "No selection";
       const current = page.choices.find(choice => selectionKind(field)!.includes("droplist") ? choice.name === field.value : normalizeId(choice.itemId) === normalizeId(field.value));
       let currentName = current ? current.displayName || current.name : undefined;
@@ -482,6 +484,10 @@ export class ItemEditorProvider implements vscode.CustomEditorProvider<ItemDocum
         for (const change of changes) {
           const field = item.fields.find(f => normalizeId(f.fieldId) === change.fieldId)!;
           if (isGeneralLink(field)) await validateLinkTarget(field, change.value, io);
+          else if (fieldKind(field) === "html") {
+            for (const id of newRichLinkTargets(field.value, change.value))
+              await validateLinkTarget({ ...field, type: "General Link", value: "", selectionSource: "" }, `<link linktype="internal" id="${id}" />`, io);
+          }
           else if (isMultipleSelection(selectionKind(field))) await validateMultipleSelection(field, change.value, io);
           else if (selectionKind(field)) await validateSelection(field, change.value, io);
         }

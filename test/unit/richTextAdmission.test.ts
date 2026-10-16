@@ -19,7 +19,7 @@ test("basic visual admission inventories original tokens and preserves formattin
 test("token-aware admission refuses malformed, identity-sensitive and unsupported content without repairing it", () => {
   for (const raw of [
     '<p x="1" x="2">duplicate</p>', '<p>unclosed', '<p>a</p></p>', '<p><div>repair</div></p>',
-    '<p id="anchor">identity</p>', '<p><a href="/x" data-sc-id="1">managed</a></p>',
+    '<p id="anchor">identity</p>', '<p><a href="javascript:alert(1)">active</a></p>',
     '<p><span id="anchor">identity</span><span id="anchor">duplicate</span></p>',
     '<p onclick="x()">event</p>', '<script>x()</script>', '<iframe src="x"></iframe>',
     '<p><strong>a<strong>b</strong></strong></p>', '<p><small>unsupported</small></p>',

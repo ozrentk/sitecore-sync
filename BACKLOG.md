@@ -178,6 +178,12 @@ Use this file as the single backlog inventory. Add newly agreed work here, prese
 - Media Library references without URLs resolve names/paths only. SVG/private/custom-CDN previews remain unavailable with retained evidence; no URL guessing, uploads, asset selection, Content Hub credentials, Rich Text editor or publishing expansion.
 - Read-only Dev evidence verified Content Hub mappings and a public JPEG. Isolated tests cover security boundaries, stale results, connection changes, raw preservation and failed previews. No Sitecore mutations. B27 remains separate.
 
+### Rich Text managed links — 3C (0.50.0)
+
+- Deliver bounded Visual link creation, destination editing and removal, with a content-root picker, atomic href/matching identity updates and retained nested formatting. New internal targets are validated before Save; stale forms/replies cannot apply.
+- The live read-only sample confirmed the documented `~/link.aspx?_id=…&_z=z` form. The optional matching `data-sc-id` profile is synthetic compatibility coverage, not a claim that all Sitecore links use it. Unknown/custom/DAM/image links remain HTML-only for destination/removal.
+- B24/B25 remain partial for 3D broader styling/media, lists and formatted paste. Native IME/accessibility and live save acceptance remain outstanding. No Sitecore writes or publishing performed.
+
 ### Rich Text table increment — 3B (0.49.0)
 
 - Bounded production tables now support caption/cell typing, row/column insertion, empty row/column deletion, multi-cell merge/split, retained explicit sections/colgroups and overflow wrappers. See [the table profile and command restrictions](docs/item-editor.md#tables-0490).

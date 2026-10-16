@@ -204,6 +204,7 @@ window.addEventListener("message", event => {
 });
 async function freezeInputs(state) {
   const generation = ++freezeGeneration;
+  for (const form of document.querySelectorAll(".richtext-link-form")) form.dispatchEvent(new Event("close-link"));
   cancelDrag?.(); activePicker?.close(false); blocked = true;
   try {
     // Blur commits IME when supported. Otherwise wait, and refuse Save if it does not finish.
@@ -245,8 +246,51 @@ function renderHtmlSource(row, field) {
     button.addEventListener("click", () => { if (!blocked) visualSources.get(field.id)?.command(name); }); tableMenu.append(button);
   }
   tools.append(tableMenu);
+  const linkButton = document.createElement("button"); linkButton.type = "button"; linkButton.textContent = "Link";
+  const linkForm = document.createElement("div"); linkForm.className = "richtext-link-form"; linkForm.hidden = true;
+  let closeLink = () => {};
+  linkForm.addEventListener("close-link", () => closeLink());
+  linkButton.addEventListener("mousedown", event => event.preventDefault());
+  linkButton.addEventListener("click", () => {
+    if (blocked) return;
+    closeLink();
+    const editor = visualSources.get(field.id);
+    try {
+      const info = editor.beginLink();
+      linkForm.replaceChildren(); linkForm.hidden = false;
+      const kind = document.createElement("select"); kind.setAttribute("aria-label", "Link destination type");
+      for (const [value, text] of [["url", "URL"], ["sitecore", "Sitecore item"]]) { const option = document.createElement("option"); option.value = value; option.textContent = text; kind.append(option); }
+      kind.value = info.kind === "sitecore" ? "sitecore" : "url";
+      const url = document.createElement("input"); url.type = "text"; url.value = info.href; url.setAttribute("aria-label", "Link URL");
+      const target = document.createElement("button"); target.type = "button"; target.textContent = info.itemId ? `Current target: ${info.itemId} — browse…` : "Choose Sitecore item…";
+      let itemId = info.itemId;
+      let active = true;
+      const message = document.createElement("p"); message.className = "meta"; message.setAttribute("role", "status"); message.textContent = info.reason || "";
+      const apply = document.createElement("button"); apply.type = "button"; apply.textContent = "Apply link";
+      const remove = document.createElement("button"); remove.type = "button"; remove.textContent = "Remove link"; remove.hidden = !info.existing;
+      const cancel = document.createElement("button"); cancel.type = "button"; cancel.textContent = "Cancel";
+      const picker = createChoicePicker(row, { ...field, selectionSource: "/sitecore/content" }, target, { multiple: false, tree: true,
+        chosen: choice => choice.itemId.replace(/[{}-]/g, "").toLowerCase() === itemId,
+        accept: choice => {
+          if (!active || blocked || visualSources.get(field.id) !== editor) return;
+          itemId = choice.itemId.replace(/[{}-]/g, "").toLowerCase(); target.textContent = choice.displayName || choice.name; target.title = choice.path; picker.close();
+        },
+      });
+      closeLink = () => { active = false; picker.dispose(); editor.cancelLink(); linkForm.hidden = true; linkForm.replaceChildren(); };
+      const update = () => { url.hidden = kind.value !== "url"; target.hidden = kind.value !== "sitecore"; picker.close(false); };
+      kind.addEventListener("change", update); target.addEventListener("click", picker.open);
+      const commit = destination => { if (blocked || !active || visualSources.get(field.id) !== editor) return; try { editor.applyLink(destination); closeLink(); } catch (failure) { message.textContent = failure.message; } };
+      apply.addEventListener("click", () => commit(kind.value === "sitecore" ? { kind: "sitecore", itemId: itemId || "" } : { kind: "url", href: url.value }));
+      remove.addEventListener("click", () => commit("remove")); cancel.addEventListener("click", () => { closeLink(); editor.focus(); });
+      linkForm.onkeydown = event => { if (event.key === "Escape") { event.preventDefault(); closeLink(); editor.focus(); } };
+      for (const control of [kind, url, target, apply, remove]) control.disabled = Boolean(info.reason);
+      linkForm.append(kind, url, target, apply, remove, cancel, message, picker.popup); update();
+      (kind.value === "url" ? url : target).focus();
+    } catch (failure) { visualError.textContent = failure.message; }
+  });
+  tools.append(linkButton);
   const hint = document.createElement("p"); hint.className = "meta";
-  hint.textContent = "Formatting, alignment and bounded table editing. Select cells by dragging across them. Table sections are separate grids; stored styling appears in Preview. Plain-text paste only.";
+  hint.textContent = "Select text to create a Link, or place the cursor inside a link to edit it. Select table cells by dragging across them. Stored styling appears in Preview. Plain-text paste only.";
   const clear = document.createElement("button"); clear.textContent = "Clear"; clear.type = "button";
   clear.title = "Store an explicit empty value; does not reset to inherited or Standard Values";
   const control = document.createElement("textarea"); control.id = field.id; control.className = "html-source";
@@ -267,6 +311,7 @@ function renderHtmlSource(row, field) {
   htmlSources.set(field.id, source);
   let modeRequest = 0;
   const mode = value => {
+    closeLink();
     visualError.textContent = "";
     visualSources.get(field.id)?.dispose(); visualSources.delete(field.id); visualArea.replaceChildren();
     if (value === "visual") {
@@ -307,7 +352,7 @@ function renderHtmlSource(row, field) {
   });
   for (const button of [html, visual, preview, clear]) button.disabled = blocked;
   control.disabled = blocked;
-  actions.append(html, visual, preview, clear); row.append(actions, tools, hint, control, visualArea, display, error, visualError);
+  actions.append(html, visual, preview, clear); row.append(actions, tools, linkForm, hint, control, visualArea, display, error, visualError);
   mode(htmlModes.get(field.id) || "html");
 }
 function selectionLabel(field) {
@@ -753,6 +798,7 @@ function createChoicePicker(row, field, trigger, options) {
     event.preventDefault(); const index = buttons.indexOf(document.activeElement?.closest(".picker-row")?.querySelector(".picker-choice")); const next = index < 0 ? (event.key === "ArrowDown" ? 0 : buttons.length - 1) : Math.max(0, Math.min(buttons.length - 1,index + (event.key === "ArrowDown" ? 1 : -1)));
     buttons[next].focus(); buttons[next].scrollIntoView({block:"nearest"});
   });
-  row.addEventListener("focusout", event => { if (!popup.hidden && event.relatedTarget && !row.contains(event.relatedTarget)) close(false); });
-  return {popup,search,open,close,refresh:update};
+  const focusOut = event => { if (!popup.hidden && event.relatedTarget && !row.contains(event.relatedTarget)) close(false); };
+  row.addEventListener("focusout", focusOut);
+  return {popup,search,open,close,refresh:update,dispose:()=>{ close(false); row.removeEventListener("focusout",focusOut); }};
 }
