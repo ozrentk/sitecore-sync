@@ -56,8 +56,6 @@ jobs:
         run: npm run test:unit
 
       - name: Run extension-host tests
-        env:
-          XM_CLOUD_SYNC_B31_EXCEPTION: ${{ github.ref == 'refs/tags/v0.45.0' && '0.45.0' || '' }}
         run: npm run test:integration
 
       - name: Build VSIX
@@ -103,16 +101,6 @@ jobs:
 
           This extension is distributed through GitHub Releases; it is not published to the VS Code Marketplace. Install newer VSIX releases manually to update.
 
-          This asset passed Git-history and package secret scans, type checking and unit tests. Extension-host verification is required, subject only to any version-specific exception documented below.
+          This asset passed Git-history and package secret scans, type checking and unit tests. Extension-host verification is required without assertion exceptions.
           NOTES
-          if [ "$RELEASE_TAG" = "v0.45.0" ]; then
-            cat >> release-notes.md <<'NOTES'
-
-          ### Known issue: B31
-
-          Local verification repeatedly failed the General Link destination-focus expansion assertion, although normal interactive reproduction remains unverified. For v0.45.0 only, CI runs the test and accepts only that exact assertion failure, reporting it as a warning and in the job summary. If it occurs, the remaining steps in that structured-field test are not exercised. Any other failure still blocks publication. The fix and removal of this exception are tracked as B31 in BACKLOG.md.
-
-          Rich Text remains read-only; Tiptap and ProseMirror editing experiments are not shipped functionality.
-          NOTES
-          fi
           gh release create "$RELEASE_TAG" dist/sitecore-xm-cloud-sync.vsix --verify-tag --title "XM Cloud Sync $RELEASE_TAG" --notes-file release-notes.md --generate-notes

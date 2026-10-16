@@ -207,6 +207,8 @@ export const itemEditorTests: readonly IntegrationTest[] = [{
         if(event.data.type!=="state"||started)return;started=true;
         const until=async fn=>{for(let i=0;i<200;i++){if(fn())return;await new Promise(r=>setTimeout(r,25));}throw Error("Structured UI did not settle");};
         try {
+          api.postMessage({type:"structuredFocus"});
+          await until(()=>document.hasFocus());
           const rows=[...document.querySelectorAll(".field")];
           const named=name=>rows.find(row=>row.querySelector("label").textContent===name);
           const nv=named("Parameters"), link=named("Link"), dam=named("DAM");
@@ -220,6 +222,10 @@ export const itemEditorTests: readonly IntegrationTest[] = [{
           if(!link.querySelector(".link-form").hidden||!link.querySelector(".link-summary").textContent.includes("Text: Old"))throw Error("Initial link should be compact with summary");
           link.querySelector('[data-link-property="url"]').focus();
           if(link.querySelector(".link-form").hidden)throw Error("Destination focus must expand inline");
+          link.querySelector(".link-expand").click();
+          if(!link.querySelector(".link-form").hidden)throw Error("Explicit collapse failed");
+          link.querySelector('[data-link-property="url"]').click();
+          if(link.querySelector(".link-form").hidden)throw Error("Clicking an already focused destination must expand inline");
           const text=link.querySelector('[data-link-property="text"]');text.focus();if(link.querySelector(".link-form").hidden)throw Error("Property focus must not collapse");text.value="New & text";text.dispatchEvent(new Event("input"));
           const choose=kind=>[...link.querySelectorAll("[data-link-type]")].find(b=>b.dataset.linkType===kind).click();choose("mailto");
           const url=link.querySelector('[data-link-property="url"]');url.value="name@example.test";url.dispatchEvent(new Event("input"));
@@ -248,13 +254,23 @@ export const itemEditorTests: readonly IntegrationTest[] = [{
           const stored=nv.querySelector("[data-field-id]");
           window.dispatchEvent(new MessageEvent("message",{data:{type:"draftValidation",revision:event.data.revision-1,id:stored.dataset.fieldId,input:stored.value,error:"STALE"}}));
           if(document.body.textContent.includes("STALE"))throw Error("Stale validation accepted");
+          link.querySelector(".link-expand").click();
+          api.postMessage({type:"structuredBlur"});await until(()=>!document.hasFocus());
+          link.querySelector(".selection-trigger").focus();
+          if(document.activeElement!==link.querySelector(".selection-trigger"))throw Error("Background destination selection failed");
+          api.postMessage({type:"structuredFocus"});await until(()=>document.hasFocus());
+          if(link.querySelector(".link-form").hidden)throw Error("Restored webview focus must expand the active destination");
           api.postMessage({type:"structuredResult",ok:true});
         }catch(error){api.postMessage({type:"structuredResult",error:String(error)});}
       });`;
       const scriptPath=join(directory,"smoke.js"); await writeFile(scriptPath,script);
       const result=new Promise<void>((resolve,reject)=>{
         timer=setTimeout(()=>reject(Error("Structured webview timed out")),20000);
-        listener=panel.webview.onDidReceiveMessage(message=>{if(message.type==="structuredResult"){try{strictEqual(message.ok,true,message.error);resolve();}catch(error){reject(error);}}});
+        listener=panel.webview.onDidReceiveMessage(async message=>{
+          if(message.type==="structuredFocus") { panel.reveal(vscode.ViewColumn.Active, false); await vscode.commands.executeCommand("workbench.action.focusActiveEditorGroup"); }
+          if(message.type==="structuredBlur") await vscode.commands.executeCommand("workbench.action.focusSideBar");
+          if(message.type==="structuredResult"){try{strictEqual(message.ok,true,message.error);resolve();}catch(error){reject(error);}}
+        });
       });
       const nonce=/nonce="([a-f0-9]+)"/u.exec(panel.webview.html)![1];
       panel.webview.options={enableScripts:true,localResourceRoots:[vscode.Uri.joinPath(extension.extensionUri,"media","itemEditor"),vscode.Uri.joinPath(extension.extensionUri, "media", "shared"), vscode.Uri.file(directory)]};

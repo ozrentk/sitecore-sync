@@ -22,9 +22,7 @@ The local Git Flow release is not online until its branches and tag are pushed. 
 
 ## Known verification exception for v0.45.0
 
-For the `v0.45.0` tag only, CI explicitly accepts B31's exact General Link destination-focus assertion failure. The test still runs; an accepted failure produces a warning and job-summary entry, and its remaining steps are not exercised. All other failures remain blocking. Ordinary branch tests have no exception. Local reproduction can opt in with `XM_CLOUD_SYNC_B31_EXCEPTION=0.45.0`; the harness also requires extension version 0.45.0. Remove this temporary exception when B31 is fixed. The GitHub release notes disclose the coverage gap.
-
-The underlying [B31 issue](troubleshooting.md#general-link-properties-b31) remains tracked in [BACKLOG.md](../BACKLOG.md). Release-specific exceptions must stay visible rather than turning the entire test suite non-blocking.
+The published v0.45.0 release explicitly accepted B31's exact General Link destination-focus assertion failure; its notes disclose that the remaining steps of that test might not have run. This remains historical release evidence. The B31 fix removes the exception from current CI and the test harness; every assertion is now required. Published tags and release notes have not been rewritten.
 
 ## Release history
 
