@@ -36,7 +36,7 @@ const nodes = [
 const marks = [["bold", "strong"], ["italic", "em"], ["underline", "u"]].map(([name, tag]) =>
   Mark.create({ name, addAttributes: attributes, renderHTML: () => [tag, 0] }));
 
-export function createVisual(element: HTMLElement, initial: string, callbacks: Callbacks) {
+export function createVisual(element: HTMLElement, initial: string, callbacks: Callbacks, extraExtensions: Extension[] = []) {
   const admission = admitVisual(initial);
   if (initial && !admission.document.content?.some(node => ["paragraph", "heading", "tableShell", "tableWrapper", "bulletList", "orderedList", "blockquote"].includes(node.type ?? "")))
     throw new Error("No editable paragraph, heading or table is present. Use HTML.");
@@ -108,7 +108,7 @@ export function createVisual(element: HTMLElement, initial: string, callbacks: C
         ? execute("outdent") : baseKeymap.Backspace(state, editor.view.dispatch, editor.view),
     })]; },
   });
-  const editor: Editor = new Editor({ element, extensions: [...nodes, ...marks, ...tableExtensions, ...blockExtensions, guard], content: initial === "" ? { type: "doc", content: [{ type: "paragraph" }] } : admission.document,
+  const editor: Editor = new Editor({ element, extensions: [...nodes, ...marks, ...tableExtensions, ...blockExtensions, guard, ...extraExtensions], content: initial === "" ? { type: "doc", content: [{ type: "paragraph" }] } : admission.document,
     enableInputRules: false, enablePasteRules: false, injectCSS: false,
     editorProps: { attributes: { role: "textbox", "aria-label": "Rich Text visual editor", "aria-multiline": "true", spellcheck: "false" } },
     onTransaction: () => callbacks.selection?.(),

@@ -114,3 +114,4 @@ select { font:inherit; color:var(--vscode-input-foreground); background:var(--vs
 .richtext-tools button[aria-disabled="true"] { opacity: .55; cursor: not-allowed; }
 .richtext-visual blockquote { border-left: 3px solid var(--vscode-textBlockQuote-border); margin-left: 0; padding-left: 1em; }
 .richtext-visual .rt-list-text { display: inline; }
+.richtext-editing-frame { display:block; width:100%; height:320px; min-height:140px; max-height:1200px; resize:vertical; border:0; box-sizing:border-box; background:var(--vscode-editor-background); }

@@ -34,6 +34,9 @@ const send = (type, extra = {}) => api.postMessage({ type, revision, ...extra })
 for (const action of ["save", "revert", "reconcile", "locale"]) document.getElementById(action).addEventListener("click", () => send(action));
 window.addEventListener("message", event => {
   const state = event.data;
+  // Nested editing frames have their own authenticated protocol, never host editor state.
+  // VS Code removes window.parent; its host messages use this webview's own origin.
+  if (!state || typeof state !== "object" || state.channel || (event.source && (event.origin !== window.origin || [...document.querySelectorAll("iframe")].some(frame => frame.contentWindow === event.source)))) return;
   if (state.type === "assetPreview") {
     const pending = assetRequests.get(state.id);
     if (pending && pending.request === state.request && state.revision === revision) { assetRequests.delete(state.id); pending.receive(state); }
@@ -260,15 +263,18 @@ function renderHtmlSource(row, field) {
   linkButton.dataset.richCommand = "link";
   const linkForm = document.createElement("div"); linkForm.className = "richtext-link-form"; linkForm.hidden = true;
   let closeLink = () => {};
-  linkForm.addEventListener("close-link", () => closeLink());
+  let linkRequest = 0;
+  linkForm.addEventListener("close-link", () => { linkRequest++; closeLink(); });
   linkButton.addEventListener("mousedown", event => event.preventDefault());
-  linkButton.addEventListener("click", () => {
+  linkButton.addEventListener("click", async () => {
     if (blocked) return;
     if (linkButton.getAttribute("aria-disabled") === "true") { visualError.textContent = linkButton.title; return; }
     closeLink();
+    const request = ++linkRequest;
     const editor = visualSources.get(field.id);
     try {
-      const info = editor.beginLink();
+      const info = await editor.beginLink();
+      if (request !== linkRequest || blocked || !row.isConnected || visualSources.get(field.id) !== editor) return;
       linkForm.replaceChildren(); linkForm.hidden = false;
       const kind = document.createElement("select"); kind.setAttribute("aria-label", "Link destination type");
       for (const [value, text] of [["url", "URL"], ["sitecore", "Sitecore item"]]) { const option = document.createElement("option"); option.value = value; option.textContent = text; kind.append(option); }
@@ -291,7 +297,7 @@ function renderHtmlSource(row, field) {
       closeLink = () => { active = false; picker.dispose(); editor.cancelLink(); linkForm.hidden = true; linkForm.replaceChildren(); };
       const update = () => { url.hidden = kind.value !== "url"; target.hidden = kind.value !== "sitecore"; picker.close(false); };
       kind.addEventListener("change", update); target.addEventListener("click", picker.open);
-      const commit = destination => { if (blocked || !active || visualSources.get(field.id) !== editor) return; try { editor.applyLink(destination); closeLink(); } catch (failure) { message.textContent = failure.message; } };
+      const commit = async destination => { if (blocked || !active || visualSources.get(field.id) !== editor) return; try { await editor.applyLink(destination); if (active && visualSources.get(field.id) === editor) closeLink(); } catch (failure) { if (active) message.textContent = failure.message; } };
       apply.addEventListener("click", () => commit(kind.value === "sitecore" ? { kind: "sitecore", itemId: itemId || "" } : { kind: "url", href: url.value }));
       remove.addEventListener("click", () => commit("remove")); cancel.addEventListener("click", () => { closeLink(); editor.focus(); });
       linkForm.onkeydown = event => { if (event.key === "Escape") { event.preventDefault(); closeLink(); editor.focus(); } };
@@ -302,7 +308,7 @@ function renderHtmlSource(row, field) {
   });
   tools.append(linkButton);
   const hint = document.createElement("p"); hint.className = "meta";
-  hint.textContent = "Select text to create a Link, or place the cursor inside a link to edit it. Select table cells by dragging across them. Stored styling appears in Preview. Plain-text paste only.";
+  hint.textContent = "Supported typography, spacing and borders appear in Visual. Full stored styling appears in Preview. Plain-text paste only; external resources are blocked.";
   const clear = document.createElement("button"); clear.textContent = "Clear"; clear.type = "button";
   clear.title = "Store an explicit empty value; does not reset to inherited or Standard Values";
   const control = document.createElement("textarea"); control.id = field.id; control.className = "html-source";
@@ -333,7 +339,7 @@ function renderHtmlSource(row, field) {
       }
     });
   };
-  tableMenu.addEventListener("toggle", refreshTools);
+  tableMenu.addEventListener("toggle", () => { visualSources.get(field.id)?.tableMenu?.(tableMenu.open); refreshTools(); });
   const display = document.createElement("div"); display.className = "html-source-preview";
   const source = createHtmlSource(control, field.clear ? "" : field.input, {
     error: message => { error.textContent = message; },
@@ -347,13 +353,15 @@ function renderHtmlSource(row, field) {
   htmlSources.set(field.id, source);
   let modeRequest = 0;
   const mode = value => {
+    linkRequest++;
     closeLink();
     visualError.textContent = "";
     visualSources.get(field.id)?.dispose(); visualSources.delete(field.id); visualArea.replaceChildren();
     if (value === "visual") {
       try {
-        const editor = createRichTextVisual(visualArea, source.read(), {
+        const editor = (globalThis.createRichTextFrame || createRichTextVisual)(visualArea, source.read(), {
           change: raw => source.replace(raw), history: action => { if (!blocked) send(action); }, error: message => { visualError.textContent = message; }, selection: refreshTools,
+          escape: () => html.focus(), save: () => { if (!blocked) document.getElementById("save").click(); },
         });
         editor.editable(!blocked); visualSources.set(field.id, editor); error.textContent = "";
       } catch (failure) { value = "html"; visualError.textContent = `Visual unavailable: ${failure.message}`; }

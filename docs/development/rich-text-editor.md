@@ -1,6 +1,6 @@
 # Rich Text editor development guide for agents
 
-Status: implementation guidance, reviewed 2026-10-16. **0.46.0 adds HTML source editing; 0.47.0 adds the guarded basic visual profile; 0.48.0 extends it to nested spans and safe alignment; 0.49.0 adds bounded table editing; 0.50.0 adds managed links; 0.51.0 adds bounded formatting/list/quote commands.** The latest published release, 0.45.0, is read-only. Experiments demonstrate bounded feasibility, not authorization to widen the implemented visual profile.
+Status: implementation guidance, reviewed 2026-10-16. **0.46.0 adds HTML source editing; 0.47.0 adds the guarded basic visual profile; 0.48.0 extends it to nested spans and safe alignment; 0.49.0 adds bounded table editing; 0.50.0 adds managed links; 0.51.0 adds bounded formatting/list/quote commands; 0.52.0 adds isolated styled editing.** The latest published release, 0.45.0, is read-only. Experiments demonstrate bounded feasibility, not authorization to widen the implemented visual profile.
 
 Read this document before changing Rich Text rendering, editing, serialization, mode switching or save integration. Follow repository `AGENTS.md` and the current user's scope. This guide does not authorize releases, remote pushes, Sitecore mutations or new features outside the assigned task.
 
@@ -13,6 +13,18 @@ Read this document before changing Rich Text rendering, editing, serialization, 
 5. Reuse the ordinary item editor's draft, undo, backup, conflict, journal and save flow. Do not create a separate Rich Text mutation path.
 
 ## Architectural decision and evidence
+
+### Isolated styled Visual surface (0.52.0)
+
+Production Visual uses `richTextFrame.ts` and a separately bundled `richTextFrameRuntime.ts` around the same guarded core. The opaque data frame has `allow-scripts` only, a nonce-authorized trusted bundle, nonce styles and a default-deny CSP. Its nonce matches the enclosing webview policy; never add `unsafe-inline`, `allow-same-origin`, remote scripts or source HTML interpolation. HTML, mode controls, status and formatting toolbar remain in the host. Preview is unchanged and script-free.
+
+`richTextStyles.ts` projects supported CSS through decorations and nonce-authorized CSS layers (defaults, stored stylesheet, inline). It does not mutate model tokens or authoritative source. `richTextStylePolicy.ts` defines the bounded property/selector/numeric profile; see [user limits](../item-editor.md#rich-text-basic-visual-mode). Unsupported styling is retained but not displayed. CSSOM parsing is used only for the disposable display. Images remain opaque, and helper table/link DOM still limits website fidelity. This closes the bounded styled-editing portion of 3D, not media editing or arbitrary HTML/CSS support.
+
+Authenticate child replies using exact `contentWindow`, opaque origin and a cryptographic session; validate bounded snapshots, selection/status/link payloads and monotonically increasing sequences. Requests have IDs, ordered execution, timeouts and disposal rejection. Host editor messages reject child sources and frame channels. Never accept a frame `state` as the extension's item state. Keep the frame inert until initialization is acknowledged; a rejected initialization may return original raw for HTML escape because it never enabled input. Once input is enabled, failed freeze acknowledgement must preserve the draft and fail closed rather than save a cached value.
+
+Changed raw is sent immediately; selection-only updates may be frame-scheduled. Freeze snapshots flush the authoritative child draft before the host acknowledgement. Preserve the existing document revision/generation fence in `editor.js` and the provider; old disposed frames cannot update replacement fields. Link forms await replies and recheck active editor identity. Escape focuses the outer HTML control, Save routes to the ordinary host action and history routes to VS Code. Compute expensive table statuses only while the table menu is open.
+
+Regression coverage includes actual production mode transitions, child/host message separation, rejected initialization escape, dispose during freeze, strict protocol parsing and bounded CSS. Browser checks must observe actual requests without an interceptor disguising CSP failures, inspect computed CSS, and exercise typing plus source fidelity. Keep explicit native IME, assistive-technology and live-save limitations until those checks are performed.
 
 ### Command completeness increment (0.51.0)
 

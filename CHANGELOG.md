@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.52.0 — 2026-10-16
+
+- Apply supported inline and embedded CSS in an isolated Rich Text Visual frame, with bounded typography, colors, spacing, borders and dimensions. Keep unsupported CSS and all original source tokens intact.
+- Keep controls and HTML escape outside stored styling; block source scripts, external resources, navigation and forms. Preserve the script-free Preview.
+- Authenticate frame messages, reject stale/disposed replies and await current raw snapshots for mode switches and Save. Add keyboard Escape/Save routing and vertical resize; retain native history and existing draft protections.
+- Media editing, arbitrary CSS/HTML support, native IME/assistive-technology and live-save acceptance remain outside the verified scope.
+
 ## 0.51.0 — 2026-10-16
 
 - Add Rich Text paragraph/heading and alignment controls, bullet/numbered lists, list indent/outdent, quotes and plain bold/italic/underline clearing.
