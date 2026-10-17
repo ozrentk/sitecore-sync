@@ -2,6 +2,7 @@ import { findVisual, replaceVisual, visualMatches } from "../src/editor/richText
 import { Decoration, DecorationSet } from "@tiptap/pm/view";
 import { literalMatches, type SearchInput, type ReplaceInput } from "../src/editor/richTextSearchInput";
 import { richMarkTags } from "../src/editor/richTextMarks";
+import { formatManagedHtml } from "../src/editor/richTextFormatting";
 import { Editor, Node, Mark, Extension, type JSONContent } from "@tiptap/core";
 import { Plugin, TextSelection } from "@tiptap/pm/state";
 import { baseKeymap } from "@tiptap/pm/commands";
@@ -11,7 +12,7 @@ import { CellSelection } from "@tiptap/pm/tables";
 import { tableExtensions } from "./richTextTables";
 import { blockExtensions } from "./richTextBlocks";
 import { richCommands, richTextCommand, activeRichCommand } from "../src/editor/richTextCommands";
-import { tableCommand } from "../src/editor/richTextTableCommands";
+import { tableCommand, wholeTableSelected } from "../src/editor/richTextTableCommands";
 import { beginRichLink, richLinkCommand, type RichLinkSession } from "../src/editor/richTextLinkCommands";
 import type { RichLinkDestination } from "../src/editor/richTextLinks";
 import { admitVisual, exportVisual, htmlSignature, protectedAttributes } from "../src/editor/richTextAdmission";
@@ -46,6 +47,8 @@ export function createVisual(element: HTMLElement, initial: string, callbacks: C
   if (initial && !admission.document.content?.some(node => ["paragraph", "heading", "horizontalRule", "tableShell", "tableWrapper", "bulletList", "orderedList", "blockquote"].includes(node.type ?? "")))
     throw new Error("No editable paragraph, heading or table is present. Use HTML.");
   let authorizedTableTransaction: Transaction | undefined;
+  let authorizedTableInventory: string | undefined;
+  let authorizedTableOpaque: readonly string[] | undefined;
   let authorizedLinkTransaction: Transaction | undefined;
   let authorizedLinkInventory: string | undefined;
   let linkSession: RichLinkSession | undefined;
@@ -66,9 +69,9 @@ export function createVisual(element: HTMLElement, initial: string, callbacks: C
           const raw = exportVisual(transaction.doc.toJSON() as JSONContent);
           const next = admitVisual(raw);
           const structural = transaction === authorizedTableTransaction;
-          const expected = transaction === authorizedCommand ? authorizedCommandInventory : transaction === authorizedLinkTransaction ? authorizedLinkInventory : protectedAttributes(current, structural);
+          const expected = structural && authorizedTableInventory !== undefined ? authorizedTableInventory : transaction === authorizedCommand ? authorizedCommandInventory : transaction === authorizedLinkTransaction ? authorizedLinkInventory : protectedAttributes(current, structural);
           const opaque = (values: readonly string[]) => transaction === authorizedCommand && structuralCommand ? values.filter(value => !/^\s*$/u.test(value)) : values;
-          if (JSON.stringify(opaque(next.opaque)) !== JSON.stringify(opaque(retainedOpaque)) || protectedAttributes(raw, structural) !== expected)
+          if (JSON.stringify(opaque(next.opaque)) !== JSON.stringify(opaque(structural && authorizedTableOpaque ? authorizedTableOpaque : retainedOpaque)) || protectedAttributes(raw, structural) !== expected)
             return reject("This operation would change protected metadata or opaque content. Use HTML.");
           validatedDoc = transaction.doc; validatedOpaque = next.opaque;
           return true;
@@ -117,7 +120,8 @@ export function createVisual(element: HTMLElement, initial: string, callbacks: C
       },
       Tab: state => activeRichCommand(state, "listItem") ? execute("indent") : false,
       "Shift-Tab": state => activeRichCommand(state, "listItem") ? execute("outdent") : false,
-      Backspace: state => activeRichCommand(state, "listItem") && state.selection.empty && state.selection.$from.parent.isTextblock && state.selection.$from.parentOffset === 0
+      Delete: state => wholeTableSelected(state) ? execute("deleteTable") : baseKeymap.Delete(state, editor.view.dispatch, editor.view),
+      Backspace: state => wholeTableSelected(state) ? execute("deleteTable") : activeRichCommand(state, "listItem") && state.selection.empty && state.selection.$from.parent.isTextblock && state.selection.$from.parentOffset === 0
         ? execute("outdent") : baseKeymap.Backspace(state, editor.view.dispatch, editor.view),
     })]; },
   });
@@ -128,7 +132,7 @@ export function createVisual(element: HTMLElement, initial: string, callbacks: C
     onUpdate: ({ editor: active }) => {
       const document = active.getJSON();
       if (active.state.doc === validatedDoc) retainedOpaque = validatedOpaque;
-      const next = JSON.stringify(document) === baseline ? initial : exportVisual(document);
+      const next = JSON.stringify(document) === baseline ? initial : formatManagedHtml(exportVisual(document));
       if (next !== current) { current = next; callbacks.error(""); callbacks.change(current); }
     },
   });
@@ -144,10 +148,17 @@ export function createVisual(element: HTMLElement, initial: string, callbacks: C
         structuralCommand = ["bulletList", "orderedList", "indent", "outdent", "blockquote", "splitListItem"].includes(name);
         authorizedCommandInventory = protectedAttributes(exportVisual(authorizedCommand.doc.toJSON()));
         editor.view.dispatch(authorizedCommand);
-      } else { authorizedTableTransaction = tableCommand(editor.state, name); editor.view.dispatch(authorizedTableTransaction); }
+      } else {
+        authorizedTableTransaction = tableCommand(editor.state, name);
+        if (["deleteTable", "removeRows", "removeColumns", "insertTable"].includes(name)) {
+          const raw = exportVisual(authorizedTableTransaction.doc.toJSON());
+          authorizedTableInventory = protectedAttributes(raw, true); authorizedTableOpaque = admitVisual(raw).opaque;
+        }
+        editor.view.dispatch(authorizedTableTransaction);
+      }
       editor.view.focus();
     } catch (error) { callbacks.error(error instanceof Error ? error.message : "Command unavailable."); }
-    finally { authorizedCommand = undefined; authorizedCommandInventory = undefined; structuralCommand = false; authorizedTableTransaction = undefined; }
+    finally { authorizedCommand = undefined; authorizedCommandInventory = undefined; structuralCommand = false; authorizedTableTransaction = undefined; authorizedTableInventory = undefined; authorizedTableOpaque = undefined; }
     return true;
   }
   let statusState = editor.state;

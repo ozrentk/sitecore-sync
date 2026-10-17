@@ -8,7 +8,7 @@ import { frameSelection } from "../src/editor/richTextFrameProtocol";
 declare const frameSession: string;
 const nonce = document.currentScript?.nonce ?? "";
 const themeStyle = document.createElement("style"); themeStyle.nonce = nonce; document.head.append(themeStyle);
-const commands = [...richCommands, "link", "insertTable", "caption", "rowBefore", "rowAfter", "columnBefore", "columnAfter", "deleteRow", "deleteColumn", "mergeCells", "splitCell"];
+const commands = [...richCommands, "link", "insertTable", "caption", "rowBefore", "rowAfter", "columnBefore", "columnAfter", "deleteRow", "deleteColumn", "removeRows", "removeColumns", "deleteTable", "mergeCells", "splitCell"];
 let editor: ReturnType<typeof createVisual> | undefined;
 let tableMenuOpen = false;
 let sequence = 0; let lastRequest = 0; let scheduled = false; let queue = Promise.resolve();

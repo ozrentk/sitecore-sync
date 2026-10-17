@@ -54,5 +54,13 @@ export function replaceVisual(state: EditorState, input: ReplaceInput): { transa
   tr.doc.check();
   if (protectedAttributes(before) !== protectedAttributes(after) || JSON.stringify(admitVisual(before).opaque) !== JSON.stringify(admitVisual(after).opaque))
     throw new Error("Replacement would remove protected formatting or metadata. Narrow the selection or edit HTML.");
-  return { transaction: tr.scrollIntoView(), result: { count: visualMatches(tr.doc, input).length, index: 0, replaced: selected.length } };
+  const remaining = visualMatches(tr.doc, input);
+  let index = -1;
+  if (!input.all && remaining.length) {
+    const resume = tr.mapping.map(selected[0].to, 1);
+    index = remaining.findIndex(match => match.from >= resume);
+    if (index < 0) index = 0;
+    tr.setSelection(TextSelection.create(tr.doc, remaining[index].from, remaining[index].to));
+  }
+  return { transaction: tr.scrollIntoView(), result: { count: remaining.length, index: index + 1, replaced: selected.length } };
 }

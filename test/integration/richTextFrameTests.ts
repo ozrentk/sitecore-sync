@@ -99,6 +99,26 @@ export const richTextFrameTests: readonly IntegrationTest[] = [{
         assert(document.getElementById('html').value==='<h2 style="text-align:center">Keep</h2>','Mode switch keeps edited source');
         button('Preview').click();await wait(()=>document.querySelector('.richtext-preview'));assert(document.querySelector('.richtext-preview').sandbox.value==='','Preview stays script-free');
         button('Visual').click();await wait(()=>visualSources.get('html')?.status('h2').enabled);assert(htmlSources.get('html').read()==='<h2 style="text-align:center">Keep</h2>','Reentry is raw-exact');
+        const showPolish=async raw=>{sendState({...state,fields:[{...field,raw,input:raw,original:raw}]});await wait(()=>visualSources.get('html')?.status('indent').enabled);};
+        await showPolish('<p>one One one</p>');
+        const tool=name=>document.querySelector('.richtext-tools button[aria-label="'+name+'"]');
+        tool('Indent').click();await wait(()=>htmlSources.get('html').read().includes('40px'));tool('Indent').click();await wait(()=>htmlSources.get('html').read().includes('80px'));
+        tool('Replace').click();const q=document.querySelector('input[aria-label="Find in this field"]');q.value='one';q.dispatchEvent(new Event('input'));
+        await wait(()=>document.querySelector('.richtext-search [role=status]').textContent.includes('of 3'));
+        assert(!document.querySelector('[aria-label="Show replacement"]'),'Find bar has no redundant replacement toggle');
+        const sensitive=document.querySelector('input[aria-label="Match case"]');sensitive.checked=true;sensitive.dispatchEvent(new Event('input'));
+        await wait(()=>document.querySelector('.richtext-search [role=status]').textContent.includes('of 2'));
+        sensitive.checked=false;sensitive.dispatchEvent(new Event('input'));await wait(()=>document.querySelector('.richtext-search [role=status]').textContent.includes('of 3'));
+        document.querySelector('input[aria-label="Replace with"]').value='two';q.dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',bubbles:true,cancelable:true}));
+        await wait(()=>document.querySelector('.richtext-search [role=status]').textContent.includes('1 of 3'));
+        for(const text of ['two One one','two two one','two two two']){document.querySelector('.richtext-search button[aria-label="Replace"]').click();await wait(()=>htmlSources.get('html').read().includes(text));}
+        await showPolish('<p>One</p><p>Two</p>');visualSources.get('html').restore({from:1,to:9});await wait(()=>visualSources.get('html').selection().to===9);
+        visualSources.get('html').command('insertTable');await wait(()=>htmlSources.get('html').read().includes('<table>'));
+        assert((htmlSources.get('html').read().match(/<tr>/g)||[]).length===2,'Each paragraph becomes a row');
+        assert(htmlSources.get('html').read().includes('\\n  <tbody>'),'Generated table HTML is readable');
+        visualSources.get('html').command('removeRows');await wait(()=>!htmlSources.get('html').read().includes('One'));
+        assert(htmlSources.get('html').read().includes('Two'),'Row deletion retains the other row');
+        visualSources.get('html').command('deleteTable');await wait(()=>!htmlSources.get('html').read().includes('<table>'));
         api.postMessage({type:'styled-modes-result',ok:true});
       })().catch(error=>api.postMessage({type:'styled-modes-result',error:String(error)}));</script>`;
       await complete;

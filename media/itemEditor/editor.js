@@ -265,9 +265,9 @@ function renderHtmlSource(row, field) {
   const tableTitle = document.createElement("summary"); tableTitle.textContent = "Table"; tableMenu.append(tableTitle);
   tableTitle.dataset.actionIcon = "table"; tableTitle.title = "Table commands";
   const tableCommands = document.createElement("div"); tableCommands.className = "richtext-table-menu"; tableMenu.append(tableCommands);
-  for (const [name, label] of [["insertTable", "Insert table (2 × 2)"], ["caption", "Add / edit caption"], ["rowBefore", "Insert row above"], ["rowAfter", "Insert row below"],
-    ["columnBefore", "Insert column before"], ["columnAfter", "Insert column after"], ["deleteRow", "Delete empty rows"],
-    ["deleteColumn", "Delete empty columns"], ["mergeCells", "Merge selected cells"], ["splitCell", "Split cell"]]) {
+  for (const [name, label] of [["insertTable", "Insert table / paragraphs to rows"], ["caption", "Add / edit caption"], ["rowBefore", "Insert row above"], ["rowAfter", "Insert row below"],
+    ["columnBefore", "Insert column before"], ["columnAfter", "Insert column after"], ["removeRows", "Delete rows"],
+    ["removeColumns", "Delete columns"], ["deleteTable", "Delete table"], ["mergeCells", "Merge selected cells"], ["splitCell", "Split cell"]]) {
     const button = document.createElement("button"); button.type = "button"; button.textContent = label; button.disabled = blocked;
     button.dataset.richCommand = name;
     button.addEventListener("mousedown", event => event.preventDefault());
@@ -399,8 +399,8 @@ function renderHtmlSource(row, field) {
   const query = document.createElement("input"); query.type = "text"; query.maxLength = 1024; query.placeholder = "Find in this field"; query.setAttribute("aria-label", "Find in this field");
   const replacement = document.createElement("input"); replacement.type = "text"; replacement.maxLength = 8192; replacement.placeholder = "Replace with"; replacement.setAttribute("aria-label", "Replace with");
   const matchCase = document.createElement("input"); matchCase.type = "checkbox";
-  const caseLabel = document.createElement("label"); caseLabel.append(matchCase, "Match case");
-  const searchStatus = document.createElement("span"); searchStatus.setAttribute("role", "status");
+  const caseLabel = document.createElement("label"); caseLabel.className = "richtext-match-case"; caseLabel.title = "When checked, uppercase and lowercase must match exactly"; matchCase.setAttribute("aria-label", "Match case"); caseLabel.append(matchCase, "Match case");
+  const searchStatus = document.createElement("span"); searchStatus.className = "richtext-search-count"; searchStatus.setAttribute("role", "status");
   const mirror = document.createElement("pre"); mirror.className = "richtext-search-mirror"; mirror.setAttribute("aria-hidden", "true"); mirror.hidden = true;
   const sourceWrap = document.createElement("div"); sourceWrap.className = "richtext-source-wrap"; sourceWrap.append(mirror, control);
   let searchEpoch = 0; let searchBusy = false; let searchTimer;
@@ -442,10 +442,11 @@ function renderHtmlSource(row, field) {
           for (const match of [...selected].reverse()) raw = raw.slice(0, match.from) + replacement.value + raw.slice(match.to);
           if (raw.length > htmlSourceTools.limit) throw new Error("Replacement exceeds the HTML size limit.");
           matches = richTextSearchTools.literalMatches(raw, request); // Validate the entire result before any draft change.
-          source.replace(raw); replaced = selected.length; from = to = 0;
+          const resume = selected[0]?.from ?? 0;
+          source.replace(raw); replaced = selected.length; from = to = operation === "one" ? resume + replacement.value.length : 0;
         }
         let index = matches.findIndex(match => match.from === from && match.to === to);
-        if (operation === "find" && matches.length) {
+        if (["find", "one"].includes(operation) && matches.length) {
           index = direction === "previous" ? matches.reduce((found, match, i) => match.to <= from ? i : found, -1) : matches.findIndex(match => match.from >= to);
           if (index < 0) index = direction === "previous" ? matches.length - 1 : 0;
           const found = matches[index]; control.setSelectionRange(htmlSourceTools.normalize(raw.slice(0, found.from)).length, htmlSourceTools.normalize(raw.slice(0, found.to)).length);
@@ -462,15 +463,16 @@ function renderHtmlSource(row, field) {
   };
   const refreshSearch = () => { clearTimeout(searchTimer); if (!searchBar.hidden) searchTimer = setTimeout(() => { if (searchBusy) refreshSearch(); else void runSearch("next", "refresh"); }, 100); };
   const openSearch = replace => { if (blocked || htmlModes.get(field.id) === "preview") return; searchBar.hidden = false; replaceRow.hidden = !replace; query.focus(); query.select(); void runSearch("next", "refresh"); };
-  const actionButton = (parent, label, action, icon) => { const button = document.createElement("button"); button.type = "button"; button.textContent = label; button.title = label; button.setAttribute("aria-label", label); if (icon) button.dataset.actionIcon = icon; button.disabled = blocked; button.addEventListener("mousedown", event => event.preventDefault()); button.addEventListener("click", () => { if (!blocked) action(); }); parent.append(button); return button; };
+  const actionButton = (parent, label, action, icon) => { const button = document.createElement("button"); button.type = "button"; button.textContent = label; button.title = label; button.setAttribute("aria-label", label); if (icon) button.dataset.actionIcon = icon; if (["previousMatch", "nextMatch", "cancel"].includes(icon)) { button.className = "richtext-icon-button"; const text = document.createElement("span"); text.className = "action-label"; text.textContent = label; button.replaceChildren(text); } button.disabled = blocked; button.addEventListener("mousedown", event => event.preventDefault()); button.addEventListener("click", () => { if (!blocked) action(); }); parent.append(button); return button; };
   for (const action of ["undo", "redo"]) actionButton(historyGroup, action === "undo" ? "Undo" : "Redo", async () => {
     const editor = visualSources.get(field.id);
     try { await editor?.freeze(); await source.finishComposition(); if (!blocked && row.isConnected && editor === visualSources.get(field.id)) { editor?.editable(true); send(action); } }
     catch (failure) { visualError.textContent = failure.message; if (editor === visualSources.get(field.id)) editor?.editable(!blocked); }
   }, action);
   actionButton(searchGroup, "Find", () => openSearch(false), "find"); actionButton(searchGroup, "Replace", () => openSearch(true), "replace");
-  findRow.append(query); actionButton(findRow, "Previous match", () => void runSearch("previous")); actionButton(findRow, "Next match", () => void runSearch());
-  actionButton(findRow, "Show replacement", () => { replaceRow.hidden = !replaceRow.hidden; if (!replaceRow.hidden) replacement.focus(); }, "replace");
+  const navigation = document.createElement("div"); navigation.className = "richtext-search-navigation"; navigation.setAttribute("role", "group"); navigation.setAttribute("aria-label", "Match navigation");
+  findRow.append(query, navigation); actionButton(navigation, "Previous match", () => void runSearch("previous"), "previousMatch"); actionButton(navigation, "Next match", () => void runSearch(), "nextMatch");
+
   findRow.append(caseLabel, searchStatus); actionButton(findRow, "Close search", () => closeSearch(), "cancel");
   replaceRow.append(replacement); actionButton(replaceRow, "Replace", () => void runSearch("next", "one"), "replace"); actionButton(replaceRow, "Replace all", () => void runSearch("next", "all"), "replace");
   searchBar.append(findRow, replaceRow);

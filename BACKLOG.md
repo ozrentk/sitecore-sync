@@ -235,3 +235,8 @@ Use this file as the single backlog inventory. Add newly agreed work here, prese
 ### Rich Text formatting/search/history increment (0.54.0)
 
 Implemented horizontal rule, strikethrough, subscript/superscript; two toolbar rows; field-scoped inline literal Find/Replace in Visual and authoritative HTML with transient highlights and atomic guarded replacements; explicit native Undo/Redo. See [behavior and limits](docs/item-editor.md#formatting-findreplace-and-history-0540). Broader arbitrary HTML, formatted paste, native IME/accessibility and live-save acceptance are not closed by this increment. B31 remains independent.
+
+
+### Rich Text editing polish (0.55.0)
+
+Addressed struck-S icon, paragraph indentation, readable generated HTML, consecutive Replace, removal of Show replacement, grouped controls, distinct functional Match case, paragraph-to-table rows, populated row/column deletion and whole-table deletion. See [limits](docs/item-editor.md#editing-refinements-0550). Merged-cell row/column edits, complex margin CSS, native IME/accessibility and live-save acceptance remain bounded or unverified.
