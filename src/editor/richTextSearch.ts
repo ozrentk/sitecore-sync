@@ -2,7 +2,7 @@ import type { Node as PMNode } from "@tiptap/pm/model";
 import { TextSelection, type EditorState, type Transaction } from "@tiptap/pm/state";
 import { admitVisual, exportVisual, protectedAttributes } from "./richTextAdmission";
 
-import { literalMatches, validReplaceInput, validSearchInput, type Part, type SearchInput, type ReplaceInput, type SearchResult } from "./richTextSearchInput";
+import { replacementText, literalMatches, validReplaceInput, validSearchInput, type Part, type SearchInput, type ReplaceInput, type SearchResult } from "./richTextSearchInput";
 interface Match extends Part { parts: Part[] }
 /** Visible text only. Blocks, breaks and opaque fragments are search boundaries. */
 export function visualMatches(doc: PMNode, input: SearchInput): Match[] {
@@ -47,8 +47,11 @@ export function replaceVisual(state: EditorState, input: ReplaceInput): { transa
   if (selected.some(match => match.parts.some((part, index) => index > 0 && part.from !== match.parts[index - 1].to)))
     throw new Error("Replacement crosses a link or wrapper boundary. Narrow the search or edit HTML. Nothing was replaced.");
   const tr = state.tr;
-  for (const match of [...selected].reverse()) for (let i = match.parts.length - 1; i >= 0; i--) {
-    const part = match.parts[i]; tr.insertText(i === 0 ? input.replacement : "", part.from, part.to);
+  for (const match of [...selected].reverse()) {
+    const replacement = replacementText(match.parts.map(part => state.doc.textBetween(part.from, part.to)).join(""), input.replacement, input.preserveCase);
+    for (let i = match.parts.length - 1; i >= 0; i--) {
+      const part = match.parts[i]; tr.insertText(i === 0 ? replacement : "", part.from, part.to);
+    }
   }
   const before = exportVisual(state.doc.toJSON()); const after = exportVisual(tr.doc.toJSON());
   tr.doc.check();

@@ -1,32 +1,38 @@
 import { parseFragment, type DefaultTreeAdapterTypes as P } from "parse5";
 
-/** Add layout whitespace only between block/structural elements; never touch inline text or tokens. */
+/** Format changed Visual output. Inline boundary spacing is deliberately normalized. */
 export function formatManagedHtml(raw: string): string {
+  if (raw.length > 262144) return raw;
   const root = parseFragment(raw, { sourceCodeLocationInfo: true });
-  const blocks = new Set(["p", "h1", "h2", "h3", "h4", "h5", "h6", "table", "ul", "ol", "blockquote", "hr", "div"]);
-  const containers = new Set(["table", "thead", "tbody", "tfoot", "tr", "ul", "ol", "li", "blockquote", "td", "th"]);
-  const edits: { position: number; value: string }[] = [];
-  function visit(parent: P.ParentNode, depth: number): void {
-    const tag = "tagName" in parent ? parent.tagName : "";
-    if ("attrs" in parent && parent.attrs.some(attr => attr.name === "style" && /white-space\s*:/iu.test(attr.value))) return;
-    const elements = parent.childNodes.filter((node): node is P.Element => "tagName" in node);
-    const onlyBlocks = elements.length > 0 && parent.childNodes.every(node => "tagName" in node || node.nodeName === "#text" && /^\s*$/u.test((node as P.TextNode).value));
-    const layout = onlyBlocks && (!tag ? elements.every(node => blocks.has(node.tagName)) : containers.has(tag) && elements.every(node => blocks.has(node.tagName) || ["caption", "colgroup", "col", "thead", "tbody", "tfoot", "tr", "td", "th", "li"].includes(node.tagName)));
-    if (layout) {
-      let cursor = "tagName" in parent ? parent.sourceCodeLocation?.startTag?.endOffset : 0;
-      for (let i = 0; i < elements.length; i++) {
-        const location = elements[i].sourceCodeLocation;
-        if (location && cursor === location.startOffset && (tag || i > 0)) edits.push({ position: location.startOffset, value: "\n" + "  ".repeat(depth) });
-        cursor = location?.endOffset;
-      }
-      if (tag && "tagName" in parent && cursor === parent.sourceCodeLocation?.endTag?.startOffset) edits.push({ position: cursor!, value: "\n" + "  ".repeat(Math.max(0, depth - 1)) });
-    }
-    if (!tag || containers.has(tag)) for (const element of elements) visit(element, depth + 1);
-  }
-  visit(root, 0);
-  let result = raw;
-  for (const edit of edits.sort((a, b) => b.position - a.position)) result = result.slice(0, edit.position) + edit.value + result.slice(edit.position);
+  const containers = new Set(["p", "h1", "h2", "h3", "h4", "h5", "h6", "div", "span", "a",
+    "strong", "b", "em", "i", "u", "s", "strike", "del", "sub", "sup",
+    "table", "caption", "colgroup", "thead", "tbody", "tfoot", "tr", "td", "th", "ul", "ol", "li", "blockquote"]);
+  const edgeWhitespace = /^(?:\s|&nbsp;|&#0*160;|&#x0*a0;)+|(?:\s|&nbsp;|&#0*160;|&#x0*a0;)+$/giu;
   const countNodes = (node: P.ParentNode): number => node.childNodes.reduce((count, child) => count + 1 + ("childNodes" in child ? countNodes(child) : 0), 0);
-  // Added layout text must not push an otherwise editable document past admission limits.
-  return result.length <= 262144 && countNodes(root) + edits.length <= 5000 ? result : raw;
+  function render(node: P.ChildNode, depth: number): string {
+    const location = node.sourceCodeLocation;
+    if (!location) throw new Error("Cannot format an implied HTML node.");
+    const token = raw.slice(location.startOffset, location.endOffset);
+    const indent = "  ".repeat(depth);
+    if (node.nodeName === "#text") {
+      const text = token.replace(edgeWhitespace, "").replace(/[\t\r\n ]+/gu, " ");
+      return text ? indent + text : "";
+    }
+    // Preserve opaque content and whitespace-sensitive subtrees byte-for-byte.
+    if (!("tagName" in node) || !containers.has(node.tagName) ||
+      node.attrs.some(attr => attr.name === "style" && /white-space\s*:/iu.test(attr.value))) return indent + token;
+    const elementLocation = node.sourceCodeLocation;
+    if (!elementLocation?.startTag || !elementLocation.endTag) throw new Error("Cannot format implicit element boundaries.");
+    const open = raw.slice(elementLocation.startTag.startOffset, elementLocation.startTag.endOffset);
+    const close = raw.slice(elementLocation.endTag.startOffset, elementLocation.endTag.endOffset);
+    const children = node.childNodes.map(child => render(child, depth + 1)).filter(Boolean);
+    return indent + open + "\n" + (children.length ? children.join("\n") + "\n" : "") + indent + close;
+  }
+  try {
+    const result = root.childNodes.map(node => render(node, 0)).filter(Boolean).join("\n");
+    // Layout text also counts toward the visual admission budget.
+    return result.length <= 262144 && countNodes(parseFragment(result)) <= 5000 ? result : raw;
+  } catch {
+    return raw;
+  }
 }

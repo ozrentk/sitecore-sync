@@ -132,3 +132,16 @@ Addressed all ten reported editor objections: struck-S icon; 40px paragraph/head
 Explicit limitations: split merged cells before row/column deletion; column operations with multiple sections or column definitions remain HTML-only; complex/ambiguous margin CSS remains HTML-only; no native OS IME, screen-reader or live-save acceptance is claimed. Ordinary partial text selections do not authorize whole-table removal. Generated formatting respects source-size/node limits and never forces manual/untouched HTML into a formatter.
 
 Final v0.55.0 package passed type checking, inventory verification (181 entries, current UI/docs; README links rewritten by vsce), pinned secret scanning with no leaks, and disposable installed-extension activation/command/search/conversion/deletion smoke. SHA-256: `CDC7D7C1251D330199412EAED353A4719FB28A9895A694D3A9335DD290125D67`. This is a local installable update, not a remote release.
+
+## Deep HTML layout and replacement casing (0.56.0, 2026-10-17)
+
+The user explicitly approved deep two-space tag/text indentation, including visible whitespace changes around inline wrappers and clearing NBSP-only paragraphs. This supersedes the block-only layout rule from 0.55.0. Formatting applies only to actual Visual changes; untouched entry, manual HTML, and undo-to-entry remain exact. Opaque and explicitly whitespace-sensitive subtrees retain their original tokens. Size/node admission budgets remain enforced.
+
+- 478 unit tests pass, including independently specified nested formatting output, internal entities and attribute tokens, NBSP variants, idempotence, opaque/preformatted retention and node-budget fallback.
+- 115 extension-host tests pass, covering actual controls, source/history/freeze, formatted link/table reentry, and protected metadata. Changed-output expectations use the formatter; independent unit fixtures establish its exact expected whitespace. No-op/manual-source assertions remain exact.
+- Isolated production Edge checks pass for Preserve casing in Visual and HTML and for deep HTML reentry followed by typing. The new checkbox is separate from Match case and defaults off.
+- Replacement casing uses per-match Unicode lower/upper/initial-capital patterns; ambiguous mixed/uncased matches retain replacement input. Unicode expansion is included when advancing raw HTML selections. Both modes retain their existing atomicity and history boundaries.
+
+Native OS IME, screen-reader and live Sitecore save acceptance were not exercised. No Sitecore content was changed.
+
+Final package: 181 entries, 5,143,196 bytes; inventory/current-assets check and secret scan passed. Installed v0.56.0 passed isolated activation, command registration, casing replacement, styled/deep HTML snapshot, table conversion and deletion smoke. SHA-256: `943BEFDC0C61E70F20C49FF846DD07DAEF9E024B5F799362A71054CD03BA8C7C`. No remote publication.

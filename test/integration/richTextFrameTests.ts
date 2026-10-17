@@ -1,3 +1,4 @@
+import { formatManagedHtml } from "../../src/editor/richTextFormatting";
 import * as vscode from "vscode";
 import { strictEqual } from "node:assert/strict";
 import type { IntegrationTest } from "./testSupport";
@@ -23,7 +24,7 @@ export const richTextFrameTests: readonly IntegrationTest[] = [{
           const frame=document.querySelector('iframe');assert(frame.sandbox.value==='allow-scripts','Opaque script-only sandbox');assert(frame.contentDocument===null,'Frame must not share origin');
           window.dispatchEvent(new MessageEvent('message',{source:window,origin:'null',data:{channel:'rich-text-frame',type:'state',state:{raw:'bad',sequence:999}}}));
           assert(editor.read()===raw,'Foreign reply cannot replace source');
-          editor.command('h2');await wait(()=>editor.read().includes('<h2 class="theme"'));assert(editor.read()==='<style>.theme{color:red}</style><h2 class="theme" style="text-align:center">Text &amp; more</h2>','Requested retag retains CSS and content');
+          editor.command('h2');await wait(()=>editor.read().includes('<h2 class="theme"'));assert(editor.read()===${JSON.stringify(formatManagedHtml('<style>.theme{color:red}</style><h2 class="theme" style="text-align:center">Text &amp; more</h2>'))},'Requested retag retains CSS and content');
           const baseline=editor.read();const changesBeforeFind=changed;
           const search={query:'Text',matchCase:true,direction:'next'};
           assert((await editor.highlightSearch(search)).count===1,'Highlight count through authenticated bridge');
@@ -63,7 +64,7 @@ export const richTextFrameTests: readonly IntegrationTest[] = [{
         timer = setTimeout(() => reject(new Error("Styled modes integration timed out")), 25000);
         listener = panel.webview.onDidReceiveMessage(message => {
           if (message.type === "frozen") frozen = message;
-          if (message.type === "styled-modes-result") { try { strictEqual(message.ok, true, message.error); strictEqual(frozen?.revision, 4); strictEqual(frozen?.drafts.html.input, '<h2 style="text-align:center">Keep</h2>'); resolve(); } catch (error) { reject(error); } }
+          if (message.type === "styled-modes-result") { try { strictEqual(message.ok, true, message.error); strictEqual(frozen?.revision, 4); strictEqual(frozen?.drafts.html.input, formatManagedHtml('<h2 style="text-align:center">Keep</h2>')); resolve(); } catch (error) { reject(error); } }
         });
       });
       const script = (uri: vscode.Uri) => `<script nonce="styled" src="${panel.webview.asWebviewUri(uri)}"></script>`;
@@ -93,12 +94,12 @@ export const richTextFrameTests: readonly IntegrationTest[] = [{
         const frame=document.querySelector('.richtext-editing-frame');sendState({channel:'rich-text-frame',type:'state',item:{name:'Wrong'}});assert(document.getElementById('title').textContent==='Fixture','Frame namespace is not host state');
         window.dispatchEvent(new MessageEvent('message',{source:frame.contentWindow,data:{...state,item:{name:'Wrong'}}}));assert(document.getElementById('title').textContent==='Fixture','Nested source cannot spoof host state');
         sendState({type:'freeze',id:'styled-freeze',revision:4});await wait(()=>document.getElementById('save').disabled);await new Promise(r=>setTimeout(r,200));
-        assert(htmlSources.get('html').read()==='<h2 style="text-align:center">Keep</h2>','Freeze retains the changed raw draft');
+        assert(htmlSources.get('html').read()===${JSON.stringify(formatManagedHtml('<h2 style="text-align:center">Keep</h2>'))},'Freeze retains the changed raw draft');
         sendState({type:'unfreeze',revision:4,error:''});await wait(()=>visualSources.get('html').status('h2').enabled);
         button('HTML').click();await wait(()=>!document.getElementById('html').hidden);assert(!document.querySelector('.richtext-editing-frame'),'HTML disposes the frame');assert(document.querySelector('.richtext-tools button[aria-label=Undo]').tabIndex===0,'HTML toolbar retains a visible keyboard entry');
-        assert(document.getElementById('html').value==='<h2 style="text-align:center">Keep</h2>','Mode switch keeps edited source');
+        assert(document.getElementById('html').value===${JSON.stringify(formatManagedHtml('<h2 style="text-align:center">Keep</h2>'))},'Mode switch keeps edited source');
         button('Preview').click();await wait(()=>document.querySelector('.richtext-preview'));assert(document.querySelector('.richtext-preview').sandbox.value==='','Preview stays script-free');
-        button('Visual').click();await wait(()=>visualSources.get('html')?.status('h2').enabled);assert(htmlSources.get('html').read()==='<h2 style="text-align:center">Keep</h2>','Reentry is raw-exact');
+        button('Visual').click();await wait(()=>visualSources.get('html')?.status('h2').enabled);assert(htmlSources.get('html').read()===${JSON.stringify(formatManagedHtml('<h2 style="text-align:center">Keep</h2>'))},'Reentry is raw-exact');
         const showPolish=async raw=>{sendState({...state,fields:[{...field,raw,input:raw,original:raw}]});await wait(()=>visualSources.get('html')?.status('indent').enabled);};
         await showPolish('<p>one One one</p>');
         const tool=name=>document.querySelector('.richtext-tools button[aria-label="'+name+'"]');
@@ -112,6 +113,14 @@ export const richTextFrameTests: readonly IntegrationTest[] = [{
         document.querySelector('input[aria-label="Replace with"]').value='two';q.dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',bubbles:true,cancelable:true}));
         await wait(()=>document.querySelector('.richtext-search [role=status]').textContent.includes('1 of 3'));
         for(const text of ['two One one','two two one','two two two']){document.querySelector('.richtext-search button[aria-label="Replace"]').click();await wait(()=>htmlSources.get('html').read().includes(text));}
+        await showPolish('<p>pro Pro PRO pRo</p>');
+        document.querySelector('.richtext-tools button[aria-label="Replace"]').click();
+        const casingQuery=document.querySelector('input[aria-label="Find in this field"]');casingQuery.value='pro';casingQuery.dispatchEvent(new Event('input'));
+        document.querySelector('input[aria-label="Replace with"]').value='aqua';
+        document.querySelector('input[aria-label="Preserve casing"]').checked=true;
+        await wait(()=>document.querySelector('.richtext-search [role=status]').textContent.includes('of 4'));
+        document.querySelector('.richtext-search button[aria-label="Replace all"]').click();
+        await wait(()=>htmlSources.get('html').read()===${JSON.stringify(formatManagedHtml('<p>aqua Aqua AQUA aqua</p>'))});
         await showPolish('<p>One</p><p>Two</p>');visualSources.get('html').restore({from:1,to:9});await wait(()=>visualSources.get('html').selection().to===9);
         visualSources.get('html').command('insertTable');await wait(()=>htmlSources.get('html').read().includes('<table>'));
         assert((htmlSources.get('html').read().match(/<tr>/g)||[]).length===2,'Each paragraph becomes a row');
