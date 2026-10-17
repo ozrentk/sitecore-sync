@@ -1,5 +1,5 @@
 export interface SearchInput { query: string; matchCase: boolean; direction: "next" | "previous" }
-export interface ReplaceInput extends SearchInput { replacement: string; all: boolean }
+export interface ReplaceInput extends SearchInput { replacement: string; all: boolean; preserveCase?: boolean }
 export interface SearchResult { count: number; index: number; replaced: number }
 export interface Part { from: number; to: number }
 export function validSearchInput(value: unknown): value is SearchInput {
@@ -8,7 +8,7 @@ export function validSearchInput(value: unknown): value is SearchInput {
   return typeof input.query === "string" && input.query.length > 0 && input.query.length <= 1024 && typeof input.matchCase === "boolean" && (input.direction === "next" || input.direction === "previous");
 }
 export function validReplaceInput(value: unknown): value is ReplaceInput {
-  return validSearchInput(value) && typeof (value as ReplaceInput).replacement === "string" && (value as ReplaceInput).replacement.length <= 8192 && typeof (value as ReplaceInput).all === "boolean";
+  return validSearchInput(value) && typeof (value as ReplaceInput).replacement === "string" && (value as ReplaceInput).replacement.length <= 8192 && typeof (value as ReplaceInput).all === "boolean" && ((value as ReplaceInput).preserveCase === undefined || typeof (value as ReplaceInput).preserveCase === "boolean");
 }
 export function validSearchResult(value: unknown): value is SearchResult {
   if (!value || typeof value !== "object") return false;
@@ -25,4 +25,21 @@ export function literalMatches(text: string, input: SearchInput): Part[] {
     matches.push({ from: match.index, to: match.index + match[0].length });
   }
   return matches;
+}
+
+/** Match clear Unicode lower/upper/initial-capital patterns; mixed casing stays as entered. */
+export function replacementText(matched: string, replacement: string, preserveCase = false): string {
+  if (!preserveCase) return replacement;
+  const letters = Array.from(matched).filter(char => char.toLowerCase() !== char.toUpperCase());
+  if (!letters.length) return replacement;
+  if (letters.every(char => char === char.toUpperCase())) return replacement.toUpperCase();
+  if (letters.every(char => char === char.toLowerCase())) return replacement.toLowerCase();
+  if (letters[0] === letters[0].toUpperCase() && letters.slice(1).every(char => char === char.toLowerCase())) {
+    let capitalized = false;
+    return Array.from(replacement.toLowerCase()).map(char => {
+      if (capitalized || char.toLowerCase() === char.toUpperCase()) return char;
+      capitalized = true; return char.toUpperCase();
+    }).join("");
+  }
+  return replacement;
 }

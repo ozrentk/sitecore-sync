@@ -170,3 +170,12 @@ test("repeated single replace automatically selects the next match", () => {
   }
   strictEqual(raw(value), '<p>two two two</p>');
 });
+
+test("preserve casing applies independently and repeated replacement advances", () => {
+  let value = state('<p>pro Pro PRO pRo</p>', 'pro', 0, 3);
+  const input = { query: 'pro', matchCase: false, direction: 'next' as const, replacement: 'aqua', preserveCase: true, all: false };
+  for (let i = 0; i < 4; i++) value = value.apply(replaceVisual(value, input).transaction);
+  strictEqual(raw(value), '<p>aqua Aqua AQUA aqua</p>');
+  value = state('<p><span title="keep">pro Pro PRO</span></p>', 'pro');
+  strictEqual(raw(value.apply(replaceVisual(value, { ...input, all: true }).transaction)), '<p><span title="keep">aqua Aqua AQUA</span></p>');
+});

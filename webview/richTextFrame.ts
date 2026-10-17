@@ -1,4 +1,4 @@
-import { literalMatches, validSearchResult, type SearchInput, type ReplaceInput, type SearchResult } from "../src/editor/richTextSearchInput";
+import { replacementText, literalMatches, validSearchResult, type SearchInput, type ReplaceInput, type SearchResult } from "../src/editor/richTextSearchInput";
 import type { createVisual } from "./richTextVisual";
 import type { RichLinkDestination } from "../src/editor/richTextLinks";
 import { frameState, frameLinkInfo } from "../src/editor/richTextFrameProtocol";
@@ -101,4 +101,4 @@ function createFrame(element: HTMLElement, initial: string, callbacks: Callbacks
     },
   };
 }
-Object.assign(globalThis, { createRichTextFrame: createFrame, richTextSearchTools: { literalMatches } });
+Object.assign(globalThis, { createRichTextFrame: createFrame, richTextSearchTools: { literalMatches, replacementText } });

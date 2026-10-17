@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.56.0 — 2026-10-17
+
+- Add optional Preserve casing to Replace in Visual and HTML: pro/Pro/PRO becomes aqua/Aqua/AQUA. Mixed casing uses the replacement as entered.
+- Deeply indent generated Visual HTML with tags and text on separate lines. Normalize inline boundary whitespace and NBSP-only paragraphs as requested; retain opaque/preformatted content and leave untouched/manual HTML unchanged.
+
 ## 0.55.0 — 2026-10-17
 
 - Use a struck S icon and improve grouping, spacing and Match case labeling in the inline search bar; remove Show replacement from Find mode.

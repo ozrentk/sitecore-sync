@@ -35,6 +35,10 @@ Before starting, [install the extension and have your CM URL and automation-clie
 | Understand language selection and fallback | [Languages and fallback](docs/languages-and-fallback.md) |
 | Run a task plug-in or connect an agent | [Plug-ins](docs/plugins.md) · [MCP](docs/mcp.md) |
 
+Changed Visual HTML uses two-space indentation for nested tags and text; inline boundary spacing is normalized, while untouched/manual source remains unchanged.
+
+Replace offers an optional **Preserve casing** checkbox in Visual and HTML. Each match independently follows lowercase, UPPERCASE or Initial capital (for example, pro/Pro/PRO → aqua/Aqua/AQUA). Mixed casing uses the replacement as entered. This uses Unicode casing, not locale-specific linguistic rules; Match case remains a separate search option.
+
 ## Help and project information
 
 Use [Troubleshooting and support](docs/troubleshooting.md) for diagnostic steps and known limitations, or browse the [documentation index](docs/README.md).

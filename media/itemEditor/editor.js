@@ -398,6 +398,8 @@ function renderHtmlSource(row, field) {
   const findRow = document.createElement("div"); const replaceRow = document.createElement("div"); replaceRow.hidden = true;
   const query = document.createElement("input"); query.type = "text"; query.maxLength = 1024; query.placeholder = "Find in this field"; query.setAttribute("aria-label", "Find in this field");
   const replacement = document.createElement("input"); replacement.type = "text"; replacement.maxLength = 8192; replacement.placeholder = "Replace with"; replacement.setAttribute("aria-label", "Replace with");
+  const preserveCase = document.createElement("input"); preserveCase.type = "checkbox"; preserveCase.setAttribute("aria-label", "Preserve casing");
+  const preserveLabel = document.createElement("label"); preserveLabel.className = "richtext-match-case"; preserveLabel.title = "Match lowercase, UPPERCASE or Initial capital; mixed casing uses your replacement as entered"; preserveLabel.append(preserveCase, "Preserve casing");
   const matchCase = document.createElement("input"); matchCase.type = "checkbox";
   const caseLabel = document.createElement("label"); caseLabel.className = "richtext-match-case"; caseLabel.title = "When checked, uppercase and lowercase must match exactly"; matchCase.setAttribute("aria-label", "Match case"); caseLabel.append(matchCase, "Match case");
   const searchStatus = document.createElement("span"); searchStatus.className = "richtext-search-count"; searchStatus.setAttribute("role", "status");
@@ -430,7 +432,7 @@ function renderHtmlSource(row, field) {
       if (!query.value) { editor?.clearSearch(); paintSource([]); searchStatus.textContent = ""; return; }
       const request = input(direction); let result;
       if (editor) {
-        result = operation === "refresh" ? await editor.highlightSearch(request) : operation === "find" ? await editor.search(request) : await editor.replaceSearch({ ...request, replacement: replacement.value, all: operation === "all" });
+        result = operation === "refresh" ? await editor.highlightSearch(request) : operation === "find" ? await editor.search(request) : await editor.replaceSearch({ ...request, replacement: replacement.value, preserveCase: preserveCase.checked, all: operation === "all" });
       } else {
         await source.finishComposition();
         if (epoch !== searchEpoch || blocked || !row.isConnected) return;
@@ -439,11 +441,12 @@ function renderHtmlSource(row, field) {
         if (operation === "one" || operation === "all") {
           const selected = operation === "all" ? matches : matches.filter(match => match.from === from && match.to === to);
           if (!selected.length && operation === "one") throw new Error("Find a match before replacing it. The selection may have changed.");
-          for (const match of [...selected].reverse()) raw = raw.slice(0, match.from) + replacement.value + raw.slice(match.to);
+          const replacements = selected.map(match => ({ ...match, text: richTextSearchTools.replacementText(raw.slice(match.from, match.to), replacement.value, preserveCase.checked) }));
+          for (const match of [...replacements].reverse()) raw = raw.slice(0, match.from) + match.text + raw.slice(match.to);
           if (raw.length > htmlSourceTools.limit) throw new Error("Replacement exceeds the HTML size limit.");
           matches = richTextSearchTools.literalMatches(raw, request); // Validate the entire result before any draft change.
           const resume = selected[0]?.from ?? 0;
-          source.replace(raw); replaced = selected.length; from = to = operation === "one" ? resume + replacement.value.length : 0;
+          source.replace(raw); replaced = selected.length; from = to = operation === "one" ? resume + (replacements[0]?.text.length ?? 0) : 0;
         }
         let index = matches.findIndex(match => match.from === from && match.to === to);
         if (["find", "one"].includes(operation) && matches.length) {
@@ -474,7 +477,7 @@ function renderHtmlSource(row, field) {
   findRow.append(query, navigation); actionButton(navigation, "Previous match", () => void runSearch("previous"), "previousMatch"); actionButton(navigation, "Next match", () => void runSearch(), "nextMatch");
 
   findRow.append(caseLabel, searchStatus); actionButton(findRow, "Close search", () => closeSearch(), "cancel");
-  replaceRow.append(replacement); actionButton(replaceRow, "Replace", () => void runSearch("next", "one"), "replace"); actionButton(replaceRow, "Replace all", () => void runSearch("next", "all"), "replace");
+  replaceRow.append(replacement, preserveLabel); actionButton(replaceRow, "Replace", () => void runSearch("next", "one"), "replace"); actionButton(replaceRow, "Replace all", () => void runSearch("next", "all"), "replace");
   searchBar.append(findRow, replaceRow);
   for (const node of [query, matchCase]) node.addEventListener("input", refreshSearch);
   control.addEventListener("input", refreshSearch);

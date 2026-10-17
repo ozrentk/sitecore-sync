@@ -1,6 +1,6 @@
 import { findVisual, replaceVisual, visualMatches } from "../src/editor/richTextSearch";
 import { Decoration, DecorationSet } from "@tiptap/pm/view";
-import { literalMatches, type SearchInput, type ReplaceInput } from "../src/editor/richTextSearchInput";
+import { replacementText, literalMatches, type SearchInput, type ReplaceInput } from "../src/editor/richTextSearchInput";
 import { richMarkTags } from "../src/editor/richTextMarks";
 import { formatManagedHtml } from "../src/editor/richTextFormatting";
 import { Editor, Node, Mark, Extension, type JSONContent } from "@tiptap/core";
@@ -239,4 +239,4 @@ export function createVisual(element: HTMLElement, initial: string, callbacks: C
   };
 }
 
-Object.assign(globalThis, { createRichTextVisual: createVisual, richTextSearchTools: { literalMatches } });
+Object.assign(globalThis, { createRichTextVisual: createVisual, richTextSearchTools: { literalMatches, replacementText } });
