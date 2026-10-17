@@ -1,5 +1,15 @@
 # XM Cloud Sync backlog
 
+### Bounded styled Rich Text surface (0.52.0)
+
+- The styled-editing portion of 3D now uses an isolated Visual frame and bounded stored CSS projection, preserving original HTML/CSS, host escape, native history and revision-pinned freeze/Save. Unsupported styling remains in source; no external resources execute or load.
+- Media/DAM selection, arbitrary mixed containers, formatted paste and universal website fidelity remain separate. B24/B25 still cover broader item-editor work. Native IME, assistive-technology and live-save acceptance are not claimed. B32 toolbar/application icons are completed in 0.53.0 below.
+
+### Rich Text command completeness (0.51.0)
+
+- Added guarded paragraph/heading and alignment controls, B/I/U active states, bullet/numbered lists, list indent/outdent, quotes and plain-mark clearing. Keyboard and toolbar paths share the same preservation checks; see [the supported profile](docs/item-editor.md#formatting-commands-lists-and-quotes-0510).
+- B31 and 3C were integrated in 0.50.1. B24/B25 remain partial for 3D broader styling/media, arbitrary mixed containers/lists and formatted paste. Native IME/accessibility and live save acceptance are still outstanding; no live writes or publishing are part of this increment.
+
 Consolidated planning inventory as of 2026-09-14, reviewed against version 0.20.0. Unchecked entries are outstanding, not a commitment to implement them in this order. Product requirements remain in [PRODUCT_SPEC.md](PRODUCT_SPEC.md); completed release details are in [CHANGELOG.md](CHANGELOG.md).
 
 Status: B01–B06 are explicit TODOs; B07–B15 are deferred enhancements; B16 is a known limitation; B17 is documentation cleanup; B18 has a session foundation, single-tree navigation, read-only details/actions and mode switching; full integrated acceptance remains pending. Grouping does not change their priority or scope.
@@ -10,7 +20,7 @@ Also recorded: B22–B29 cover environment database/IAR diagnostics, finishing P
 
 ## Publishing and delivery verification
 
-- [ ] **B31 — General Link destination focus/expansion regression (0.45.0 release verification).** The VS Code 1.100.0 integration test `structured field webview supports name/value rows and safe General Link forms with pinned item picker` repeatedly fails at “Destination focus must expand inline.” Diagnostic evidence shows the destination is connected, in an open section, and is the active element, while `.link-form` remains hidden. A bounded wait did not resolve the failure. This is a confirmed automated-test failure; reproduction during normal user interaction and the underlying cause remain unverified. Investigate webview focus-event delivery and the expansion handler, manually check mouse and keyboard navigation plus the explicit expand button, and restore a passing integration test without bypassing the assertion. No save corruption was observed, but this failure prevents the remainder of that structured-field test from completing. Other integration tests, unit tests, packaging, secret scans and packaged activation checks do not replace that missing coverage. Recorded 2026-10-16; the user explicitly accepted this known issue for the local 0.45.0 release and deferred the fix on 2026-10-16.
+- [x] **B31 — General Link destination focus/expansion.** Reproduced background-webview focus in VS Code 1.100.0: activeElement changed without focus/focusin events. Tests now establish actual foreground focus and exercise restoration; destination clicks also expand an already-focused control. The original expansion assertion and remaining structured-field checks pass. Current CI/test exception removed; historical v0.45.0 release evidence is retained. Fixed 2026-10-16.
 
 - [ ] **B12 — Automatic publishing after synchronization.** Design an optional workflow that publishes after successful synchronization.
 - [ ] **B13 — Authenticated Vercel integration.** Explore project APIs, protected-deployment access, cache invalidation and deployment logs. Configured deployment URLs already work; automatic deployment-URL discovery is not implemented and is a possible extension, not an approved requirement.
@@ -62,7 +72,21 @@ Also recorded: B22–B29 cover environment database/IAR diagnostics, finishing P
 
 **Implementation acceptance.** Verify opening with one configured connection; search and details in Browse; publishing and task availability; absence of diff/transfer controls; first-time partner selection and cancellation; remembered partner/language after reload; deleted partners and unavailable languages; same-connection cross-language comparison; explicit language-lock behavior; and state restoration during cancelled or superseded loading. Use domain tests and extension-host checks where appropriate, plus focused manual checks for tree layout, keyboard access and mode transitions. Subtasks #1–#4 are delivered; full integrated acceptance remains in #5.
 
+## Page-link exploration
+
+- [ ] **B33 — Interactive outgoing page-link cloud (discovery/performance spike first).** Plan a cloud-style graph for the selected connection, site and language, with pages as nodes and directional navigation links as edges. Initially show the selected page; clicking another page incrementally expands its outgoing neighbours. Use effective language content, resolving applicable fallback underneath without fallback-specific node/edge styling or provenance clutter. The user-facing purpose is to understand the effective link shape, not fallback mechanics. This remains exploratory/planned work, not authorization to implement the feature.
+
+  Include General Link and Rich Text internal navigation links, plus supported links found in component datasources attributed to their consuming pages. Reuse or coordinate with B27's effective page/component/reference traversal where applicable; this is an implementation dependency/opportunity, not permission to turn every reference or Treelist relationship into a navigation edge. Incoming links are excluded entirely from this initial feature (B34).
+
+  Offer an optional **Include inferred links** checkbox, off by default. Match stored public URLs against known site hosts and cached routes using cheap local/cached work during expansion. Application-generated destinations may be inferred only where stored content and known routing rules determine them. Do not crawl sites, render browsers or run network-heavy heuristic discovery. Runtime-only links and whole-site graph generation are deferred. Optional node actions such as Browse, Edit and Open public page are proposals, not decided scope.
+
+  Fast interaction is a key requirement: bounded cancellable expansion, cycle handling, deduplication and cached results scoped to the selected context. Make unavailable or incomplete discovery clear without claiming completeness. Before choosing a graph library, run a small discovery/performance spike to measure accessible outgoing references, datasource-to-page attribution, effective-locale behavior and response cost. Investigate Link Database as a possible primary outgoing discovery source; do not assume API availability, speed, selected-language/effective semantics or complete navigation-link coverage without evidence.
+
+- [ ] **B34 — Incoming page-link discovery (deferred, separate from B33).** Assess the availability and measured cost of reverse-reference APIs or an index before proposing incoming-link exploration. Establish page/datasource attribution, navigation-versus-generic-reference filtering, effective-language semantics, cache/invalidation needs and bounded query behavior. Do not add reverse scans or incoming-link loading to B33's initial expansion flow. No reverse-reference API, index, performance or completeness guarantee is assumed; any implementation needs a separate scope decision.
+
 ## Editors and publishing integration
+
+- [x] **B32 — Consistent action icons across the application (0.53.0).** Audit buttons in Browse/Compare, item editors, connection/settings panels and other webviews, including Save, Revert, Preview and Clear. Define a shared action-to-icon mapping so the same action uses the same icon everywhere. Delivered with a compact grouped Rich Text toolbar; this does not make all buttons icon-only: retain text where it improves clarity, provide accessible names and tooltips for icon-only actions, preserve keyboard/focus behavior, and verify theme/high-contrast legibility.
 
 - **Stage A delivery (0.36.0):** B24/B25 now have an ordinary-item Edit… entry, pinned custom-editor tabs, the seven basic field types, Save/Revert, conflict checks, readback, local journals and native dirty/backup handling. B24/B25 remain open for Stage B link/relation/list controls and B26 verified fallback-source editing. Rich Text remains deferred pending both visual and HTML source modes. B27 page tree and B29 editor publishing are unchanged. Automated tests use synthetic content; live Sitecore save acceptance remains to be performed.
 - [ ] **B24 — Component/item editor: first development step.** Build an editor screen for ordinary items and component datasource items, with locale selection. Initially support non-document fields in the Simple Field Types, Link and Relation Field Types, and Multi-Value and List Field Types categories. Exclude file/image/media editing, Media and Complex Field Types, and Developer and System Field Types for now. Define the exact Sitecore field-type allowlist and controls during planning; excluded fields must not be accidentally changed on save.
@@ -164,7 +188,38 @@ Use this file as the single backlog inventory. Add newly agreed work here, prese
 - Media Library references without URLs resolve names/paths only. SVG/private/custom-CDN previews remain unavailable with retained evidence; no URL guessing, uploads, asset selection, Content Hub credentials, Rich Text editor or publishing expansion.
 - Read-only Dev evidence verified Content Hub mappings and a public JPEG. Isolated tests cover security boundaries, stale results, connection changes, raw preservation and failed previews. No Sitecore mutations. B27 remains separate.
 
+### Rich Text managed links — 3C (0.50.0)
+
+- Deliver bounded Visual link creation, destination editing and removal, with a content-root picker, atomic href/matching identity updates and retained nested formatting. New internal targets are validated before Save; stale forms/replies cannot apply.
+- The live read-only sample confirmed the documented `~/link.aspx?_id=…&_z=z` form. The optional matching `data-sc-id` profile is synthetic compatibility coverage, not a claim that all Sitecore links use it. Unknown/custom/DAM/image links remain HTML-only for destination/removal.
+- B24/B25 remain partial for 3D broader styling/media, lists and formatted paste. Native IME/accessibility and live save acceptance remain outstanding. No Sitecore writes or publishing performed.
+
+### Rich Text table increment — 3B (0.49.0)
+
+- Bounded production tables now support caption/cell typing, row/column insertion, empty row/column deletion, multi-cell merge/split, retained explicit sections/colgroups and overflow wrappers. See [the table profile and command restrictions](docs/item-editor.md#tables-0490).
+- Metadata-bearing row/cell structural edits, column changes across sections/colgroups, populated-cell merges/deletions, nested/ragged/implicit-section tables and section/column-definition editing remain HTML-only. These are explicit preservation policies, not blanket table support.
+- B24/B25 remain partial. 3C managed links and 3D broader styled-container/media editing are separate next increments; formatted paste, native IME/accessibility and live save acceptance remain outstanding.
+
+### Rich Text nested-span increment (0.48.0)
+
+- The supplied centered finance-content example now fits the bounded Visual profile. Recursive inline span nodes preserve nesting, classes and original style tokens through text/formatting edits; heading levels, spacing and the blank paragraph are retained.
+- Only literal single-declaration text alignment is projected using scoped bundled rules. No arbitrary CSS/classes are applied to editor chrome or fetched externally. Identity-bearing markup stays HTML-only; span loss/duplication/reparenting and attributed-block split/join remain guarded.
+- Richer containers, repeated direct formatting, lists/tables, managed references, formatted paste and visual media remain separate work. Native IME/accessibility and live Sitecore save acceptance remain outstanding.
+
+### Rich Text basic Visual implementation details (0.47.0)
+
+- Custom Tiptap paragraphs/headings, basic emphasis, line breaks and plain-text paste now use the HTML source draft and existing persistence/history pipeline. Token-aware admission and transaction guards keep unsupported content HTML-only and retain opaque CSS/images and protected attributes.
+- Remaining work includes richer spans/containers, managed links/identity policies, lists/tables, visual media editing, formatted paste, broader accessibility/native IME acceptance and site-specific content profiles. Styling is displayed in isolated Preview, never applied to trusted visual-editor chrome.
+
+### Rich Text HTML source implementation details (0.46.0)
+
+- Adds HTML source editing and isolated read-only Preview for eligible ordinary-item fields. Raw source stays authoritative; mixed newlines, no-op mode switches, native history, pending-input freeze, backup and the existing Save pipeline are covered by synthetic tests.
+- B24/B25 remain partial: Tiptap visual editing and token-aware admission, managed reference/identity policies, media, complex tables and fallback/page editing remain separate work. No live Sitecore writes are part of this implementation.
+- B31 remains an independent integration failure; its v0.45.0 release exception is not extended.
+
 ### Rich Text editing compatibility spike (2026-10-16)
+
+- Current implementation guidance: [Rich Text editor development guide](docs/development/rich-text-editor.md). The [custom-adapter follow-up](docs/research/custom-richtext-compatibility-spike.md) closes tested structural gaps in both Tiptap and direct ProseMirror; Tiptap remains preferred. The subsequent HTML-source step is recorded below; visual identity/command policies and production integration remain required.
 
 - [Evidence and proposed implementation split](docs/research/richtext-compatibility-spike.md): conditional go for MIT Tiptap + CodeMirror with exact raw HTML drafts and HTML-only fallback; no-go for unrestricted stock HTML round-tripping.
 - Four read-only live Dev samples and 14 synthetic fixtures expose custom-attribute loss, table/CSS changes, link defaults, strict-CSP alignment loss and default source newline normalization. No content writes or editing capability delivered.
@@ -175,3 +230,13 @@ Use this file as the single backlog inventory. Add newly agreed work here, prese
 - [Matched-schema comparison](docs/research/prosemirror-compatibility-spike.md): custom attribute/span adapters improve preservation, but direct ProseMirror and Tiptap with the same schema/serializer produce identical results across 15 synthetic and four live read-only cases.
 - Switching libraries alone does not solve HTML preservation. Characterized old-link-URL retention, duplicated IDs after paragraph splitting and flattened nested spans; adapter commands need explicit metadata policies.
 - Keep the exact raw-draft architecture and compatibility gate. No production editor changes, mutations or release were made.
+
+
+### Rich Text formatting/search/history increment (0.54.0)
+
+Implemented horizontal rule, strikethrough, subscript/superscript; two toolbar rows; field-scoped inline literal Find/Replace in Visual and authoritative HTML with transient highlights and atomic guarded replacements; explicit native Undo/Redo. See [behavior and limits](docs/item-editor.md#formatting-findreplace-and-history-0540). Broader arbitrary HTML, formatted paste, native IME/accessibility and live-save acceptance are not closed by this increment. B31 remains independent.
+
+
+### Rich Text editing polish (0.55.0)
+
+Addressed struck-S icon, paragraph indentation, readable generated HTML, consecutive Replace, removal of Show replacement, grouped controls, distinct functional Match case, paragraph-to-table rows, populated row/column deletion and whole-table deletion. See [limits](docs/item-editor.md#editing-refinements-0550). Merged-cell row/column edits, complex margin CSS, native IME/accessibility and live-save acceptance remain bounded or unverified.

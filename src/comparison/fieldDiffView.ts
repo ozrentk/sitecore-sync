@@ -1,3 +1,4 @@
+import { withActionIcons } from "../ui/webviewActions";
 import { randomBytes } from "node:crypto";
 import { fieldPresentation } from "../sitecore/fieldPresentation";
 import * as vscode from "vscode";
@@ -71,7 +72,7 @@ export class FieldDiffViewProvider implements vscode.WebviewViewProvider, vscode
       enableScripts: true,
       localResourceRoots: [mediaUri, vscode.Uri.joinPath(this.extensionUri, "media", "shared")],
     };
-    view.webview.html = this.html(view.webview, mediaUri);
+    view.webview.html = withActionIcons(view.webview, this.html(view.webview, mediaUri), this.extensionUri);
     this.disposables.push(
       view.onDidChangeVisibility(() => {
         if (view.visible) {

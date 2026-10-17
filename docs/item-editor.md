@@ -18,10 +18,77 @@ Right-click an ordinary content or component datasource item in **Browse**, or o
 | Name Value List | Read/write valid encoded rows. |
 | General Link | Read/write supported ordinary links; custom/DAM destinations stay protected. |
 | Image, File | Read-only metadata and on-demand supported previews. |
-| Rich Text | Read-only sandboxed preview and original HTML. |
+| Rich Text | Read/write HTML source, guarded basic Visual mode and read-only sandboxed Preview. |
 | Other or unsupported field representations | Read-only; the reason remains visible. |
 
 Eligibility also depends on an existing exact-locale version, valid metadata and the editor's page/system/fallback protections. A supported type alone does not make every field writable.
+
+## Rich Text HTML source
+
+Eligible ordinary-item Rich Text fields open in **HTML** mode. Edit the source directly, choose **Visual** for supported basic markup, use **Preview** to inspect the current draft, and use the ordinary **Save** workflow. Preview is read-only, script-free and isolated; it blocks external requests and navigation. It is not a website preview or a visual editor. Item Details remains read-only.
+
+Opening a field or switching between HTML and Preview does not serialize or change its source. The raw draft preserves comments, malformed markup, attributes, whitespace and mixed CRLF/LF/lone-CR line endings. The textarea displays normalized line breaks while retaining the original raw string separately. Newly typed line breaks use the nearest preceding convention, then the first existing convention, or LF. Pasted/dropped plain text preserves the string supplied by the browser; external clipboard software may itself normalize text. Drops insert at the current selection. **Clear** stores an explicit empty value.
+
+Source editing is limited to 1,048,576 UTF-16 code units per field. Larger stored values remain read-only, and an oversized edit is rejected without truncating the draft. The preview has a separate 262,144-character limit and structural limits; an unavailable preview never alters source. Scripts and unsupported display content remain in the raw draft but cannot execute in Preview.
+
+Save synchronizes pending edits and composition input with the current panel/revision before freezing the controls. If composition cannot finish, Save stops and preserves the draft. Native Undo/Redo, backup, conflicts, journaled non-retried writes and numbered-version readback use the same item-editor pipeline. Server-side rewriting is not silently normalized away to claim a successful exact readback.
+
+## Rich Text basic Visual mode
+
+Visual supports paragraphs, headings, nested inline spans, bold/italic/underline, line breaks and the bounded lists and quotes described below. Span wrappers, classes and style attributes survive text edits and formatting across boundaries. Type, select text and use **Bold**, **Italic**, **Underline** or Ctrl/Cmd+B/I/U; Enter splits ordinary paragraphs and Shift+Enter inserts a line break. Operations that would split, flatten or remove protected spans/attributes are refused; use HTML for those changes. Ctrl/Cmd+Z and redo use the same VS Code draft history as HTML mode. There is no separate visual undo stack.
+
+Original source tokens are checked before admission. Parser repairs, duplicate attributes, comments, identity/managed-reference attributes outside the table/link profiles and directly repeated same-type formatting remain HTML-only with a reason. Some other structures may also be refused when the visual representation would alter them. HTML remains available; rejection does not clear or repair the draft.
+
+Visual runs in an isolated editable frame (0.52.0). Supported stored inline CSS and embedded stylesheet rules display typography, colors, alignment, spacing, borders and bounded dimensions. Classes and admitted IDs are projected inside that frame; they never style the surrounding controls. Simple tag/class/ID selectors and combinators are supported. External stylesheets, fonts, images, CSS resource URLs, animations, positioning, custom properties, pseudo/attribute selectors and at-rules are not applied. Use Preview for fuller stored styling; neither mode fetches website resources or promises website-identical rendering. Original CSS, including unsupported declarations, remains unchanged in HTML. Table/link helper DOM can differ from website DOM, affecting selectors.
+
+The styled projection is limited to 256 rules and 32,768 CSS characters, selectors of 256 characters, declaration values of 256 characters and numeric magnitudes up to 4,096. Unsupported/over-limit styling is omitted only from the display, never removed from the draft. Images/DAM content remain inert placeholders. Visual operations that remove/change opaque content, span nesting or protected attributes are rejected, including ambiguous joins/splits of attributed blocks. Media editing remains unavailable; the bounded link controls are described below.
+
+The frame can be resized vertically. The toolbar and HTML control remain outside source styling; Escape returns focus to HTML, and Ctrl/Cmd+S uses the ordinary Save flow. Mode switching and Save wait for the frame to finish composition and acknowledge its current draft. Failed initialization keeps HTML available without enabling frame input. Disposal/reopening invalidates old frame replies. The frame has no same-origin access, scripts from content never run, and external requests, navigation and forms are blocked. The separate Preview remains script-free.
+
+Unchanged Visual/HTML/Preview switches preserve exact raw HTML. After a real visual edit, text entity spelling and text-node line endings may be canonicalized, and formatting wrappers may be split or merged by the requested operation. Original element attribute syntax and opaque fragments remain retained. Undo to the entry state restores its exact original source. Use HTML when lexical fidelity through edits is required.
+
+Plain-text paste is supported. Formatted clipboard HTML and drag/drop are rejected as a whole; use plain-text paste or HTML mode. Visual admission is limited to 262,144 characters, 5,000 nodes and 40 levels. These bounds do not truncate the HTML draft. Visual has basic document formatting, not website-identical rendering.
+
+### Formatting commands, lists and quotes (0.51.0)
+
+Use **Text block type** for Paragraph or Heading 1–6, and **Text alignment** for Left, Center, Right or Justify. Ctrl/Cmd+Alt+0 selects Paragraph; Ctrl/Cmd+Alt+1–6 selects a heading. Active controls reflect the selection; mixed block types/alignment have no single selected value. Unavailable actions explain why in their tooltip or status message. Selecting an already-active block type or alignment leaves its source unchanged.
+
+**Bullets** and **Numbers** wrap adjacent paragraphs/headings or change a plain list's type. Ctrl/Cmd+Shift+8 and Ctrl/Cmd+Shift+7 are the corresponding shortcuts. **Indent/Outdent** (Tab/Shift+Tab) move list items; they do not add arbitrary margins to paragraphs. Enter splits a list item; Enter on an empty item or Backspace at its start outdents it. Toggling the current list type also lifts the selected item. The first item cannot indent without a preceding sibling.
+
+The list profile supports explicit `ul`/`ol`/`li`, nested lists and one text block per item: inline text, a paragraph or a heading, followed by optional nested lists. Existing ordered-list starts and reversed numbering are retained. Multiple paragraphs per item, lists inside table cells and identity-bearing list elements remain HTML-only. Plain inline list text stays inline on untouched switches; explicitly lifting or changing its block type creates a paragraph/heading. List metadata that would be lost, duplicated or reinterpreted prevents the command.
+
+**Quote** wraps document paragraphs/headings and removes a plain quote wrapper around directly selected text. Quotes can retain nested lists and quotes; commands that would remove attributed wrappers or restructure nested list/cell content require HTML. Inter-block whitespace is retained while wrapping; subsequent structural edits can move structural indentation. Untouched switches remain raw-exact.
+
+Alignment changes require no existing style or a single recognized literal text-alignment declaration; combined/arbitrary CSS remains available in HTML. **Clear formatting** removes only plain bold, italic and underline. It retains links, CSS and structural wrappers, and refuses removal of annotated formatting. Original CSS and media remain inert; these controls do not add arbitrary styling or media editing.
+
+### Tables (0.49.0)
+
+The [0.55.0 refinements](#editing-refinements-0550) extend the original behavior below with paragraph conversion and explicit populated-row/column/table deletion.
+
+Visual mode supports rectangular tables with explicit `thead`, `tbody` and/or `tfoot` sections, an optional leading caption, column definitions and an optional top-level `div` containing only the table. Each section appears as a separate grid in the editing surface. Original wrapper/section tags, IDs, classes, styles, dimensions, header/scope metadata and spans are retained in exported HTML; original styles and IDs are not applied to editor chrome. Use Preview to inspect stored styling.
+
+To create a table, place the cursor in the document and choose **Table → Insert table (2 × 2)** (added in 0.49.1). It inserts after the current top-level paragraph/block, preserves existing content and focuses the first cell. It never nests a table or replaces selected text; collapse a text selection first. Use row and column insertion to resize it.
+
+Place the cursor in a cell and open **Table** for row/column insertion, empty-row/column deletion, merge/split and **Add / edit caption**. Drag across cells to select them. Captions and cell text support ordinary typing and formatting. The commands have deliberate limits:
+
+- Structural edits require rows and cells without attributes other than row/column spans. Cells with IDs, `headers`, `scope`, styles or other metadata remain text-editable, but structural changes require HTML.
+- Merge requires cells of the same header/data type, within one section, with at most one populated cell. Populated content is never silently discarded or combined.
+- Delete accepts only empty cells and cannot remove an entire section. Clear or move content explicitly first; deleting an entire section/table requires HTML.
+- Column changes require a single section and no `colgroup`. Column definitions are retained, but edited in HTML. Row operations remain available where their metadata policy permits.
+- Spans cannot cross section boundaries. Each section is limited to 100 rows and 100 columns. Ragged, nested or parser-repaired tables (including omitted `tbody`) stay HTML-only.
+- Originally inline cell content remains inline. Use Shift+Enter for a line break; Enter is refused if it would invent paragraph wrappers. Cells with existing explicit paragraphs can retain that structure.
+
+Unchanged mode switches preserve exact raw HTML. Structural commands intentionally change the selected grid and may change its indentation/span attribute spelling. Formatted paste/drop, arbitrary container editing and visual media editing remain outside this profile. Save, native host undo/redo and backups use the same ordinary-item workflow.
+
+### Links (0.50.0)
+
+Select text within one inline container and choose **Link** to create a link. Place the cursor inside an existing link and choose **Link** to edit its destination or **Remove link**. Whole nested spans/formatting can be selected together; selections crossing partial containers, existing links or images are refused. Links are underlined in Visual but never navigate.
+
+Choose **URL** for HTTP(S), a root-relative path, a single `mailto:` address or a `#fragment`. Choose **Sitecore item** to browse accessible items under `/sitecore/content` on this editor's pinned connection and language, then **Apply link**. Existing internal targets initially show their stored ID; choosing an item displays its label and path tooltip. This is content selection, not a guarantee that a public page is published or that the target has a version in this locale. Newly introduced supported internal targets are verified again before Save; unavailable targets stop the write and preserve the draft. Existing unchanged references need not resolve merely to edit surrounding text.
+
+The supported Sitecore form is `~/link.aspx?_id=GUID&_z=z`, with an optional fragment. An existing matching `data-sc-id` mirror is updated atomically. Changing to a URL removes that associated identity. Anchor text, nested formatting and unrelated class/style/title/target/rel attributes are retained. Removing a link retains styling/title in a span when necessary. Modified href/identity attribute quoting can normalize; untouched modes remain raw-exact.
+
+Conflicting identities, extra managed/query metadata, DAM/media variants and image links keep destination/removal controls disabled with an HTML instruction. Executable/local-resource links prevent Visual admission. HTML remains authoritative and available. Reopen Link after changing the document or selection; mode switches, Save freezing and panel replacement discard pending link forms and stale choice replies.
 
 ## Basic values and clearing
 
@@ -33,7 +100,7 @@ Datetime controls display **UTC**, with no browser-local conversion, and write S
 
 **Save** (also Ctrl+S) requires native confirmation before contacting Sitecore, including when autosave invokes it. The warning explains shared/unversioned impact and explicit overrides. The editor checks identity, numbered version, template and changed-field values/metadata again before writing, then reads back the same version. This is not an atomic compare-and-set: concurrent server edits can still occur between requests. No mutation is retried automatically. An uncertain or partial save preserves the draft and exposes **Check save outcome**; unresolved outcomes block further writes. Save failures identify the operation stage and safe error details; raw server responses are omitted. **Revert** reloads the pinned version and discards the draft, not the remote write.
 
-VS Code custom-document dirty tabs, close/save/discard prompts and backups protect drafts. Content snapshots and save journals are stored locally in the extension's global storage, with dirty backups managed by VS Code; they contain item content, not credentials. Draft edits participate in VS Code Undo/Redo; each completed reorder is one edit. Undo after Save changes the draft only and needs another confirmed Save to affect Sitecore. Revert reloads content and ends the previous draft history; backups preserve draft values, not the full undo history. Rich Text and media remain read-only; system fields and page presentation editing are unsupported. Missing exact-locale versions and fallback-derived fields are read-only; choosing another existing locale is explicit, never an inferred fallback write. Page-tree editing and publishing from the editor are not available; use [tree publishing](publishing.md).
+VS Code custom-document dirty tabs, close/save/discard prompts and backups protect drafts. Content snapshots and save journals are stored locally in the extension's global storage, with dirty backups managed by VS Code; they contain item content, not credentials. Draft edits participate in VS Code Undo/Redo; each completed reorder is one edit. Undo after Save changes the draft only and needs another confirmed Save to affect Sitecore. Revert reloads content and ends the previous draft history; backups preserve draft values, not the full undo history. Rich Text supports HTML source editing; media remains read-only. System fields and page presentation editing are unsupported. Missing exact-locale versions and fallback-derived fields are read-only; choosing another existing locale is explicit, never an inferred fallback write. Page-tree editing and publishing from the editor are not available; use [tree publishing](publishing.md).
 
 ## Field labels, groups and information
 
@@ -71,7 +138,7 @@ Save rereads the pinned exact-locale version and Source metadata, rejects value/
 
 **General Link** supports ordinary internal, external HTTP(S), email and anchor links. The form exposes applicable destination, text, title, target, CSS class, anchor and internal query-string properties. Internal destinations use the existing bounded tree picker on the editor's pinned connection/locale. A verified empty Source browses `/sitecore/content`; explicit absolute Source paths/IDs restrict the tree. The current Source item can also be chosen. New destinations are resolved and checked against fresh Source metadata before Save; retained unresolved IDs survive unrelated edits. Unsupported or unavailable Sources disable editing.
 
-The General Link control uses Sitecore item / External URL / Email / Anchor radio buttons, one destination control and an inline properties chevron. Expanded properties are inset with surrounding spacing to group them within the field. Destination focus/click, type changes or the chevron are intended to expand properties (see the [known B31 issue](troubleshooting.md#general-link-properties-b31)); moving between inputs never collapses them. A collapsed summary shows non-default text/title/target/class/anchor/query properties. Validation errors keep properties expanded. Arrow keys, Home/End and Space/Enter operate the type buttons. Internal destinations display the Sitecore path and retain the existing Source-aware picker.
+The General Link control uses Sitecore item / External URL / Email / Anchor radio buttons, one destination control and an inline properties chevron. Expanded properties are inset with surrounding spacing to group them within the field. Destination focus/click, type changes or the chevron expand properties, including clicks on an already-focused destination and focus restored after returning to the webview; moving between inputs never collapses them. A collapsed summary shows non-default text/title/target/class/anchor/query properties. Validation errors keep properties expanded. Arrow keys, Home/End and Space/Enter operate the type buttons. Internal destinations display the Sitecore path and retain the existing Source-aware picker.
 
 Type switching keeps common text/title/target/class values and remembers each type's destination, anchor and query draft. Incomplete inactive alternatives are allowed and survive native Undo/Redo, backup and reload; only the active valid link can be saved. Conversion removes attributes that no longer apply to the selected type. Successful Save (including a no-content-change Save), explicit Clear and Revert discard temporary alternatives; Undo can restore the previous local draft after Save, while Revert ends that history. Neither switching nor collapsing saves content automatically. Custom/DAM metadata exposes only the current protected type; unsupported link kinds show their type and stay read-only.
 
@@ -110,3 +177,35 @@ Image/File attributes and original XML are kept in the editor’s existing infor
 ## Further reading
 
 See [fallback behavior](languages-and-fallback.md) and [troubleshooting](troubleshooting.md). Rich Text editing experiments are [research](research/README.md), not shipped editors.
+
+## Compact toolbar and shared actions (0.53.0)
+
+Rich Text separates **HTML / Visual / Preview** from a compact neutral formatting strip. The paragraph/heading selector, text styles, four alignment buttons, lists, quote/formatting and Link/Table controls wrap as groups. Selected commands are pressed; unavailable commands retain a reason in their tooltip. **Clear formatting** removes supported plain bold/italic/underline/strikethrough/subscript/superscript marks only. **Clear content** explicitly empties the whole field; it remains separate from formatting.
+
+Tab enters/leaves the toolbar; Left/Right and Home/End move among its controls. The heading selector retains native selection keys; Alt+Left/Right moves out of that selector within the toolbar. Enter/Space activates a focused button. In the open Table menu, Up/Down moves through commands and Escape closes it. The toolbar and HTML escape remain outside the isolated Visual frame. Existing selection, history, mode switching and save guards are unchanged.
+
+Common actions retain text alongside consistent local icons across editor, comparison, settings and publishing panels. Familiar formatting buttons are icon-only with accessible names and tooltips. Busy actions show rotating arrows (stationary when reduced motion is requested); disabled and selected states remain distinct. Content choices and filter values retain their own labels. No network icon assets, font installation or additional dependencies are required.
+
+
+## Formatting, Find/Replace and history (0.54.0)
+
+The toolbar has two intentional rows: formatting/alignment/lists first, then Undo/Redo, Find/Replace and insertion controls. Groups wrap within each row on narrow panels. HTML mode retains history and search controls; Preview is read-only.
+
+Visual supports Strikethrough (`s`/`strike`), Subscript (`sub`) and Superscript (`sup`). Applying subscript or superscript removes the other plain mark. Attributed marks retain protection. Horizontal rule inserts a top-level `hr` and an empty paragraph after the current top-level paragraph or heading; it does not split selected text or nest a rule inside tables/lists/quotes. Unsupported contexts show a reason. Unchanged imported tokens remain exact; edited plain marks use canonical tags.
+
+**Find** (Ctrl/Cmd+F) opens a compact bar below the toolbar. **Replace** (Ctrl/Cmd+H, or the toolbar Replace button) adds a second textbox immediately below Find. Enter/Shift+Enter selects next/previous, wrapping around the current field. Escape closes the bar, removes highlights and returns focus to the retained editor selection. Match case is optional; patterns are literal, with no regular expressions. All matches receive subtle highlights and the current selected match is distinct. Search never marks the document dirty. Counts refresh after query changes, edits and replacement. A query allows 1–1,024 characters, replacements up to 8,192, and searches at most 1,000 matches; narrow larger searches.
+
+Visual searches text in editable blocks, including inline formatting. It excludes HTML attributes, opaque styles/images and matches crossing blocks or breaks. A replacement within one wrapper retains that wrapper; plain formatting across a replacement adopts its first text segment. Replacement across link/span boundaries or removal of protected metadata is refused. Replace all validates the entire proposed document before applying one transaction: no partial success. HTML searches authoritative source, including markup, and preserves untouched CRLF, CR and LF bytes; displayed textarea normalization never becomes the saved source. HTML replacements must fit the existing source size limit.
+
+Replace offers an optional **Preserve casing** checkbox in Visual and HTML. Each match independently follows lowercase, UPPERCASE or Initial capital (for example, pro/Pro/PRO → aqua/Aqua/AQUA). Mixed casing uses the replacement as entered. This uses Unicode casing, not locale-specific linguistic rules; Match case remains a separate search option.
+
+Each Replace or Replace all produces one ordinary document edit. **Undo/Redo** use VS Code's existing custom-document history across fields and modes, including the existing save/backup behavior; there is no independent Rich Text undo stack. Search selections/highlights are transient. Closing a field or changing modes clears search highlighting. Native OS IME, assistive-technology and live Sitecore save acceptance remain outside automated verification.
+
+
+## Editing refinements (0.55.0)
+
+- **Indent/Outdent** adjusts paragraphs/headings by 40px of `margin-left` per click (0, 40, 80, …), independently of alignment. Outdent clamps at zero; paragraphs already at zero stay there in mixed selections. Lists retain their structural nesting behavior. Existing literal styles are retained. Shorthand margins, non-pixel margins, duplicate declarations, comments and complex quoted/function CSS values remain HTML-only to avoid reinterpretation.
+- **Replace** now selects the next remaining match, wrapping when needed. Repeated clicks work in Visual and HTML. **Find** has no Show replacement button; use the toolbar **Replace** action or Ctrl/Cmd+H. The separately labeled **Match case** checkbox requires matching capitalization when checked. Its result count is a separate indicator. Navigation and replacement controls are grouped, with a struck S formatting icon.
+- Changed Visual output receives two-space HTML indentation, with nested tags and text on separate lines. This intentionally normalizes whitespace around inline wrappers and clears NBSP-only paragraph contents. Attribute tokens, internal entities, opaque content and explicitly whitespace-sensitive sections are preserved. Untouched source and manually edited HTML are not automatically formatted.
+- **Insert table / paragraphs to rows** inserts the existing 2×2 table at a caret, or converts selected adjacent top-level paragraphs/headings into a single-column table, one whole paragraph per row (up to 100). It retains their text, inline markup and attributes. Partial paragraph selections convert the whole intersecting paragraph, without discarding unselected text. Mixed/non-top-level structures remain unsupported.
+- **Delete rows / Delete columns** removes selected rows/columns and their contents. Remaining nodes and metadata are retained, and the caret stays in the remaining table. Split merged cells first. Column deletion with multiple sections or column definitions still requires HTML. Removing the final section removes the table. **Delete table** removes the entire table, including its owned wrapper/caption/column definitions. A fully selected table can also be removed with Delete/Backspace; deleting the only editable content leaves an empty paragraph. These are deliberate local draft edits and are undoable through existing native history; they do not publish or save automatically.

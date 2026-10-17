@@ -1,4 +1,8 @@
 body { color:var(--vscode-foreground); background:var(--vscode-editor-background); font-family:var(--vscode-font-family); padding:16px 24px; max-width:1000px; margin:auto; }
+.html-source-actions { display:flex; align-items:center; margin:8px 0; }
+.html-source-actions button[aria-pressed=true] { outline:1px solid var(--vscode-focusBorder); outline-offset:-2px; }
+textarea.html-source { width:100%; min-height:240px; tab-size:2; font-family:var(--vscode-editor-font-family, monospace); font-size:var(--vscode-editor-font-size, 13px); line-height:1.5; }
+.html-source-preview { margin:8px 0; }
 header { border-bottom:1px solid var(--vscode-panel-border); padding-bottom:16px; }
 h1 { font-size:21px; } h2 { font-size:17px; margin-top:28px; }
 #path, #identity { overflow-wrap:anywhere; } .field { margin:20px 0; } label { font-weight:600; } .meta { color:var(--vscode-descriptionForeground); margin:5px 0; font-size:12px; }
@@ -78,3 +82,94 @@ select { font:inherit; color:var(--vscode-input-foreground); background:var(--vs
 .link-destination .link-property, .link-destination .selection-trigger { flex:1; min-width:0; width:100%; }
 .link-expand { flex:none; padding:5px; margin:0 0 1px; background:transparent; color:var(--vscode-foreground); }
 .link-summary { white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.richtext-tools { display: flex; gap: 4px; }
+.richtext-tools[hidden] { display: none; }
+.richtext-visual .tiptap { min-height: 160px; padding: 12px; border: 1px solid var(--vscode-input-border, #666); white-space: pre-wrap; overflow-wrap: anywhere; }
+.richtext-visual [data-opaque] { color: var(--vscode-descriptionForeground); font-style: italic; user-select: none; }
+.richtext-visual [data-opaque="gap"] { display: none; }
+.richtext-visual img.ProseMirror-separator { display: inline; border: none; margin: 0; width: 0; height: 0; }
+.richtext-visual [data-rt-align="left"] { text-align: left; }
+.richtext-visual [data-rt-align="right"] { text-align: right; }
+.richtext-visual [data-rt-align="center"] { text-align: center; }
+.richtext-visual [data-rt-align="justify"] { text-align: justify; }
+.richtext-visual [data-rt-align="start"] { text-align: start; }
+.richtext-visual [data-rt-align="end"] { text-align: end; }
+.richtext-visual .rt-table-wrapper { overflow-x: auto; }
+.richtext-visual .rt-table-shell { margin: 12px 0; }
+.richtext-visual .rt-table-shell table { border-collapse: collapse; width: 100%; margin: 4px 0; table-layout: fixed; }
+.richtext-visual .rt-table-shell td, .richtext-visual .rt-table-shell th { border: 1px solid var(--vscode-panel-border); padding: 6px; min-width: 24px; vertical-align: top; position: relative; }
+.richtext-visual .rt-table-caption { font-weight: 600; padding: 6px; min-height: 1.4em; }
+.richtext-visual .rt-table-columns { color: var(--vscode-descriptionForeground); font-size: .9em; }
+.richtext-visual .selectedCell::after { content: ''; position: absolute; inset: 0; background: var(--vscode-editor-selectionBackground); opacity: .5; pointer-events: none; }
+.richtext-table-tools { display: inline-block; padding: 4px; }
+.richtext-table-tools summary { cursor: pointer; }
+.richtext-table-tools[open] { border: 1px solid var(--vscode-panel-border); }
+.richtext-visual .rt-link { color: var(--vscode-textLink-foreground); text-decoration: underline; }
+.richtext-link-form { margin: 8px 0; padding: 10px; border: 1px solid var(--vscode-widget-border); }
+.richtext-link-form > input { min-width: 260px; max-width: 100%; }
+.richtext-link-form > button, .richtext-link-form > select { margin-right: 6px; }
+.richtext-tools { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; }
+.richtext-tools > select { width: auto; max-width: 100%; }
+.richtext-tools button[aria-pressed="true"] { outline: 1px solid var(--vscode-focusBorder); background: var(--vscode-button-hoverBackground); }
+.richtext-tools button[aria-disabled="true"] { opacity: .55; cursor: not-allowed; }
+.richtext-visual blockquote { border-left: 3px solid var(--vscode-textBlockQuote-border); margin-left: 0; padding-left: 1em; }
+.richtext-visual .rt-list-text { display: inline; }
+.richtext-editing-frame { display:block; width:100%; height:320px; min-height:140px; max-height:1200px; resize:vertical; border:0; box-sizing:border-box; background:var(--vscode-editor-background); }
+
+/* Chrome stays outside the isolated editing frame and uses only theme colors. */
+.html-source-actions { gap:12px; flex-wrap:wrap; justify-content:space-between; }
+.richtext-modes { display:inline-flex; border:1px solid var(--vscode-panel-border, #777); border-radius:4px; }
+.richtext-modes button, .html-source-actions .richtext-clear { margin:0; background:transparent; color:var(--vscode-foreground); font-size:12px; }
+.richtext-modes button { border:0; padding:5px 9px; }
+.richtext-modes button + button { border-left:1px solid var(--vscode-panel-border, #777); }
+.richtext-modes button[aria-pressed=true] { background:var(--vscode-toolbar-activeBackground, var(--vscode-list-inactiveSelectionBackground)); }
+.html-source-actions .richtext-clear { color:var(--vscode-descriptionForeground); padding:4px 6px; }
+.richtext-tools { gap:4px 0; padding:5px; border:1px solid var(--vscode-panel-border, #777); border-bottom:0; background:var(--vscode-editorWidget-background, var(--vscode-editor-background)); }
+.richtext-tool-group { display:inline-flex; flex-wrap:nowrap; align-items:center; gap:2px; padding:0 5px; border-right:1px solid var(--vscode-panel-border, #777); }
+.richtext-tool-group:last-child { border-right:0; }
+.richtext-tools button, .richtext-tools summary { margin:0; min-height:28px; padding:4px 6px; border:1px solid transparent; border-radius:3px; background:transparent; color:var(--vscode-foreground); font-size:12px; box-sizing:border-box; }
+.richtext-tools button:hover, .richtext-tools summary:hover, .richtext-modes button:hover, .richtext-clear:hover { background:var(--vscode-toolbar-hoverBackground); }
+.richtext-tools button[aria-pressed=true] { background:var(--vscode-toolbar-activeBackground, var(--vscode-list-inactiveSelectionBackground)); outline:1px solid var(--vscode-focusBorder); outline-offset:-1px; }
+.richtext-tools select { width:115px; max-width:100%; height:28px; margin:0; font-size:12px; border-radius:3px; }
+.richtext-icon-button:has(.action-icon) { width:28px; }
+.richtext-icon-button:has(.action-icon) .action-label { position:absolute; width:1px; height:1px; overflow:hidden; clip-path:inset(50%); white-space:nowrap; }
+.richtext-tools .richtext-icon-button > .action-icon { margin:0; }
+.richtext-table-tools, .richtext-table-tools[open] { position:relative; padding:0; border:0; }
+.richtext-table-tools summary { white-space:nowrap; }
+.richtext-table-menu { position:absolute; z-index:8; top:100%; right:0; width:230px; max-width:calc(100vw - 40px); max-height:300px; overflow:auto; padding:5px; border:1px solid var(--vscode-widget-border, #777); background:var(--vscode-editorWidget-background, var(--vscode-editor-background)); box-shadow:0 3px 8px var(--vscode-widget-shadow); }
+.richtext-table-menu button { display:block; width:100%; text-align:left; }
+@media (max-width:500px) { body { padding:12px; } .field-section > .field { margin-left:0; } .richtext-tool-group { padding:0 3px; } .richtext-table-menu { right:auto; left:0; } }
+@media (forced-colors:active) { .richtext-tools button[aria-pressed=true], .richtext-modes button[aria-pressed=true] { border:1px solid Highlight; } .richtext-tools button[aria-disabled=true] { color:GrayText; opacity:1; } }
+
+/* Keep formatting and document actions on intentionally separate rows. */
+.richtext-tools { flex-direction:column; align-items:stretch; }
+.richtext-tool-row { display:flex; flex-wrap:wrap; gap:4px 0; align-items:center; }
+.richtext-tool-row[hidden], .richtext-tool-group[hidden], .richtext-search[hidden], .richtext-search > div[hidden], .richtext-source-wrap[hidden] { display:none; }
+.richtext-tool-row + .richtext-tool-row { border-top:1px solid var(--vscode-panel-border); padding-top:4px; }
+.richtext-search { padding:6px; border:1px solid var(--vscode-panel-border); }
+.richtext-search > div { display:flex; align-items:center; gap:5px; flex-wrap:wrap; }
+.richtext-search > div + div { margin-top:5px; }
+.richtext-search input[type=text] { width:220px; max-width:100%; }
+.richtext-search label { display:flex; align-items:center; white-space:nowrap; }
+.richtext-source-wrap { position:relative; }
+.richtext-source-wrap .html-source, .richtext-search-mirror { font:13px/20px var(--vscode-editor-font-family, monospace); padding:8px; box-sizing:border-box; tab-size:4; }
+.richtext-search-mirror { position:absolute; inset:0; margin:0; overflow:hidden; white-space:pre; color:transparent; pointer-events:none; border:1px solid transparent; }
+.richtext-search-mirror mark { background:var(--vscode-editor-findMatchHighlightBackground, #a8880044); color:transparent; }
+.richtext-search-mirror mark.current { background:var(--vscode-editor-findMatchBackground, #a8880088); outline:1px solid var(--vscode-editor-findMatchBorder, #aa8800); }
+.richtext-source-wrap.searching .html-source { position:relative; background:transparent; }
+@media(forced-colors:active) { .richtext-search-mirror mark { outline:1px solid Highlight; } .richtext-search-mirror mark.current { outline-width:3px; } }
+
+.richtext-search { background:var(--vscode-editorWidget-background); border-radius:3px; }
+.richtext-search button { margin:0; padding:3px 7px; min-height:28px; }
+.richtext-search input[type=checkbox] { width:auto; margin:0 5px 0 0; cursor:pointer; }
+.richtext-match-case { padding:4px 8px; border:1px solid var(--vscode-panel-border); border-radius:3px; cursor:pointer; }
+.richtext-search-count { margin-left:8px; padding-left:8px; border-left:1px solid var(--vscode-panel-border); font-variant-numeric:tabular-nums; }
+.richtext-tool-group { gap:4px; padding:0 7px; }
+
+.richtext-search-navigation { display:flex; gap:0; }
+.richtext-search-navigation button + button { border-left:0; }
+.richtext-search button { background:transparent; color:var(--vscode-foreground); border:1px solid var(--vscode-panel-border); border-radius:3px; }
+.richtext-search button:hover { background:var(--vscode-toolbar-hoverBackground); }
+
+.richtext-search .richtext-icon-button { padding:4px; }
+.richtext-search .richtext-icon-button .action-icon { margin:0; }

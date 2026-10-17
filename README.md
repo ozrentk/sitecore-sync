@@ -2,6 +2,8 @@
 
 XM Cloud Sync is an early-stage VS Code extension for browsing, comparing and synchronizing Sitecore XM Cloud authoring content. Connect to an environment, inspect or edit supported item fields, compare environments or languages, and queue transfers and publishing with delivery evidence.
 
+The item editor provides HTML, guarded Visual editing and isolated Preview for supported Rich Text. Its two-row toolbar groups formatting, alignment, lists, insertion, native Undo/Redo and inline Find/Replace for Visual and HTML modes, paragraph indentation, paragraph-to-table conversion and table deletion; common actions use consistent icons across panels. See the [editor support and keyboard guide](docs/item-editor.md).
+
 ## Requirements and installation
 
 Use VS Code **1.100.0 or newer** and an XM Cloud environment with a CM URL and environment automation-client credentials. [Prerequisites](docs/connections.md#prerequisites) explain connection setup.
@@ -26,11 +28,16 @@ Before starting, [install the extension and have your CM URL and automation-clie
 | Configure connections, sites or public-page URLs | [Connections](docs/connections.md) |
 | Browse, search, use favorites or compare items | [Browse and Compare](docs/browse-and-compare.md) |
 | Edit supported fields and save changes | [Item editor](docs/item-editor.md) |
+| Edit Rich Text HTML, styled text, headings, lists, quotes, tables and links | [Rich Text editing](docs/item-editor.md#rich-text-html-source) |
 | Transfer a field or subtree | [Transfers](docs/transfers.md) |
 | Publish and trace content delivery | [Publishing](docs/publishing.md) |
 | Manage queued work and operation sequences | [Operations](docs/operations.md) |
 | Understand language selection and fallback | [Languages and fallback](docs/languages-and-fallback.md) |
 | Run a task plug-in or connect an agent | [Plug-ins](docs/plugins.md) · [MCP](docs/mcp.md) |
+
+Changed Visual HTML uses two-space indentation for nested tags and text; inline boundary spacing is normalized, while untouched/manual source remains unchanged.
+
+Replace offers an optional **Preserve casing** checkbox in Visual and HTML. Each match independently follows lowercase, UPPERCASE or Initial capital (for example, pro/Pro/PRO → aqua/Aqua/AQUA). Mixed casing uses the replacement as entered. This uses Unicode casing, not locale-specific linguistic rules; Match case remains a separate search option.
 
 ## Help and project information
 

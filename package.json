@@ -2,7 +2,7 @@
   "name": "sitecore-xm-cloud-sync",
   "displayName": "XM Cloud Sync",
   "description": "Compare and synchronize Sitecore XM Cloud authoring content from VS Code.",
-  "version": "0.45.0",
+  "version": "0.56.0",
   "publisher": "OzrenTK",
   "license": "MIT",
   "repository": {
@@ -704,7 +704,8 @@
     "clean": "node ./scripts/clean.mjs",
     "compile": "npm run check && node ./scripts/build.mjs",
     "watch": "tsc -watch -p ./",
-    "check": "npm run check:extension && npm run check:tests",
+    "check": "npm run check:extension && npm run check:tests && npm run check:webview",
+    "check:webview": "tsc --noEmit -p tsconfig.webview.json",
     "check:extension": "tsc --noEmit -p ./",
     "check:tests": "tsc --noEmit -p ./tsconfig.test.json",
     "test": "npm run test:unit",
@@ -726,8 +727,11 @@
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "1.32.0",
+    "@tiptap/core": "3.32.0",
+    "@tiptap/pm": "3.32.0",
     "graphql": "^16.11.0",
     "graphql-tag": "^2.12.6",
+    "parse5": "7.3.0",
     "playwright-core": "^1.62.0",
     "zod": "4.6.5"
   }

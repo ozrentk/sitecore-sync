@@ -1,4 +1,6 @@
+import { withActionIcons } from "../ui/webviewActions";
 import { parseMultipleSelection, validateMultipleSelection, validateReorder } from "./multipleSelection";
+import { newRichLinkTargets } from "./richTextLinks";
 import { fieldPresentation, fieldAssetUrl, fieldPreviewFailure } from "../sitecore/fieldPresentation";
 import { isMultipleSelection } from "./singleSelection";
 import { orderEditorFields } from "./fieldOrder";
@@ -45,7 +47,7 @@ export class ItemDocument implements vscode.CustomDocument {
   revision = 0;
   historyEpoch = 0;
   restoredEditRegistered = false;
-  flush: { id: string; finish: (value: unknown) => void } | undefined;
+  flush: { id: string; revision: number; panel: vscode.WebviewPanel; finish: (value: unknown) => void; fail: () => void } | undefined;
   readonly lifetime = new AbortController();
   private readonly disposed = new vscode.EventEmitter<void>();
   readonly onDidDispose = this.disposed.event;
@@ -130,11 +132,11 @@ export class ItemEditorProvider implements vscode.CustomEditorProvider<ItemDocum
     panel.title = `${doc.state.base.displayName || doc.state.base.name} · ${doc.state.target.language} v${doc.state.target.version}`;
     const media = vscode.Uri.joinPath(this.context.extensionUri, "media", "itemEditor");
     const shared = vscode.Uri.joinPath(this.context.extensionUri, "media", "shared");
-    panel.webview.options = { enableScripts: true, localResourceRoots: [media, shared] };
+    panel.webview.options = { enableScripts: true, localResourceRoots: [media, shared, vscode.Uri.joinPath(this.context.extensionUri, "out", "webview")] };
     const nonce = randomBytes(16).toString("hex");
-    panel.webview.html = `<!DOCTYPE html><html><head><meta charset="UTF-8"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src data:; frame-src data:; style-src ${panel.webview.cspSource} 'nonce-${nonce}'; script-src 'nonce-${nonce}';"><link rel="stylesheet" href="${panel.webview.asWebviewUri(vscode.Uri.joinPath(media, "editor.css"))}"><link rel="stylesheet" href="${panel.webview.asWebviewUri(vscode.Uri.joinPath(shared, "readOnlyField.css"))}"></head><body><header><h1 id="title"></h1><p id="identity"></p><p id="path"></p><button id="save">Save</button> <button id="revert">Revert</button> <button id="reconcile">Check save outcome</button> <button id="locale">Open existing locale/version…</button><p id="status" role="status"></p></header><main id="fields"></main><script nonce="${nonce}" src="${panel.webview.asWebviewUri(vscode.Uri.joinPath(shared, "readOnlyField.js"))}"></script><script nonce="${nonce}" src="${panel.webview.asWebviewUri(vscode.Uri.joinPath(media, "editor.js"))}"></script></body></html>`;
+    panel.webview.html = withActionIcons(panel.webview, `<!DOCTYPE html><html><head><meta charset="UTF-8"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src data:; frame-src data:; style-src ${panel.webview.cspSource} 'nonce-${nonce}'; script-src 'nonce-${nonce}';"><link rel="stylesheet" href="${panel.webview.asWebviewUri(vscode.Uri.joinPath(media, "editor.css"))}"><link rel="stylesheet" href="${panel.webview.asWebviewUri(vscode.Uri.joinPath(shared, "readOnlyField.css"))}"></head><body><header><h1 id="title"></h1><p id="identity"></p><p id="path"></p><button id="save">Save</button> <button id="revert">Revert</button> <button id="reconcile">Check save outcome</button> <button id="locale">Open existing locale/version…</button><p id="status" role="status"></p></header><main id="fields"></main><script nonce="${nonce}" src="${panel.webview.asWebviewUri(vscode.Uri.joinPath(shared, "readOnlyField.js"))}"></script><script nonce="${nonce}" src="${panel.webview.asWebviewUri(vscode.Uri.joinPath(media, "htmlSource.js"))}"></script><script nonce="${nonce}" src="${panel.webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, "out", "webview", "richTextVisual.js"))}"></script><script nonce="${nonce}" src="${panel.webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, "out", "webview", "richTextFrame.js"))}"></script><script nonce="${nonce}" src="${panel.webview.asWebviewUri(vscode.Uri.joinPath(media, "editor.js"))}"></script></body></html>`, this.context.extensionUri);
     const subscription = panel.webview.onDidReceiveMessage(message => {
-      void this.message(doc, message).catch(error => {
+      void this.message(doc, message, panel).catch(error => {
         if (error instanceof vscode.CancellationError) return;
         void vscode.window.showErrorMessage(doc.error ?? editorFailure(error, doc.stage, Boolean(doc.state.attempt)));
       });
@@ -149,10 +151,15 @@ export class ItemEditorProvider implements vscode.CustomEditorProvider<ItemDocum
     }
   }
 
-  private async message(doc: ItemDocument, raw: unknown): Promise<void> {
+  private async message(doc: ItemDocument, raw: unknown, source?: vscode.WebviewPanel): Promise<void> {
     if (doc.lifetime.signal.aborted || !raw || typeof raw !== "object") return;
     const message = raw as Record<string, unknown>;
-    if (message.type === "frozen" && message.id === doc.flush?.id) { doc.flush?.finish(message.drafts); return; }
+    if (message.type === "frozen") {
+      if (doc.flush && message.id === doc.flush.id && message.revision === doc.flush.revision && source === doc.flush.panel) {
+        if (message.error) doc.flush.fail(); else doc.flush.finish(message.drafts);
+      }
+      return;
+    }
     if (message.type === "ready") { await this.render(doc); return; }
     if (doc.busy || message.revision !== doc.revision) return;
     if (message.type === "previewAsset" || message.type === "openAsset") {
@@ -240,8 +247,9 @@ export class ItemEditorProvider implements vscode.CustomEditorProvider<ItemDocum
     if (typeof message.id !== "string" || typeof message.request !== "string" || message.request.length > 100
       || (message.parent !== undefined && !isGuid(message.parent))) return;
     const original = doc.state.base.fields.find(f => normalizeId(f.fieldId) === message.id);
-    if (!original || (!selectionKind(original) && !isGeneralLink(original)) || readOnlyReason(doc.state.base, original)) return;
-    const field = isGeneralLink(original) ? linkSelectionField(original) : original;
+    if (!original || (!selectionKind(original) && !isGeneralLink(original) && fieldKind(original) !== "html") || readOnlyReason(doc.state.base, original)) return;
+    const richText = fieldKind(original) === "html";
+    const field = richText ? { ...original, type: "Droptree", selectionSource: "/sitecore/content", value: "" } : isGeneralLink(original) ? linkSelectionField(original) : original;
     const id = message.id;
     doc.selections.get(id)?.abort();
     const controller = new AbortController(); doc.selections.set(id, controller);
@@ -255,7 +263,7 @@ export class ItemEditorProvider implements vscode.CustomEditorProvider<ItemDocum
       if (!secret) throw new Error("Missing credentials.");
       const io = selectionIO(this.client, connection, secret, doc.state.target.language, signal, doc.state.target.itemId);
       const page = await loadSelectionPage(field, io, message.parent as string | undefined);
-      const choices = isGeneralLink(original) ? [{ ...page.parent, hasChildren: false }, ...page.choices].filter(choice => /^\/sitecore\/content(?:\/|$)/iu.test(choice.path)) : page.choices;
+      const choices = isGeneralLink(original) || richText ? [{ ...page.parent, hasChildren: false }, ...page.choices].filter(choice => /^\/sitecore\/content(?:\/|$)/iu.test(choice.path)) : page.choices;
       let currentLabel = field.value ? "Unresolved or outside allowed Source (original value preserved)" : "No selection";
       const current = page.choices.find(choice => selectionKind(field)!.includes("droplist") ? choice.name === field.value : normalizeId(choice.itemId) === normalizeId(field.value));
       let currentName = current ? current.displayName || current.name : undefined;
@@ -477,6 +485,10 @@ export class ItemEditorProvider implements vscode.CustomEditorProvider<ItemDocum
         for (const change of changes) {
           const field = item.fields.find(f => normalizeId(f.fieldId) === change.fieldId)!;
           if (isGeneralLink(field)) await validateLinkTarget(field, change.value, io);
+          else if (fieldKind(field) === "html") {
+            for (const id of newRichLinkTargets(field.value, change.value))
+              await validateLinkTarget({ ...field, type: "General Link", value: "", selectionSource: "" }, `<link linktype="internal" id="${id}" />`, io);
+          }
           else if (isMultipleSelection(selectionKind(field))) await validateMultipleSelection(field, change.value, io);
           else if (selectionKind(field)) await validateSelection(field, change.value, io);
         }
@@ -485,7 +497,7 @@ export class ItemEditorProvider implements vscode.CustomEditorProvider<ItemDocum
     };
   }
   private async flushInputs(doc: ItemDocument): Promise<void> {
-    const panel = [...doc.panels][0];
+    const panel = [...doc.panels].find(candidate => candidate.active && candidate.visible) ?? [...doc.panels].find(candidate => candidate.visible);
     // Hidden webviews can be suspended; their canonical draft already lives in the document.
     if (!panel || !panel.visible || doc.state.attempt) return;
     const id = randomBytes(12).toString("hex");
@@ -493,8 +505,9 @@ export class ItemEditorProvider implements vscode.CustomEditorProvider<ItemDocum
     try {
       const drafts = await new Promise<unknown>((resolve, reject) => {
         timer = setTimeout(() => reject(new Error("Editor inputs could not be synchronized. Keep the tab open and retry.")), 5000);
-        doc.flush = { id, finish: resolve };
-        void panel.webview.postMessage({ type: "freeze", id }).then(delivered => { if (!delivered) reject(new Error("Editor is not available.")); }, reject);
+        doc.flush = { id, revision: doc.revision, panel, finish: resolve,
+          fail: () => reject(new EditorValidationError("Finish composing HTML before saving.")) };
+        void panel.webview.postMessage({ type: "freeze", id, revision: doc.revision }).then(delivered => { if (!delivered) reject(new Error("Editor is not available.")); }, reject);
       });
       if (!drafts || typeof drafts !== "object" || Array.isArray(drafts)) throw new Error("Invalid editor draft snapshot.");
       const parsed = parseEditorState(JSON.stringify({ ...doc.state, drafts }));
@@ -504,7 +517,15 @@ export class ItemEditorProvider implements vscode.CustomEditorProvider<ItemDocum
         const field = parsed.base.fields.find(f => normalizeId(f.fieldId) === key)!;
         if (readOnlyReason(parsed.base, field)) throw new Error("Read-only field was included in an editor draft.");
       }
-      doc.state = parsed;
+      // Final IME/pending edits may arrive after busy was set. Register them in native
+      // history too, so undo after Save includes the synchronized source snapshot.
+      for (const field of parsed.base.fields) {
+        const key = normalizeId(field.fieldId);
+        const before = doc.state.drafts[key] ?? { input: fieldInput(field), clear: false };
+        const after = parsed.drafts[key] ?? { input: fieldInput(field), clear: false };
+        if (before.input !== after.input || before.clear !== after.clear) this.recordEdit(doc, key, before, after, `Edit ${field.name}`);
+      }
+      doc.state = { ...doc.state, drafts: parsed.drafts };
     } finally { clearTimeout(timer); doc.flush = undefined; }
   }
 

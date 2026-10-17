@@ -11,6 +11,21 @@ const item = (f = field()): AuthoringItemDetails => ({ itemId: id, name: "Item",
   hasChildren: false, template: { templateId: "33333333333333333333333333333333", name: "Component" }, availableVersions: [{ language: "en-AU", version: 2 }], fields: [f] });
 const state = (): EditorState => ({ formatVersion: 1, target: { connectionId: "dev", serverUrl: "https://example.test", itemId: id, language: "en-AU", version: 2 }, base: item(), drafts: { [fieldId]: { input: "changed", clear: false } } });
 
+test("new Rich Text internal targets require validation before journal/write; retained targets need no resolution", async () => {
+  const before = '<p>text</p>';
+  const after = '<p><a href="~/link.aspx?_id=AAAAAAAA222233334444555555555555&amp;_z=z">text</a></p>';
+  const current = { ...state(), base: item(field("Rich Text", before)), drafts: { [fieldId]: { input: after, clear: false } } };
+  let writes = 0; let journals = 0;
+  const io = { read: async () => current.base, write: async () => { writes++; }, persist: async () => { journals++; } };
+  await rejects(saveEditor(current, io, () => {}), /validation is unavailable/);
+  await rejects(saveEditor(current, { ...io, validateSelections: async () => { throw Error("Target unavailable"); } }, () => {}), /Target unavailable/);
+  strictEqual(writes, 0); strictEqual(journals, 0);
+  const retained = { ...current, base: item(field("Rich Text", after)), drafts: { [fieldId]: { input: after.replace('>text<', '>edited<'), clear: false } } };
+  let reads = 0;
+  await saveEditor(retained, { ...io, read: async () => ++reads === 1 ? retained.base : item(field("Rich Text", retained.drafts[fieldId].input)) }, () => {});
+  strictEqual(writes, 1);
+});
+
 test("editor preserves untouched representations and numeric precision", () => {
   for (const f of [field("Checkbox", "0"), field("Number", "0001.230000000000000000000"), field("Multi-Line Text", " a\r\nb "), field("Date", "20261014T000000"), field("Datetime", "20261014T123456Z")]) {
     strictEqual(serializeDraft(f, { input: fieldInput(f), clear: false }), f.value);
@@ -60,7 +75,7 @@ test("editor validates calendar/time/integer values without browser timezone con
   strictEqual(Boolean(readOnlyReason(item(field("Datetime", "20261014T123456")), field("Datetime", "20261014T123456"))), true);
 });
 test("unsupported/system/fallback and absent versions cannot produce writes", () => {
-  for (const f of [field("Rich Text"), field("Image"), { ...field(), containsFallbackValue: true }, { ...field(), name: "__Title" }]) {
+  for (const f of [field("Image"), { ...field("Rich Text"), containsFallbackValue: true }, { ...field(), containsFallbackValue: true }, { ...field(), name: "__Title" }]) {
     throws(() => planChanges({ ...state(), base: item(f) }));
   }
   throws(() => planChanges({ ...state(), target: { ...state().target, version: 0 }, base: { ...item(), version: 0 } }));

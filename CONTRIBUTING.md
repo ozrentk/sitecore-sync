@@ -26,7 +26,7 @@ npm test
 
 The unit-test harness uses Node's built-in test runner with `tsx` for TypeScript execution. Tests live under `test/unit/`. Current coverage exercises XM Cloud server URL normalization, persisted operation, transfer, and publishing-run validation, item-task manifest parsing, matching, path containment, and input validation, publishing form validation and webview asset contracts, publishing retry and status-recheck transitions, publishing snapshot expectations, version observability, and trace conclusion classification, Raw Experience Edge, rendered-layout, application-response, and Browser DOM observation and result evaluation, Power Publish dependency and repair-batch planning, field-state fingerprints, operation-intent preparation and sequence-runner transitions, Sitecore reference discovery, collapsed Power Publish scope graph planning, Sitecore HTTP transport behavior, and Authoring, Publishing, and Experience Edge client response parsing and validation.
 
-Run `npm run check` to type-check both the extension source and the test suite.
+Run `npm run check` to type-check the extension, test suite and browser editor source. `npm run check:webview` checks the browser editor separately. The production build bundles its local dependencies into `out/webview/`; source-only `webview/` files are excluded from the VSIX. Rich Text work must follow the [development guide](docs/development/rich-text-editor.md).
 
 Run the extension-host suite separately:
 
@@ -57,6 +57,8 @@ dist/sitecore-xm-cloud-sync.vsix
 Installation and updates are described in [releases](docs/releases.md#install-or-update). A development package is not a published release.
 
 ## Source layout
+
+Rich Text contributors and agents must first read the [Rich Text editor development guide](docs/development/rich-text-editor.md), which records the implementation direction, preservation rules, unresolved cases and required tests.
 
 The comparison webview is separated into `media/comparison/comparison.html`, `comparison.css`, and `comparison.js`. The bottom-panel field view lives in `media/fieldDiff`, with its provider in `src/comparison/fieldDiffView.ts`. Extension-host lifecycle and state messaging remain in `src/comparison/comparisonPanel.ts`.
 

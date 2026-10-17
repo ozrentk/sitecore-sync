@@ -1,4 +1,5 @@
 import { parseMultipleSelection, validateMultipleDraft } from "./multipleSelection";
+import { newRichLinkTargets } from "./richTextLinks";
 import { isMultipleSelection, selectionKind, selectionSourceReason } from "./singleSelection";
 import { createHash } from "node:crypto";
 import type { AuthoringItemDetails, AuthoringItemField } from "../sitecore/authoringClient";
@@ -24,7 +25,7 @@ export interface EditorState {
   readonly drafts: Readonly<Record<string, FieldDraft>>;
   readonly attempt?: { readonly phase: "sent" | "acknowledged"; readonly changes: readonly EditorChange[] };
 }
-export type EditorFieldKind = "text" | "multiline" | "checkbox" | "integer" | "number" | "date" | "datetime" | "selection" | "multiselection" | "namevalues" | "generallink";
+export type EditorFieldKind = "text" | "multiline" | "html" | "checkbox" | "integer" | "number" | "date" | "datetime" | "selection" | "multiselection" | "namevalues" | "generallink";
 export const normalizeId = (value: string): string => value.replace(/[{}-]/gu, "").toLowerCase();
 export const isGuid = (value: unknown): value is string => typeof value === "string" && /^(?:[0-9a-f]{32}|\{?[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}\}?)$/iu.test(value);
 export const isLocale = (value: unknown): value is string => typeof value === "string" && /^[a-z]{2,8}(?:-[a-z0-9]{1,8})*$/iu.test(value);
@@ -37,7 +38,7 @@ export function fieldKind(field: AuthoringItemField): EditorFieldKind | undefine
   if (isGeneralLink(field)) return "generallink";
   if (isMultipleSelection(selectionKind(field))) return "multiselection";
   if (selectionKind(field)) return "selection";
-  const types: Record<string, EditorFieldKind> = { "single-line text": "text", "multi-line text": "multiline",
+  const types: Record<string, EditorFieldKind> = { "single-line text": "text", "multi-line text": "multiline", "rich text": "html",
     checkbox: "checkbox", integer: "integer", number: "number", date: "date", datetime: "datetime", "name value list": "namevalues" };
   return Object.hasOwn(types, field.type.toLowerCase()) ? types[field.type.toLowerCase()] : undefined;
 }
@@ -78,9 +79,8 @@ export function readOnlyReason(item: AuthoringItemDetails, field: AuthoringItemF
   if (field.name.startsWith("__") || field.isStandardTemplate) return "System and Standard Template fields are read-only in Stage A.";
   if (item.fields.filter(other => other.name.toLowerCase() === field.name.toLowerCase()).length !== 1) return "Ambiguous field name; cannot safely target the Authoring mutation.";
   const kind = fieldKind(field);
-  if (!kind) return field.type.toLowerCase() === "rich text"
-    ? "Rich Text is deferred until visual and HTML source editors can preserve content when switching."
-    : "Editing is not supported for this field type.";
+  if (!kind) return "Editing is not supported for this field type.";
+  if (kind === "html" && field.value.length > 1024 * 1024) return "HTML exceeds the source editing limit (1,048,576 characters). The original value is preserved.";
   if (kind === "multiselection") {
     try { parseMultipleSelection(field.value); } catch (error) { return (error as Error).message; }
     return selectionSourceReason(field.selectionSource, selectionKind(field));
@@ -105,6 +105,7 @@ export function serializeDraft(field: AuthoringItemField, draft: FieldDraft): st
   if (draft.input === fieldInput(field)) return field.value;
   const value = draft.input;
   switch (fieldKind(field)) {
+    case "html": return value; // Raw source only; never parse, sanitize or normalize a draft.
     case "namevalues": return serializeNameValues(field.value, value);
     case "generallink": return serializeGeneralLink(field.value, value);
     case "multiselection": validateMultipleDraft(field, value); return value;
@@ -186,7 +187,7 @@ export async function saveEditor(state: EditorState, io: EditorIO, update: (stat
   if (!changes.length) return state;
   const fresh = await io.read();
   checkConflicts(state, fresh, changes);
-  if (changes.some(change => fresh.fields.some(field => normalizeId(field.fieldId) === change.fieldId && (selectionKind(field) || isGeneralLink(field))))) {
+  if (changes.some(change => fresh.fields.some(field => normalizeId(field.fieldId) === change.fieldId && (selectionKind(field) || isGeneralLink(field) || (fieldKind(field) === "html" && newRichLinkTargets(field.value, change.value).length))))) {
     if (!io.validateSelections) throw new EditorValidationError("Selection source validation is unavailable.");
     await io.validateSelections(fresh, changes);
   }

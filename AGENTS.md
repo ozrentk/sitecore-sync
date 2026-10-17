@@ -21,6 +21,8 @@ Treat `out/`, `dist/`, `node_modules/`, VSIX files, logs, and TypeScript build m
 
 ## Source of truth and scope
 
+For Rich Text rendering or editor work (including schema, HTML serialization, Visual/HTML switching, and save integration), read [the Rich Text editor development guide](docs/development/rich-text-editor.md) before editing. Apply its fidelity, security, command-policy and acceptance rules. Its linked experiments are evidence, not production implementations or authorization to enable writes.
+
 Before changing code:
 
 1. Read the relevant source, `package.json` contributions, `PRODUCT_SPEC.md`, and nearby documentation.

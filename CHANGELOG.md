@@ -1,5 +1,92 @@
 # Changelog
 
+## 0.56.0 — 2026-10-17
+
+- Add optional Preserve casing to Replace in Visual and HTML: pro/Pro/PRO becomes aqua/Aqua/AQUA. Mixed casing uses the replacement as entered.
+- Deeply indent generated Visual HTML with tags and text on separate lines. Normalize inline boundary whitespace and NBSP-only paragraphs as requested; retain opaque/preformatted content and leave untouched/manual HTML unchanged.
+
+## 0.55.0 — 2026-10-17
+
+- Use a struck S icon and improve grouping, spacing and Match case labeling in the inline search bar; remove Show replacement from Find mode.
+- Indent/outdent paragraphs and headings in 40px margin-left steps while preserving existing supported styles. List indentation remains unchanged.
+- Advance to the next match after Replace in Visual and HTML, allowing consecutive replacements without searching again.
+- Format generated Visual HTML with block/table indentation while preserving inline text, attribute tokens, existing line endings and untouched source.
+- Convert selected top-level paragraphs/headings to one-column table rows. Add populated row/column deletion and Delete table; Delete/Backspace removes a fully selected table. Retain native Undo and surrounding content. Split merged cells before row/column deletion.
+
+## 0.54.0 — 2026-10-17
+
+- Add Strikethrough, Subscript, Superscript and top-level Horizontal rule to guarded Visual editing, including preserved import/export and disabled reasons.
+- Separate formatting and document actions into two toolbar rows, with grouped wrapping, explicit native Undo/Redo and accessible icons.
+- Add field-scoped inline Find/Replace beneath the toolbar in Visual and HTML modes: literal matching, Match case, previous/next, counts, highlights, Replace and atomic Replace all. Keep replacement beneath Find; support Ctrl/Cmd+F/H, Enter/Shift+Enter and Escape.
+- Keep search decorations out of saved HTML and history. Replacements use the existing native document history and retain raw HTML newline conventions. Refuse Visual replacements across link/wrapper boundaries or protected metadata loss before changing any match.
+
+## 0.53.0 — 2026-10-16
+
+- Replace the Rich Text text-button row with compact neutral icon groups, direct alignment controls, a heading selector and separate HTML/Visual/Preview controls. Keep Clear content distinct from Clear formatting.
+- Share locally bundled action icons across Browse/Compare, Item Details, editors, connection settings, publishing forms and operation details. Retain useful labels and existing native VS Code icon conventions.
+- Preserve command guards and draft/save behavior; add toolbar keyboard navigation, accessible names, busy indicators, responsive groups and bounded table menus.
+
+## 0.52.0 — 2026-10-16
+
+- Apply supported inline and embedded CSS in an isolated Rich Text Visual frame, with bounded typography, colors, spacing, borders and dimensions. Keep unsupported CSS and all original source tokens intact.
+- Keep controls and HTML escape outside stored styling; block source scripts, external resources, navigation and forms. Preserve the script-free Preview.
+- Authenticate frame messages, reject stale/disposed replies and await current raw snapshots for mode switches and Save. Add keyboard Escape/Save routing and vertical resize; retain native history and existing draft protections.
+- Media editing, arbitrary CSS/HTML support, native IME/assistive-technology and live-save acceptance remain outside the verified scope.
+
+## 0.51.0 — 2026-10-16
+
+- Add Rich Text paragraph/heading and alignment controls, bullet/numbered lists, list indent/outdent, quotes and plain bold/italic/underline clearing.
+- Show active and unavailable command states with reasons; add heading/list shortcuts and list Enter, Tab/Shift+Tab and Backspace behavior.
+- Preserve nested formatting, links, opaque styles/media and raw no-op fidelity. Guard metadata-bearing structural changes and retain HTML access for unsupported content. Keep ordinary Save, history, freeze and backup protections.
+- Arbitrary styling/media editing, formatted paste and native IME/accessibility/live-save acceptance remain separate work.
+
+## 0.50.1 — 2026-10-16
+
+- Fix General Link expansion when clicking an already-focused destination or restoring webview focus.
+- Establish real foreground focus in the B31 integration regression; retain its assertion and verify background/foreground restoration. Remove the obsolete CI exception without changing historical release notes.
+
+
+## 0.50.0 — 2026-10-16
+
+- Add Visual **Link** creation, destination editing and removal, with safe URLs and a Sitecore content picker.
+- Update supported internal hrefs and matching identity metadata together while retaining nested formatting and unrelated attributes. Protect custom, conflicting, image and DAM link variants with HTML access.
+- Recheck new internal targets before Save; reject stale link forms and picker responses. Keep raw/no-op fidelity, native history, freeze, backup and ordinary save protections.
+- Broader styling/media, formatted paste and live save acceptance remain separate work. No new B31 exception.
+
+## 0.49.1 — 2026-10-16
+
+- Add the missing **Table → Insert table (2 × 2)** action. Insert after the current block without replacing content or nesting tables, and focus the first cell so typing and row/column commands work immediately.
+- Explain how to create a table when an existing-table command is used outside a table. Retain all metadata, raw-draft and structural-edit protections.
+
+## 0.49.0 — 2026-10-16
+
+- Add bounded table Visual editing: preserved overflow wrappers, captions, explicit table sections, column definitions, header/cell metadata and spans.
+- Add row/column insertion, empty-row/column deletion, guarded cell merge/split and caption controls. Refuse structural changes involving protected cell metadata, populated-cell loss, cross-section merges or incompatible column definitions.
+- Keep raw HTML authoritative, no-op switches exact, unsupported tables HTML-editable, and table drafts integrated with ordinary Save, native history and backups. Stored CSS/IDs remain inert in the trusted editor.
+- Managed links, arbitrary styled-container/media editing and formatted paste remain separate work. No new B31 release exception is introduced.
+
+## 0.48.0 — 2026-10-16
+
+- Extend Visual editing to nested inline spans without flattening their wrappers, classes or style attributes; preserve heading levels, text spacing and blank paragraphs.
+- Display literal single-declaration text alignment through bundled, scoped CSS rules. Original classes and arbitrary CSS remain inert; no website stylesheets are fetched.
+- Protect even unstyled span nesting against destructive split/join operations. Keep exact no-op mode switches, host undo/redo, pending-input freeze, Save and backup behavior.
+- Add the supplied finance-content example and nested formatting, paste, alignment and persistence regressions. Tables, managed links, visual media and formatted paste remain outside the supported profile.
+
+## 0.47.0 — 2026-10-16
+
+- Add a conservative Tiptap Visual mode for paragraphs, headings, bold, italic, underline and line breaks, using the existing HTML draft and Save workflow.
+- Check original source tokens before visual admission. Unsupported, repaired, identity-sensitive and complex markup stays HTML-editable with a reason; unchanged mode switches retain exact raw source.
+- Preserve CSS, image/DAM metadata and inter-block whitespace as inert data. Block visual operations that would remove protected metadata; display styling remains in the isolated Preview.
+- Support plain-text paste and native host undo; reject formatted paste/drop rather than stripping content. No visual media, links, lists, tables or page/fallback editing is added.
+- Record future action-icon consistency work as B32. B31 remains a known intermittent test failure, with no new release exception.
+
+## 0.46.0 — 2026-10-16
+
+- Add HTML source editing for eligible ordinary-item Rich Text fields, with a separate read-only sandboxed Preview.
+- Preserve raw source and mixed line endings across unchanged mode switches, drafts, backup and Save; integrate pending composition with panel/revision-pinned synchronization and native undo after Save.
+- Retain exact-locale, version, fallback and system/page protections. Visual editing and media editing remain deferred.
+- B31 remains unresolved; the v0.45.0 release exception does not apply to this version.
+
 ## 0.45.0 — 2026-10-16
 
 - Isolate Rich Text previews in sandboxed frames, preserving inline formatting and embedded CSS while blocking scripts, navigation and external requests.

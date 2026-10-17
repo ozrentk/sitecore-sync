@@ -1,3 +1,4 @@
+import { withActionIcons } from "../ui/webviewActions";
 import * as vscode from "vscode";
 import {
   defaultPublishingFormRuntime,
@@ -142,7 +143,7 @@ export async function showTracedPublishForm(
       finish(undefined);
       return;
     }
-    panel.webview.html = html;
+    panel.webview.html = withActionIcons(panel.webview, html, extensionUri);
   });
 }
 

@@ -10,9 +10,17 @@ let cancelDrag;
 const linkOpen = new Map();
 const assetRequests = new Map();
 let assetRequestId = 0;
+const htmlSources = new Map();
+const htmlModes = new Map();
+const htmlSelections = new Map();
+const visualSources = new Map();
+const visualSelections = new Map();
+// Electron can restore an active input without delivering its original focus event.
+window.addEventListener("focus", () => document.activeElement?.dispatchEvent(new Event("editorFocus")));
+let freezeGeneration = 0;
 document.addEventListener("keydown", event => { if (event.key === "Escape") { cancelDrag?.(); activePicker?.close(); } });
 document.addEventListener("keydown", event => {
-  if ((event.ctrlKey || event.metaKey) && !event.altKey && !event.target.matches("input, textarea") && ["z", "y"].includes(event.key.toLowerCase())) {
+  if (!event.defaultPrevented && (event.ctrlKey || event.metaKey) && !event.altKey && !event.target.matches("input, textarea") && ["z", "y"].includes(event.key.toLowerCase())) {
     event.preventDefault(); send(event.shiftKey || event.key.toLowerCase() === "y" ? "redo" : "undo");
   }
 });
@@ -26,6 +34,9 @@ const send = (type, extra = {}) => api.postMessage({ type, revision, ...extra })
 for (const action of ["save", "revert", "reconcile", "locale"]) document.getElementById(action).addEventListener("click", () => send(action));
 window.addEventListener("message", event => {
   const state = event.data;
+  // Nested editing frames have their own authenticated protocol, never host editor state.
+  // VS Code removes window.parent; its host messages use this webview's own origin.
+  if (!state || typeof state !== "object" || state.channel || (event.source && (event.origin !== window.origin || [...document.querySelectorAll("iframe")].some(frame => frame.contentWindow === event.source)))) return;
   if (state.type === "assetPreview") {
     const pending = assetRequests.get(state.id);
     if (pending && pending.request === state.request && state.revision === revision) { assetRequests.delete(state.id); pending.receive(state); }
@@ -62,28 +73,32 @@ window.addEventListener("message", event => {
     return;
   }
   if (state.type === "unfreeze") {
+    freezeGeneration++;
     revision = state.revision; blocked = false;
     for (const [control, disabled] of frozenControls) control.disabled = disabled;
+    for (const source of visualSources.values()) source.editable(true);
     frozenControls = [];
+    for (const [id, source] of htmlSources) {
+      const control = document.getElementById(id);
+      send("change", { id, input: source.read(), clear: control?.dataset.explicitClear === "true" });
+    }
     document.getElementById("status").textContent = state.error;
     return;
   }
   if (state.type === "freeze") {
-    cancelDrag?.();
-    activePicker?.close(false);
-    blocked = true;
-    const drafts = {};
-    for (const control of document.querySelectorAll("[data-field-id]")) {
-      const input = control.type === "checkbox" ? (control.checked ? "1" : "") : control.value;
-      const clear = control.dataset.explicitClear === "true";
-      if (input !== control.dataset.original || clear) drafts[control.dataset.fieldId] = { input, clear };
-    }
-    frozenControls = [...document.querySelectorAll("input, textarea, select, button")].map(control => [control, control.disabled]);
-    for (const [control] of frozenControls) control.disabled = true;
-    api.postMessage({ type: "frozen", id: state.id, drafts });
+    void freezeInputs(state);
     return;
   }
   if (state.type !== "state") return;
+  freezeGeneration++;
+  for (const [id, source] of visualSources) { visualSelections.set(id, source.selection()); source.dispose(); }
+  visualSources.clear();
+  for (const [id, source] of htmlSources) {
+    const control = document.getElementById(id);
+    if (control) htmlSelections.set(id, { start: control.selectionStart, end: control.selectionEnd, scroll: control.scrollTop });
+    source.dispose();
+  }
+  htmlSources.clear();
   cancelDrag?.();
   activePicker?.close(false);
   selectionRequests.clear();
@@ -95,6 +110,7 @@ window.addEventListener("message", event => {
   document.getElementById("path").textContent = state.item.path;
   document.getElementById("status").textContent = state.busy ? "Working…" : (state.error || state.status);
   document.getElementById("save").disabled = blocked || !state.target.version;
+  document.getElementById("save").setAttribute("aria-busy", String(state.busy));
   document.getElementById("revert").disabled = state.busy;
   document.getElementById("locale").disabled = state.busy;
   document.getElementById("reconcile").hidden = !state.pending;
@@ -138,6 +154,8 @@ window.addEventListener("message", event => {
       }
       if (field.selectionKind && !["checklist", "multilist", "treelist", "treelistex"].includes(field.selectionKind)) row.append(selectionLabel(field));
       row.append(value);
+    } else if (field.kind === "html") {
+      renderHtmlSource(row, field);
     } else if (field.kind === "namevalues") {
       renderNameValues(row, field);
     } else if (field.kind === "generallink") {
@@ -177,10 +195,348 @@ window.addEventListener("message", event => {
     }
   }
   if (state.focus) {
+    const visual = visualSources.get(state.focus.id);
+    if (visual) { const selection = visualSelections.get(state.focus.id); if (selection) visual.restore(selection); else visual.focus(); return; }
     const handle = [...document.querySelectorAll("[data-reorder-field]")].find(control => control.dataset.reorderField === state.focus.id && control.dataset.reorderValue === state.focus.value);
     (handle || document.getElementById(state.focus.id))?.focus();
+    const source = document.getElementById(state.focus.id);
+    const selection = htmlSelections.get(state.focus.id);
+    if (source?.classList.contains("html-source") && selection) {
+      source.setSelectionRange(selection.start, selection.end); source.scrollTop = selection.scroll;
+    }
   }
 });
+async function freezeInputs(state) {
+  const generation = ++freezeGeneration;
+  for (const form of document.querySelectorAll(".richtext-link-form")) form.dispatchEvent(new Event("close-link"));
+  cancelDrag?.(); activePicker?.close(false); blocked = true;
+  try {
+    // Blur commits IME when supported. Otherwise wait, and refuse Save if it does not finish.
+    await Promise.all([...visualSources.values()].map(source => source.freeze()));
+    await Promise.all([...htmlSources.values()].map(source => source.finishComposition()));
+    if (generation !== freezeGeneration) return;
+    const drafts = {};
+    for (const control of document.querySelectorAll("[data-field-id]")) {
+      const input = htmlSources.get(control.dataset.fieldId)?.read() ?? (control.type === "checkbox" ? (control.checked ? "1" : "") : control.value);
+      const clear = control.dataset.explicitClear === "true";
+      if (input !== control.dataset.original || clear) drafts[control.dataset.fieldId] = { input, clear };
+    }
+    frozenControls = [...document.querySelectorAll("input, textarea, select, button")].map(control => [control, control.disabled]);
+    for (const [control] of frozenControls) control.disabled = true;
+    api.postMessage({ type: "frozen", id: state.id, revision, drafts });
+  } catch {
+    if (generation === freezeGeneration) api.postMessage({ type: "frozen", id: state.id, revision, error: true });
+  }
+}
+function renderHtmlSource(row, field) {
+  const actions = document.createElement("div"); actions.className = "html-source-actions";
+  const html = document.createElement("button"); html.textContent = "HTML"; html.type = "button";
+  const preview = document.createElement("button"); preview.textContent = "Preview"; preview.type = "button";
+  const visual = document.createElement("button"); visual.textContent = "Visual"; visual.type = "button";
+  const visualArea = document.createElement("div"); visualArea.className = "richtext-visual";
+  const tools = document.createElement("div"); tools.className = "richtext-tools";
+  tools.setAttribute("role", "toolbar"); tools.setAttribute("aria-label", "Text formatting");
+  const formatRow = document.createElement("div"); formatRow.className = "richtext-tool-row";
+  const actionRow = document.createElement("div"); actionRow.className = "richtext-tool-row"; tools.append(formatRow, actionRow);
+  const group = (label, parent = formatRow) => { const node = document.createElement("div"); node.className = "richtext-tool-group"; node.setAttribute("role", "group"); node.setAttribute("aria-label", label); parent.append(node); return node; };
+  const blocks = group("Block style");
+  const marks = group("Text style");
+  const alignments = group("Alignment");
+  const lists = group("Lists");
+  const extras = group("Quote and formatting");
+  const historyGroup = group("History", actionRow);
+  const searchGroup = group("Find and replace", actionRow);
+  const insert = group("Insert", actionRow);
+  const blockType = document.createElement("select"); blockType.setAttribute("aria-label", "Text block type");
+  for (const [value, text] of [["", "Mixed blocks"], ["paragraph", "Paragraph"], ...[1,2,3,4,5,6].map(n=>[`h${n}`, `Heading ${n}`])]) {
+    const option = document.createElement("option"); option.value = value; option.textContent = text; option.disabled = !value; blockType.append(option);
+  }
+  blockType.addEventListener("change", () => { if (!blocked && blockType.value) visualSources.get(field.id)?.command(blockType.value); }); blocks.append(blockType);
+  for (const [name, label] of [["bold", "Bold"], ["italic", "Italic"], ["underline", "Underline"], ["strike", "Strikethrough"], ["subscript", "Subscript"], ["superscript", "Superscript"], ["horizontalRule", "Horizontal rule"], ["alignLeft", "Align left"], ["alignCenter", "Align center"], ["alignRight", "Align right"], ["alignJustify", "Justify"], ["bulletList", "Bullets"], ["orderedList", "Numbers"], ["indent", "Indent"], ["outdent", "Outdent"], ["blockquote", "Quote"], ["clearFormatting", "Clear formatting"]]) {
+    const button = document.createElement("button"); button.type = "button"; button.textContent = label; button.disabled = blocked;
+    button.className = "richtext-icon-button"; button.setAttribute("aria-label", label); button.title = label;
+    const text = document.createElement("span"); text.className = "action-label"; text.textContent = label; button.replaceChildren(text);
+    button.dataset.richCommand = name;
+    button.addEventListener("mousedown", event => event.preventDefault());
+    button.addEventListener("click", () => { if (blocked) return; if (button.getAttribute("aria-disabled") === "true") visualError.textContent = button.title; else visualSources.get(field.id)?.command(name); });
+    (name === "horizontalRule" ? insert : name.startsWith("align") ? alignments : ["bold", "italic", "underline", "strike", "subscript", "superscript"].includes(name) ? marks : ["bulletList", "orderedList", "indent", "outdent"].includes(name) ? lists : extras).append(button);
+  }
+  const tableMenu = document.createElement("details"); tableMenu.className = "richtext-table-tools";
+  const tableTitle = document.createElement("summary"); tableTitle.textContent = "Table"; tableMenu.append(tableTitle);
+  tableTitle.dataset.actionIcon = "table"; tableTitle.title = "Table commands";
+  const tableCommands = document.createElement("div"); tableCommands.className = "richtext-table-menu"; tableMenu.append(tableCommands);
+  for (const [name, label] of [["insertTable", "Insert table / paragraphs to rows"], ["caption", "Add / edit caption"], ["rowBefore", "Insert row above"], ["rowAfter", "Insert row below"],
+    ["columnBefore", "Insert column before"], ["columnAfter", "Insert column after"], ["removeRows", "Delete rows"],
+    ["removeColumns", "Delete columns"], ["deleteTable", "Delete table"], ["mergeCells", "Merge selected cells"], ["splitCell", "Split cell"]]) {
+    const button = document.createElement("button"); button.type = "button"; button.textContent = label; button.disabled = blocked;
+    button.dataset.richCommand = name;
+    button.addEventListener("mousedown", event => event.preventDefault());
+    button.addEventListener("click", () => { if (blocked) return; if (button.getAttribute("aria-disabled") === "true") visualError.textContent = button.title; else visualSources.get(field.id)?.command(name); }); tableCommands.append(button);
+  }
+  insert.append(tableMenu);
+  const linkButton = document.createElement("button"); linkButton.type = "button"; linkButton.textContent = "Link";
+  linkButton.dataset.richCommand = "link";
+  const linkForm = document.createElement("div"); linkForm.className = "richtext-link-form"; linkForm.hidden = true;
+  let closeLink = () => {};
+  let linkRequest = 0;
+  linkForm.addEventListener("close-link", () => { linkRequest++; closeLink(); });
+  linkButton.addEventListener("mousedown", event => event.preventDefault());
+  linkButton.addEventListener("click", async () => {
+    if (blocked) return;
+    if (linkButton.getAttribute("aria-disabled") === "true") { visualError.textContent = linkButton.title; return; }
+    closeLink();
+    const request = ++linkRequest;
+    const editor = visualSources.get(field.id);
+    try {
+      const info = await editor.beginLink();
+      if (request !== linkRequest || blocked || !row.isConnected || visualSources.get(field.id) !== editor) return;
+      linkForm.replaceChildren(); linkForm.hidden = false;
+      const kind = document.createElement("select"); kind.setAttribute("aria-label", "Link destination type");
+      for (const [value, text] of [["url", "URL"], ["sitecore", "Sitecore item"]]) { const option = document.createElement("option"); option.value = value; option.textContent = text; kind.append(option); }
+      kind.value = info.kind === "sitecore" ? "sitecore" : "url";
+      const url = document.createElement("input"); url.type = "text"; url.value = info.href; url.setAttribute("aria-label", "Link URL");
+      const target = document.createElement("button"); target.dataset.actionIcon = "link"; target.type = "button"; target.textContent = info.itemId ? `Current target: ${info.itemId} — browse…` : "Choose Sitecore item…";
+      let itemId = info.itemId;
+      let active = true;
+      const message = document.createElement("p"); message.className = "meta"; message.setAttribute("role", "status"); message.textContent = info.reason || "";
+      const apply = document.createElement("button"); apply.type = "button"; apply.textContent = "Apply link";
+      const remove = document.createElement("button"); remove.type = "button"; remove.textContent = "Remove link"; remove.hidden = !info.existing;
+      const cancel = document.createElement("button"); cancel.type = "button"; cancel.textContent = "Cancel";
+      const picker = createChoicePicker(row, { ...field, selectionSource: "/sitecore/content" }, target, { multiple: false, tree: true,
+        chosen: choice => choice.itemId.replace(/[{}-]/g, "").toLowerCase() === itemId,
+        accept: choice => {
+          if (!active || blocked || visualSources.get(field.id) !== editor) return;
+          itemId = choice.itemId.replace(/[{}-]/g, "").toLowerCase(); target.textContent = choice.displayName || choice.name; target.title = choice.path; picker.close();
+        },
+      });
+      closeLink = () => { active = false; picker.dispose(); editor.cancelLink(); linkForm.hidden = true; linkForm.replaceChildren(); };
+      const update = () => { url.hidden = kind.value !== "url"; target.hidden = kind.value !== "sitecore"; picker.close(false); };
+      kind.addEventListener("change", update); target.addEventListener("click", picker.open);
+      const commit = async destination => { if (blocked || !active || visualSources.get(field.id) !== editor) return; try { await editor.applyLink(destination); if (active && visualSources.get(field.id) === editor) closeLink(); } catch (failure) { if (active) message.textContent = failure.message; } };
+      apply.addEventListener("click", () => commit(kind.value === "sitecore" ? { kind: "sitecore", itemId: itemId || "" } : { kind: "url", href: url.value }));
+      remove.addEventListener("click", () => commit("remove")); cancel.addEventListener("click", () => { closeLink(); editor.focus(); });
+      linkForm.onkeydown = event => { if (event.key === "Escape") { event.preventDefault(); closeLink(); editor.focus(); } };
+      for (const control of [kind, url, target, apply, remove]) control.disabled = Boolean(info.reason);
+      linkForm.append(kind, url, target, apply, remove, cancel, message, picker.popup); update();
+      (kind.value === "url" ? url : target).focus();
+    } catch (failure) { visualError.textContent = failure.message; }
+  });
+  insert.prepend(linkButton);
+  // A single toolbar tab stop; select arrows retain their native behavior.
+  const toolStops = () => [...tools.querySelectorAll("button, select, summary")].filter(node => !node.disabled && !node.closest("[hidden]") && (!node.closest(".richtext-table-menu") || tableMenu.open));
+  const setToolStop = node => { for (const stop of toolStops()) stop.tabIndex = stop === node ? 0 : -1; };
+  setToolStop(blockType);
+  tools.addEventListener("focusin", event => { if (toolStops().includes(event.target)) setToolStop(event.target); });
+  tools.addEventListener("keydown", event => {
+    if (event.key === "Escape" && tableMenu.open) { event.preventDefault(); tableMenu.open = false; tableTitle.focus(); return; }
+    if (tableMenu.open && tableMenu.contains(event.target) && ["ArrowUp", "ArrowDown"].includes(event.key)) {
+      const stops = [tableTitle, ...tableCommands.querySelectorAll("button:not(:disabled)")];
+      const index = stops.indexOf(event.target); event.preventDefault();
+      const next = stops[(index + (event.key === "ArrowDown" ? 1 : -1) + stops.length) % stops.length]; setToolStop(next); next.focus(); return;
+    }
+    if ((event.target.tagName === "SELECT" && !event.altKey) || !["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return;
+    const stops = toolStops(); const index = stops.indexOf(event.target); if (index < 0) return;
+    event.preventDefault();
+    const next = event.key === "Home" ? 0 : event.key === "End" ? stops.length - 1 : (index + (event.key === "ArrowRight" ? 1 : -1) + stops.length) % stops.length;
+    setToolStop(stops[next]); stops[next].focus();
+  });
+  const hint = document.createElement("p"); hint.className = "meta";
+  hint.textContent = "Supported typography, spacing and borders appear in Visual. Full stored styling appears in Preview. Plain-text paste only; external resources are blocked.";
+  const clear = document.createElement("button"); clear.textContent = "Clear content"; clear.type = "button"; clear.className = "richtext-clear";
+  clear.title = "Store an explicit empty value; does not reset to inherited or Standard Values";
+  const control = document.createElement("textarea"); control.id = field.id; control.className = "html-source";
+  control.spellcheck = false; control.wrap = "off"; control.setAttribute("aria-label", field.label + " HTML source");
+  control.dataset.fieldId = field.id; control.dataset.original = field.original; control.dataset.explicitClear = String(field.clear);
+  const error = document.createElement("p"); error.className = "meta"; error.setAttribute("role", "status");
+  const visualError = document.createElement("p"); visualError.className = "meta visual-error"; visualError.setAttribute("role", "status");
+  let toolFrame;
+  const refreshTools = () => {
+    if (toolFrame) return;
+    toolFrame = requestAnimationFrame(() => {
+      toolFrame = undefined;
+      const editor = visualSources.get(field.id); if (!editor || !row.isConnected) return;
+      for (const button of tools.querySelectorAll("button[data-rich-command]")) {
+        if (button.closest(".richtext-table-tools") && !tableMenu.open) continue;
+        const state = editor.status(button.dataset.richCommand);
+        button.setAttribute("aria-disabled", String(blocked || !state.enabled));
+        if (["bold","italic","underline","strike","subscript","superscript","bulletList","orderedList","blockquote","alignLeft","alignCenter","alignRight","alignJustify"].includes(button.dataset.richCommand)) button.setAttribute("aria-pressed",String(state.active));
+        button.title = state.reason || (button.dataset.richCommand === "clearFormatting" ? "Remove plain text marks; retain links, wrappers and CSS." : button.textContent);
+      }
+      for (const select of [blockType]) {
+        let selected = ""; let reason = ""; let available = false;
+        for (const option of select.options) if (option.value) {
+          const state = editor.status(option.value); option.disabled = !state.enabled; option.title = state.reason;
+          if (state.active) selected = option.value; if (state.enabled) available = true; else reason ||= state.reason;
+        }
+        select.value = selected; select.disabled = blocked || !available; select.title = available ? `${select.getAttribute("aria-label")} (Alt+Left/Right moves between toolbar controls)` : reason;
+      }
+      const stops = toolStops(); if (!stops.some(stop => stop.tabIndex === 0)) setToolStop(stops[0]);
+    });
+  };
+  tableMenu.addEventListener("toggle", () => {
+    visualSources.get(field.id)?.tableMenu?.(tableMenu.open); refreshTools();
+    setToolStop(toolStops().includes(document.activeElement) ? document.activeElement : toolStops().find(stop => stop.tabIndex === 0) || toolStops()[0]);
+    if (tableMenu.open) {
+      const rect = tableMenu.getBoundingClientRect();
+      const width = tableCommands.getBoundingClientRect().width;
+      tableCommands.style.left = `${Math.max(8 - rect.left, Math.min(0, document.documentElement.clientWidth - 8 - rect.left - width))}px`;
+      tableCommands.style.right = "auto";
+    }
+  });
+  const display = document.createElement("div"); display.className = "html-source-preview";
+  const source = createHtmlSource(control, field.clear ? "" : field.input, {
+    error: message => { error.textContent = message; },
+    change: input => {
+      visualError.textContent = "";
+      control.dataset.explicitClear = "false";
+      send("change", { id: field.id, input, clear: false }); document.getElementById("status").textContent = "Unsaved changes";
+    },
+    history: action => { if (!blocked) send(action); },
+  });
+  htmlSources.set(field.id, source);
+  const searchBar = document.createElement("div"); searchBar.className = "richtext-search"; searchBar.hidden = true;
+  const findRow = document.createElement("div"); const replaceRow = document.createElement("div"); replaceRow.hidden = true;
+  const query = document.createElement("input"); query.type = "text"; query.maxLength = 1024; query.placeholder = "Find in this field"; query.setAttribute("aria-label", "Find in this field");
+  const replacement = document.createElement("input"); replacement.type = "text"; replacement.maxLength = 8192; replacement.placeholder = "Replace with"; replacement.setAttribute("aria-label", "Replace with");
+  const preserveCase = document.createElement("input"); preserveCase.type = "checkbox"; preserveCase.setAttribute("aria-label", "Preserve casing");
+  const preserveLabel = document.createElement("label"); preserveLabel.className = "richtext-match-case"; preserveLabel.title = "Match lowercase, UPPERCASE or Initial capital; mixed casing uses your replacement as entered"; preserveLabel.append(preserveCase, "Preserve casing");
+  const matchCase = document.createElement("input"); matchCase.type = "checkbox";
+  const caseLabel = document.createElement("label"); caseLabel.className = "richtext-match-case"; caseLabel.title = "When checked, uppercase and lowercase must match exactly"; matchCase.setAttribute("aria-label", "Match case"); caseLabel.append(matchCase, "Match case");
+  const searchStatus = document.createElement("span"); searchStatus.className = "richtext-search-count"; searchStatus.setAttribute("role", "status");
+  const mirror = document.createElement("pre"); mirror.className = "richtext-search-mirror"; mirror.setAttribute("aria-hidden", "true"); mirror.hidden = true;
+  const sourceWrap = document.createElement("div"); sourceWrap.className = "richtext-source-wrap"; sourceWrap.append(mirror, control);
+  let searchEpoch = 0; let searchBusy = false; let searchTimer;
+  const input = direction => ({ query: query.value, matchCase: matchCase.checked, direction });
+  const mirrorScroll = () => { mirror.scrollTop = control.scrollTop; mirror.scrollLeft = control.scrollLeft; };
+  control.addEventListener("scroll", mirrorScroll);
+  const paintSource = matches => {
+    mirror.replaceChildren(); let offset = 0; const raw = source.read();
+    for (const found of matches) {
+      mirror.append(document.createTextNode(htmlSourceTools.normalize(raw.slice(offset, found.from))));
+      const mark = document.createElement("mark"); mark.textContent = htmlSourceTools.normalize(raw.slice(found.from, found.to));
+      if (htmlSourceTools.normalize(raw.slice(0, found.from)).length === control.selectionStart && htmlSourceTools.normalize(raw.slice(0, found.to)).length === control.selectionEnd) mark.className = "current";
+      mirror.append(mark); offset = found.to;
+    }
+    mirror.append(document.createTextNode(htmlSourceTools.normalize(raw.slice(offset)) + "\n"));
+    mirror.hidden = searchBar.hidden || control.hidden; sourceWrap.classList.toggle("searching", !mirror.hidden); mirrorScroll();
+  };
+  const closeSearch = (focus = true) => {
+    searchEpoch++; clearTimeout(searchTimer); searchBar.hidden = true; mirror.hidden = true; sourceWrap.classList.remove("searching");
+    visualSources.get(field.id)?.clearSearch();
+    if (focus) { const editor = visualSources.get(field.id); if (editor) editor.focus(); else control.focus(); }
+  };
+  const runSearch = async (direction = "next", operation = "find") => {
+    if (blocked || searchBusy || searchBar.hidden || !row.isConnected) return;
+    const epoch = ++searchEpoch; const editor = visualSources.get(field.id); searchBusy = true;
+    try {
+      if (!query.value) { editor?.clearSearch(); paintSource([]); searchStatus.textContent = ""; return; }
+      const request = input(direction); let result;
+      if (editor) {
+        result = operation === "refresh" ? await editor.highlightSearch(request) : operation === "find" ? await editor.search(request) : await editor.replaceSearch({ ...request, replacement: replacement.value, preserveCase: preserveCase.checked, all: operation === "all" });
+      } else {
+        await source.finishComposition();
+        if (epoch !== searchEpoch || blocked || !row.isConnected) return;
+        let raw = source.read(); let matches = richTextSearchTools.literalMatches(raw, request);
+        let from = htmlSourceTools.offset(raw, control.selectionStart); let to = htmlSourceTools.offset(raw, control.selectionEnd); let replaced = 0;
+        if (operation === "one" || operation === "all") {
+          const selected = operation === "all" ? matches : matches.filter(match => match.from === from && match.to === to);
+          if (!selected.length && operation === "one") throw new Error("Find a match before replacing it. The selection may have changed.");
+          const replacements = selected.map(match => ({ ...match, text: richTextSearchTools.replacementText(raw.slice(match.from, match.to), replacement.value, preserveCase.checked) }));
+          for (const match of [...replacements].reverse()) raw = raw.slice(0, match.from) + match.text + raw.slice(match.to);
+          if (raw.length > htmlSourceTools.limit) throw new Error("Replacement exceeds the HTML size limit.");
+          matches = richTextSearchTools.literalMatches(raw, request); // Validate the entire result before any draft change.
+          const resume = selected[0]?.from ?? 0;
+          source.replace(raw); replaced = selected.length; from = to = operation === "one" ? resume + (replacements[0]?.text.length ?? 0) : 0;
+        }
+        let index = matches.findIndex(match => match.from === from && match.to === to);
+        if (["find", "one"].includes(operation) && matches.length) {
+          index = direction === "previous" ? matches.reduce((found, match, i) => match.to <= from ? i : found, -1) : matches.findIndex(match => match.from >= to);
+          if (index < 0) index = direction === "previous" ? matches.length - 1 : 0;
+          const found = matches[index]; control.setSelectionRange(htmlSourceTools.normalize(raw.slice(0, found.from)).length, htmlSourceTools.normalize(raw.slice(0, found.to)).length);
+          const line = htmlSourceTools.normalize(raw.slice(0, found.from)).split("\n").length - 1;
+          control.scrollTop = Math.max(0, line * parseFloat(getComputedStyle(control).lineHeight) - control.clientHeight / 2);
+          const column = htmlSourceTools.normalize(raw.slice(0, found.from)).split("\n").at(-1).length;
+          control.scrollLeft = Math.max(0, column * parseFloat(getComputedStyle(control).fontSize) * .61 - control.clientWidth / 2);
+        }
+        paintSource(matches); result = { count: matches.length, index: index + 1, replaced };
+      }
+      if (epoch === searchEpoch && row.isConnected && visualSources.get(field.id) === editor) searchStatus.textContent = `${result.index} of ${result.count}${result.replaced ? ` · ${result.replaced} replaced` : ""}`;
+    } catch (failure) { if (epoch === searchEpoch && row.isConnected) { searchStatus.textContent = failure.message; editor?.clearSearch(); paintSource([]); } }
+    finally { searchBusy = false; }
+  };
+  const refreshSearch = () => { clearTimeout(searchTimer); if (!searchBar.hidden) searchTimer = setTimeout(() => { if (searchBusy) refreshSearch(); else void runSearch("next", "refresh"); }, 100); };
+  const openSearch = replace => { if (blocked || htmlModes.get(field.id) === "preview") return; searchBar.hidden = false; replaceRow.hidden = !replace; query.focus(); query.select(); void runSearch("next", "refresh"); };
+  const actionButton = (parent, label, action, icon) => { const button = document.createElement("button"); button.type = "button"; button.textContent = label; button.title = label; button.setAttribute("aria-label", label); if (icon) button.dataset.actionIcon = icon; if (["previousMatch", "nextMatch", "cancel"].includes(icon)) { button.className = "richtext-icon-button"; const text = document.createElement("span"); text.className = "action-label"; text.textContent = label; button.replaceChildren(text); } button.disabled = blocked; button.addEventListener("mousedown", event => event.preventDefault()); button.addEventListener("click", () => { if (!blocked) action(); }); parent.append(button); return button; };
+  for (const action of ["undo", "redo"]) actionButton(historyGroup, action === "undo" ? "Undo" : "Redo", async () => {
+    const editor = visualSources.get(field.id);
+    try { await editor?.freeze(); await source.finishComposition(); if (!blocked && row.isConnected && editor === visualSources.get(field.id)) { editor?.editable(true); send(action); } }
+    catch (failure) { visualError.textContent = failure.message; if (editor === visualSources.get(field.id)) editor?.editable(!blocked); }
+  }, action);
+  actionButton(searchGroup, "Find", () => openSearch(false), "find"); actionButton(searchGroup, "Replace", () => openSearch(true), "replace");
+  const navigation = document.createElement("div"); navigation.className = "richtext-search-navigation"; navigation.setAttribute("role", "group"); navigation.setAttribute("aria-label", "Match navigation");
+  findRow.append(query, navigation); actionButton(navigation, "Previous match", () => void runSearch("previous"), "previousMatch"); actionButton(navigation, "Next match", () => void runSearch(), "nextMatch");
+
+  findRow.append(caseLabel, searchStatus); actionButton(findRow, "Close search", () => closeSearch(), "cancel");
+  replaceRow.append(replacement, preserveLabel); actionButton(replaceRow, "Replace", () => void runSearch("next", "one"), "replace"); actionButton(replaceRow, "Replace all", () => void runSearch("next", "all"), "replace");
+  searchBar.append(findRow, replaceRow);
+  for (const node of [query, matchCase]) node.addEventListener("input", refreshSearch);
+  control.addEventListener("input", refreshSearch);
+  control.addEventListener("keydown", event => { if ((event.ctrlKey || event.metaKey) && !event.altKey && ["f", "h"].includes(event.key.toLowerCase())) { event.preventDefault(); openSearch(event.key.toLowerCase() === "h"); } });
+  searchBar.addEventListener("keydown", event => { if (event.key === "Escape") { event.preventDefault(); closeSearch(); } else if (event.key === "Enter") { event.preventDefault(); void runSearch(event.shiftKey ? "previous" : "next"); } });
+  row.addEventListener("close-link", () => closeSearch(false), true);
+  let modeRequest = 0;
+  const mode = value => {
+    closeSearch(false);
+    linkRequest++;
+    closeLink();
+    visualError.textContent = "";
+    visualSources.get(field.id)?.dispose(); visualSources.delete(field.id); visualArea.replaceChildren();
+    if (value === "visual") {
+      try {
+        const editor = (globalThis.createRichTextFrame || createRichTextVisual)(visualArea, source.read(), {
+          change: raw => { source.replace(raw); refreshSearch(); }, find: openSearch, history: action => { if (!blocked) send(action); }, error: message => { visualError.textContent = message; }, selection: refreshTools,
+          escape: () => html.focus(), save: () => { if (!blocked) document.getElementById("save").click(); },
+        });
+        editor.editable(!blocked); visualSources.set(field.id, editor); error.textContent = "";
+      } catch (failure) { value = "html"; visualError.textContent = `Visual unavailable: ${failure.message}`; }
+    }
+    source.read(); htmlModes.set(field.id, value);
+    visualArea.hidden = formatRow.hidden = insert.hidden = hint.hidden = value !== "visual";
+    tools.hidden = value === "preview";
+    sourceWrap.hidden = control.hidden = value !== "html"; display.hidden = value !== "preview";
+    html.setAttribute("aria-pressed", String(value === "html")); preview.setAttribute("aria-pressed", String(value === "preview")); visual.setAttribute("aria-pressed", String(value === "visual"));
+    display.replaceChildren();
+    setToolStop(toolStops()[0]);
+    refreshTools();
+    if (value === "preview") {
+      const raw = source.read();
+      display.append(renderReadOnlyField({ raw, presentation: { kind: "richtext", status: raw ? "populated" : "empty" } }, { sourceMode: true }));
+    }
+  };
+  const switchMode = async value => {
+    if (blocked) return;
+    const request = ++modeRequest;
+    try {
+      await visualSources.get(field.id)?.freeze(); await source.finishComposition();
+      if (request === modeRequest && row.isConnected && !blocked) { mode(value); if (value === "html") control.focus(); else if (value === "visual") visualSources.get(field.id)?.focus(); }
+    } catch { error.textContent = "Finish composing before changing modes."; visualSources.get(field.id)?.editable(!blocked); }
+  };
+  html.addEventListener("click", () => void switchMode("html"));
+  preview.addEventListener("click", () => void switchMode("preview"));
+  visual.addEventListener("click", () => void switchMode("visual"));
+  clear.addEventListener("click", () => {
+    if (blocked) return;
+    modeRequest++;
+    source.replace("", false); control.dataset.explicitClear = "true";
+    send("change", { id: field.id, input: "", clear: true }); mode("html"); control.focus();
+    document.getElementById("status").textContent = "Unsaved changes";
+  });
+  for (const button of [html, visual, preview, clear]) button.disabled = blocked;
+  control.disabled = blocked;
+  const modes = document.createElement("div"); modes.className = "richtext-modes"; modes.setAttribute("role", "group"); modes.setAttribute("aria-label", "Rich Text mode");
+  modes.append(html, visual, preview); actions.append(modes, clear); row.append(actions, tools, searchBar, linkForm, hint, sourceWrap, visualArea, display, error, visualError);
+  mode(htmlModes.get(field.id) || "html");
+}
 function selectionLabel(field) {
   const label = document.createElement("p"); label.className = "selection-current"; label.id = field.id; label.setAttribute("role", "status");
   label.dataset.selectionLabel = field.id;
@@ -224,7 +580,7 @@ function renderNameValues(row, field) {
         input.placeholder = key === "key" ? "Name" : "Value"; input.setAttribute("aria-label", `${field.label} row ${index + 1} ${key}`);
         input.addEventListener("input", () => { entry[key] = input.value; validate(); draft.change(entries); }); pair.append(input);
       }
-      const remove = document.createElement("button"); remove.textContent = "×"; remove.disabled = blocked; remove.setAttribute("aria-label", `Remove row ${index + 1}`);
+      const remove = document.createElement("button"); remove.textContent = "×"; remove.dataset.actionIcon = "remove"; remove.dataset.iconOnly = "true"; remove.disabled = blocked; remove.setAttribute("aria-label", `Remove row ${index + 1}`);
       remove.addEventListener("click", () => { entries.splice(index, 1); draft.change(entries); draw(); (list.children[Math.min(index, entries.length - 1)]?.querySelector("input") || add).focus(); });
       pair.append(remove); list.append(pair);
     });
@@ -275,7 +631,7 @@ function renderGeneralLink(row, field) {
     const input = document.createElement("input"); input.type = "text"; input.dataset.linkProperty = key;
     input.setAttribute("aria-label",`${field.label} ${title}`);
     input.disabled = blocked || (field.linkCustom && !["text","title","target","class"].includes(key));
-    input.addEventListener("focus",()=>expand(true));
+    for (const event of ["focus", "editorFocus", "click"]) input.addEventListener(event,()=>expand(true));
     input.addEventListener("input",()=>{
       if (key === "url" && values.linktype === "anchor") {
         const attributeOnly = !values.url && Boolean(values.anchor);
@@ -298,7 +654,8 @@ function renderGeneralLink(row, field) {
     chosen:choice=>values.id.replace(/[{}-]/g,"").toLowerCase()===choice.itemId.replace(/[{}-]/g,"").toLowerCase(),
     accept:choice=>{values.id=choice.value;values.url="";names.set(values.id,choice.path);refreshTarget();setSelectionLabel(target,choice.displayName||choice.name,choice.path);changed();picker.close();}
   });
-  target.addEventListener("focus",()=>expand(true));target.addEventListener("click",picker.open);
+  for (const event of ["focus", "editorFocus", "click"]) target.addEventListener(event,()=>expand(true));
+  target.addEventListener("click",picker.open);
   target.addEventListener("keydown",event=>{if(["Enter"," ","ArrowDown"].includes(event.key)){event.preventDefault();picker.open();}});
   for(const [key,title] of [["text","Link text"],["title","Title"],["target","Target"],["class","CSS class"],["anchor","Anchor"],["querystring","Query string"]])add(key,title,properties);
   const update = () => {
@@ -519,9 +876,9 @@ function createChoicePicker(row, field, trigger, options) {
   popup.setAttribute("role", "dialog"); popup.setAttribute("aria-label", `${field.label} choices`);
   trigger.setAttribute("aria-controls", popup.id); trigger.setAttribute("aria-haspopup", "dialog");
   const header = document.createElement("div"); header.className = "picker-header";
-  const back = document.createElement("button"); back.textContent = "‹"; back.title = "Back to parent"; back.setAttribute("aria-label", "Back to parent"); back.hidden = true;
+  const back = document.createElement("button"); back.textContent = "‹"; back.dataset.actionIcon = "left"; back.dataset.iconOnly = "true"; back.title = "Back to parent"; back.setAttribute("aria-label", "Back to parent"); back.hidden = true;
   const source = document.createElement("span"); source.className = "picker-source";
-  const dismiss = document.createElement("button"); dismiss.textContent = "×"; dismiss.title = "Close choices"; dismiss.setAttribute("aria-label", "Close choices");
+  const dismiss = document.createElement("button"); dismiss.textContent = "×"; dismiss.dataset.actionIcon = "cancel"; dismiss.dataset.iconOnly = "true"; dismiss.title = "Close choices"; dismiss.setAttribute("aria-label", "Close choices");
   header.append(back,source,dismiss);
   const search = document.createElement("input"); search.type = "search"; search.className = "picker-search";
   search.placeholder = options.tree ? "Filter this level" : "Search items"; search.setAttribute("aria-label", `Search ${field.label} choices`);
@@ -623,6 +980,7 @@ function createChoicePicker(row, field, trigger, options) {
     event.preventDefault(); const index = buttons.indexOf(document.activeElement?.closest(".picker-row")?.querySelector(".picker-choice")); const next = index < 0 ? (event.key === "ArrowDown" ? 0 : buttons.length - 1) : Math.max(0, Math.min(buttons.length - 1,index + (event.key === "ArrowDown" ? 1 : -1)));
     buttons[next].focus(); buttons[next].scrollIntoView({block:"nearest"});
   });
-  row.addEventListener("focusout", event => { if (!popup.hidden && event.relatedTarget && !row.contains(event.relatedTarget)) close(false); });
-  return {popup,search,open,close,refresh:update};
+  const focusOut = event => { if (!popup.hidden && event.relatedTarget && !row.contains(event.relatedTarget)) close(false); };
+  row.addEventListener("focusout", focusOut);
+  return {popup,search,open,close,refresh:update,dispose:()=>{ close(false); row.removeEventListener("focusout",focusOut); }};
 }

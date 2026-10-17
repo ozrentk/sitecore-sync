@@ -16,6 +16,7 @@ import {
 import type { IntegrationTest } from "./testSupport";
 
 class TestWebview {
+  options: vscode.WebviewOptions = {};
   readonly received = new vscode.EventEmitter<unknown>();
   readonly onDidReceiveMessage = this.received.event;
   readonly messages: unknown[] = [];
@@ -86,6 +87,7 @@ class TestPublishingFormRuntime implements PublishingFormRuntime {
     options: vscode.WebviewPanelOptions & vscode.WebviewOptions,
   ): vscode.WebviewPanel {
     this.created = { viewType, title, options };
+    this.panel.webviewHost.options = options;
     return this.panel as unknown as vscode.WebviewPanel;
   }
 

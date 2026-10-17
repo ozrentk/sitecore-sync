@@ -72,6 +72,7 @@ function localErrors(type) {
 }
 function setBusy(value, cancellable = false) {
   busy = value; get("fields").disabled = value;
+  if (!value) for (const button of document.querySelectorAll("[aria-busy]")) button.setAttribute("aria-busy", "false");
   for (const id of ["save", "cancel", "reload"]) get(id).disabled = value;
   get("stop").hidden = !value || !cancellable;
 }
@@ -79,6 +80,7 @@ function request(type) {
   if (busy) return;
   const invalid = localErrors(type); errors(invalid); if (Object.keys(invalid).length) return;
   const input = values(); setBusy(true, type !== "save");
+  (type === "save" ? get("save") : document.querySelector(`[data-test="${type}"]`))?.setAttribute("aria-busy", "true");
   get("status").textContent = type === "save" ? "Validating and saving…" : "Testing…";
   vscode.postMessage({ type, values: input });
 }
