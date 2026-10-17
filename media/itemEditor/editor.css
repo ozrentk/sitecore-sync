@@ -158,3 +158,18 @@ select { font:inherit; color:var(--vscode-input-foreground); background:var(--vs
 .richtext-search-mirror mark.current { background:var(--vscode-editor-findMatchBackground, #a8880088); outline:1px solid var(--vscode-editor-findMatchBorder, #aa8800); }
 .richtext-source-wrap.searching .html-source { position:relative; background:transparent; }
 @media(forced-colors:active) { .richtext-search-mirror mark { outline:1px solid Highlight; } .richtext-search-mirror mark.current { outline-width:3px; } }
+
+.richtext-search { background:var(--vscode-editorWidget-background); border-radius:3px; }
+.richtext-search button { margin:0; padding:3px 7px; min-height:28px; }
+.richtext-search input[type=checkbox] { width:auto; margin:0 5px 0 0; cursor:pointer; }
+.richtext-match-case { padding:4px 8px; border:1px solid var(--vscode-panel-border); border-radius:3px; cursor:pointer; }
+.richtext-search-count { margin-left:8px; padding-left:8px; border-left:1px solid var(--vscode-panel-border); font-variant-numeric:tabular-nums; }
+.richtext-tool-group { gap:4px; padding:0 7px; }
+
+.richtext-search-navigation { display:flex; gap:0; }
+.richtext-search-navigation button + button { border-left:0; }
+.richtext-search button { background:transparent; color:var(--vscode-foreground); border:1px solid var(--vscode-panel-border); border-radius:3px; }
+.richtext-search button:hover { background:var(--vscode-toolbar-hoverBackground); }
+
+.richtext-search .richtext-icon-button { padding:4px; }
+.richtext-search .richtext-icon-button .action-icon { margin:0; }

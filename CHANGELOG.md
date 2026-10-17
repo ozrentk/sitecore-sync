@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.55.0 — 2026-10-17
+
+- Use a struck S icon and improve grouping, spacing and Match case labeling in the inline search bar; remove Show replacement from Find mode.
+- Indent/outdent paragraphs and headings in 40px margin-left steps while preserving existing supported styles. List indentation remains unchanged.
+- Advance to the next match after Replace in Visual and HTML, allowing consecutive replacements without searching again.
+- Format generated Visual HTML with block/table indentation while preserving inline text, attribute tokens, existing line endings and untouched source.
+- Convert selected top-level paragraphs/headings to one-column table rows. Add populated row/column deletion and Delete table; Delete/Backspace removes a fully selected table. Retain native Undo and surrounding content. Split merged cells before row/column deletion.
+
 ## 0.54.0 — 2026-10-17
 
 - Add Strikethrough, Subscript, Superscript and top-level Horizontal rule to guarded Visual editing, including preserved import/export and disabled reasons.

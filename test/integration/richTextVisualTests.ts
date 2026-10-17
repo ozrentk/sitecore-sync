@@ -1,3 +1,4 @@
+import { formatManagedHtml } from "../../src/editor/richTextFormatting";
 import * as vscode from "vscode";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -119,7 +120,7 @@ export const richTextVisualTests: readonly IntegrationTest[] = [{
           assert(htmlSources.get('html').read().includes('<caption>Caption</caption>'),"New caption typing");
           show(table);await wait();visualSources.get('html').restore({from:5,to:5});
           const tablePaste=new DataTransfer();tablePaste.setData('text/plain','X');document.querySelector('.tiptap').dispatchEvent(new ClipboardEvent('paste',{clipboardData:tablePaste,bubbles:true,cancelable:true}));await wait();
-          assert(htmlSources.get('html').read()===table.replace('>A<','>XA<'),"Plain cell paste retains grid");
+          assert(htmlSources.get('html').read()===${JSON.stringify(formatManagedHtml(simpleTableHtml.replace('>A<','>XA<')))},"Plain cell paste retains grid");
           const pastedTable=htmlSources.get('html').read();tablePaste.setData('text/html','<table><tr><td>bad</td></tr></table>');document.querySelector('.tiptap').dispatchEvent(new ClipboardEvent('paste',{clipboardData:tablePaste,bubbles:true,cancelable:true}));await wait();
           assert(htmlSources.get('html').read()===pastedTable,"Formatted table paste rejected atomically");
           show(table,{id:'html'});await wait();assert(htmlSources.get('html').read()===table,"Host table undo restores raw");
@@ -128,8 +129,8 @@ export const richTextVisualTests: readonly IntegrationTest[] = [{
           show(insertBase);await wait();selectText('Before',2);await wait();
           document.querySelector('.richtext-table-tools summary').click();
           const tableButton=label=>[...document.querySelectorAll('.richtext-table-tools button')].find(button=>button.textContent===label);
-          tableButton('Insert table (2 × 2)').click();await wait();
-          const inserted='<p class="keep">Before</p>'+table.replace('>A<','><')+'<p>After</p>';
+          tableButton('Insert table / paragraphs to rows').click();await wait();
+          const inserted=${JSON.stringify(formatManagedHtml('<p class="keep">Before</p>'+simpleTableHtml.replace('>A<','><')+'<p>After</p>'))};
           assert(htmlSources.get('html').read()===inserted,"Visible Insert table action preserves existing paragraphs");
           document.execCommand('insertText',false,'New cell');await wait();
           const typedTable=inserted.replace('<td></td>','<td>New cell</td>');
@@ -165,12 +166,12 @@ export const richTextVisualTests: readonly IntegrationTest[] = [{
           const commandButton=name=>document.querySelector('[data-rich-command="'+name+'"]');
           show('<p>Alpha</p><p>Beta</p>');button('Visual').click();await wait();
           visualSources.get('html').restore({from:1,to:12});await wait();commandButton('bulletList').click();await wait();
-          assert(htmlSources.get('html').read()==='<ul><li><p>Alpha</p></li><li><p>Beta</p></li></ul>','Toolbar creates list without changing text');
+          assert(htmlSources.get('html').read()===${JSON.stringify(formatManagedHtml('<ul><li><p>Alpha</p></li><li><p>Beta</p></li></ul>'))},'Toolbar creates list without changing text');
           assert(commandButton('bulletList').getAttribute('aria-pressed')==='true','List state active');
           selectText('Beta',1);await wait();commandButton('indent').click();await wait();
-          assert(htmlSources.get('html').read()==='<ul><li><p>Alpha</p><ul><li><p>Beta</p></li></ul></li></ul>','Indent nests selected item');
+          assert(htmlSources.get('html').read()===${JSON.stringify(formatManagedHtml('<ul><li><p>Alpha</p><ul><li><p>Beta</p></li></ul></li></ul>'))},'Indent nests selected item');
           document.querySelector('.tiptap').dispatchEvent(new KeyboardEvent('keydown',{key:'Tab',shiftKey:true,bubbles:true,cancelable:true}));await wait();
-          assert(htmlSources.get('html').read()==='<ul><li><p>Alpha</p></li><li><p>Beta</p></li></ul>','Keyboard outdent preserves order');
+          assert(htmlSources.get('html').read()===${JSON.stringify(formatManagedHtml('<ul><li><p>Alpha</p></li><li><p>Beta</p></li></ul>'))},'Keyboard outdent preserves order');
           const block=document.querySelector('[aria-label="Text block type"]');block.value='h2';block.dispatchEvent(new Event('change'));await wait();
           commandButton('alignCenter').click();await wait();assert(commandButton('alignCenter').getAttribute('aria-pressed')==='true','Direct alignment button active');
           const listDraft=htmlSources.get('html').read();assert(listDraft.includes('<h2 style="text-align: center;">Beta</h2>'),'Heading and alignment retain list structure');
@@ -181,15 +182,14 @@ export const richTextVisualTests: readonly IntegrationTest[] = [{
           assert(commandButton('bold').getAttribute('aria-pressed')==='true','Bold state reflects selection');
           commandButton('clearFormatting').click();await wait();assert(htmlSources.get('html').read()==='<p>Bold text</p>','Clear removes only plain marks');
           show('<p style="color:red">Text</p>');await wait();assert(commandButton('alignCenter').getAttribute('aria-disabled')==='true','Arbitrary CSS disables alignment');
-          assert(commandButton('indent').getAttribute('aria-disabled')==='true','Indent unavailable outside list');
-          assert(commandButton('indent').title.includes('list items'),'Disabled command has reason');
-          commandButton('blockquote').click();await wait();assert(htmlSources.get('html').read()==='<blockquote><p style="color:red">Text</p></blockquote>','Quote retains block styling');
+          assert(commandButton('indent').getAttribute('aria-disabled')==='false','Paragraph indentation available outside lists');
+          commandButton('blockquote').click();await wait();assert(htmlSources.get('html').read()===${JSON.stringify(formatManagedHtml('<blockquote><p style="color:red">Text</p></blockquote>'))},'Quote retains block styling');
           commandButton('blockquote').click();await wait();assert(htmlSources.get('html').read()==='<p style="color:red">Text</p>','Quote removal retains inner styling');
           const spaced='<p>One</p>\n<p>Two</p>';
           for(const command of ['bulletList','blockquote']){
             show(spaced);await wait();visualSources.get('html').restore({from:1,to:10});
             commandButton(command).click();await wait();
-            const expected=command==='bulletList'?'<ul><li><p>One</p></li>\n<li><p>Two</p></li></ul>':'<blockquote><p>One</p>\n<p>Two</p></blockquote>';
+            const expected=command==='bulletList'?${JSON.stringify(formatManagedHtml('<ul><li><p>One</p></li>\n<li><p>Two</p></li></ul>'))}:${JSON.stringify(formatManagedHtml('<blockquote><p>One</p>\n<p>Two</p></blockquote>'))};
             assert(htmlSources.get('html').read()===expected,'Whitespace survives explicit '+command+' wrapping');
             selectText('Two',3);await wait();document.execCommand('insertText',false,'!');await wait();
             assert(htmlSources.get('html').read()===expected.replace('Two','Two!'),'Typing remains admitted after whitespace moves into '+command);
@@ -202,9 +202,9 @@ export const richTextVisualTests: readonly IntegrationTest[] = [{
           assert(htmlSources.get('html').read()==='<p></p>','Enter on an empty item exits the list');
           const commandOpaque='<style>.sample{color:red}</style><p>Text</p><img src="/asset" alt="Keep" data-dam-id="123">';
           show(commandOpaque);await wait();selectText('Text',2);await wait();commandButton('blockquote').click();await wait();
-          assert(htmlSources.get('html').read()===commandOpaque.replace('<p>Text</p>','<blockquote><p>Text</p></blockquote>'),'Quote retains stylesheet and DAM image opaque bytes');
+          assert(htmlSources.get('html').read()===commandOpaque.replace('<p>Text</p>',${JSON.stringify(formatManagedHtml('<blockquote><p>Text</p></blockquote>'))}),'Quote retains stylesheet and DAM image opaque bytes');
           selectText('Text',4);await wait();document.execCommand('insertText',false,'!');await wait();
-          assert(htmlSources.get('html').read()===commandOpaque.replace('<p>Text</p>','<blockquote><p>Text!</p></blockquote>'),'Typing preserves opaque content after structural command');
+          assert(htmlSources.get('html').read()===commandOpaque.replace('<p>Text</p>',${JSON.stringify(formatManagedHtml('<blockquote><p>Text!</p></blockquote>'))}),'Typing preserves opaque content after structural command');
           api.postMessage({type:"visual-test",ok:true,edited});
         })().catch(error=>api.postMessage({type:"visual-test",error:String(error)}));
       `);

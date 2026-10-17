@@ -70,6 +70,27 @@ function apply(tr: Transaction, state: EditorState, command: Command): void {
   for (const step of result.steps) tr.step(step);
   tr.setSelection(Selection.fromJSON(tr.doc, result.selection.toJSON())); tr.setStoredMarks(result.storedMarks);
 }
+function indentToken(open: string, direction: number): string {
+  const token = open || "<p>";
+  const node = parseFragment(token + "</p>", { sourceCodeLocationInfo: true }).childNodes[0];
+  if (!node || !("tagName" in node)) throw new Error("Unrecognized block token.");
+  const style = node.attrs.find(attr => attr.name === "style");
+  if (/["'()\\]/u.test(style?.value ?? "")) throw new Error("Complex CSS values require HTML editing to preserve their syntax.");
+  const declarations = (style?.value ?? "").split(";").map(part => part.trim()).filter(Boolean);
+  if (declarations.some(part => /^margin\s*:/iu.test(part)) || /\/\*|\*\//u.test(style?.value ?? "")) throw new Error("Edit shorthand or commented margins in HTML first.");
+  const margins = declarations.filter(part => /^margin-left\s*:/iu.test(part));
+  if (margins.length > 1 || margins.some(part => !/^margin-left\s*:\s*(?:0|\d+px)\s*$/iu.test(part))) throw new Error("Indent supports a single nonnegative pixel margin-left. Edit other margin units in HTML.");
+  const previous = margins.length ? Number(margins[0].match(/:\s*(\d+)/u)![1]) : 0;
+  const next = Math.max(0, previous + direction * 40);
+  if (next === previous) return token;
+  if (next > 10240) throw new Error("Maximum paragraph indentation reached.");
+  const rest = declarations.filter(part => !/^margin-left\s*:/iu.test(part));
+  if (next) rest.push(`margin-left: ${next}px`);
+  const value = rest.length ? `style="${(rest.join("; ") + ";").replace(/&/gu, "&amp;").replace(/"/gu, "&quot;")}"` : "";
+  if (!style) return token.replace(/>$/u, ` ${value}>`);
+  const location = node.sourceCodeLocation!.attrs!.style;
+  return (token.slice(0, location.startOffset) + value + token.slice(location.endOffset)).replace(/\s+>$/u, ">");
+}
 /** Construct one bounded, preflighted operation; callers authorize only this exact transaction. */
 export function richTextCommand(state: EditorState, name: string, availabilityOnly = false): Transaction {
   if (!richCommands.includes(name as typeof richCommands[number])) throw new Error("Unknown Rich Text command.");
@@ -87,6 +108,13 @@ export function richTextCommand(state: EditorState, name: string, availabilityOn
     const position = state.selection.$from.after(1);
     tr.insert(position, [state.schema.nodes.horizontalRule.create(), state.schema.nodes.paragraph.create()]);
     tr.setSelection(TextSelection.create(tr.doc, position + 2));
+  } else if (["indent", "outdent"].includes(name) && !ancestor(state, ["listItem"])) {
+    for (const { node, pos } of selectedBlocks(state)) {
+      if (!["paragraph", "heading"].includes(node.type.name)) throw new Error("Select paragraphs or headings to indent.");
+      tr.setNodeMarkup(pos, undefined, { ...node.attrs, open: indentToken(node.attrs.open || `<${node.attrs.tag || "p"}>`, name === "indent" ? 1 : -1) });
+    }
+    if (tr.doc.eq(state.doc)) throw new Error("The selected paragraphs are already at the left margin.");
+    semanticBlockEdit = true;
   } else if (name === "paragraph" || /^h[1-6]$/u.test(name) || name.startsWith("align")) {
     for (const { node, pos } of selectedBlocks(state)) {
       const alignment = name.startsWith("align") ? name.slice(5).toLowerCase() : undefined;

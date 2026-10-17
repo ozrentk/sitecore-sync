@@ -65,7 +65,7 @@ test("inline item split/lift is deliberate, while metadata loss and impossible i
   strictEqual(raw(run(state('<ul><li>Text</li></ul>', 'Text', 1), 'outdent')), '<p>Text</p>');
   throws(() => richTextCommand(state('<ul><li class="keep">Text</li></ul>', 'Text', 1), 'outdent'), /protected/);
   throws(() => richTextCommand(state('<ul class="keep"><li>Text</li></ul>', 'Text', 1), 'orderedList'), /metadata/);
-  throws(() => richTextCommand(state('<p>Text</p>', 'Text', 1), 'indent'), /list items/);
+  strictEqual(raw(run(state('<p>Text</p>', 'Text', 1), 'indent')), '<p style="margin-left: 40px;">Text</p>');
   throws(() => richTextCommand(state('<ul><li>Text</li></ul>', 'Text', 1), 'indent'), /unavailable/);
 });
 test("quote wrapping/lifting preserves block attributes and refuses deleting annotated wrappers", () => {
@@ -148,4 +148,25 @@ test("replacement is atomic, retains wrappers and rejects crossing structures or
   throws(() => replaceVisual(value, { ...find, replacement: '', all: true }), /protected/);
   strictEqual(visualMatches(state('<p>o<br>ne</p>', 'o').doc, find).length, 0);
   strictEqual(visualMatches(state('<p>o</p><p>ne</p>', 'o').doc, find).length, 0);
+});
+
+
+test("paragraph indentation uses 40px steps while preserving styles and content", () => {
+  let value = state('<p style="text-align: left; color: red;">Text</p>', 'Text');
+  value = run(value, 'indent'); match(raw(value), /text-align: left; color: red; margin-left: 40px;/);
+  value = run(value, 'indent'); match(raw(value), /margin-left: 80px/);
+  value = run(value, 'outdent'); match(raw(value), /margin-left: 40px/);
+  value = run(value, 'outdent'); strictEqual(raw(value), '<p style="text-align: left; color: red;">Text</p>');
+  throws(() => run(state('<p style="margin-left: 2em">Text</p>', 'Text'), 'indent'), /pixel/);
+  const mixed = state('<p style="margin-left: 40px;">One</p><p>Two</p>', 'One');
+  strictEqual(raw(run(mixed.apply(mixed.tr.setSelection(new AllSelection(mixed.doc))), 'outdent')), '<p>One</p><p>Two</p>');
+  throws(() => run(state('<p style="color: rgb(1,2,3)">Text</p>', 'Text'), 'indent'), /Complex CSS/);
+});
+test("repeated single replace automatically selects the next match", () => {
+  let value = state('<p>one one one</p>', 'one', 0, 3);
+  for (let i = 0; i < 3; i++) {
+    const result = replaceVisual(value, { ...find, replacement: 'two', all: false });
+    strictEqual(result.result.count, 2 - i); value = value.apply(result.transaction);
+  }
+  strictEqual(raw(value), '<p>two two two</p>');
 });

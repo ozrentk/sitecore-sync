@@ -1,9 +1,9 @@
 import { test } from "node:test";
 import { strictEqual, throws, match } from "node:assert/strict";
 import { Schema } from "@tiptap/pm/model";
-import { EditorState, TextSelection } from "@tiptap/pm/state";
+import { EditorState, TextSelection, NodeSelection } from "@tiptap/pm/state";
 import { CellSelection } from "@tiptap/pm/tables";
-import { tableCommand } from "../../src/editor/richTextTableCommands";
+import { tableCommand, wholeTableSelected } from "../../src/editor/richTextTableCommands";
 import { admitVisual, exportVisual } from "../../src/editor/richTextAdmission";
 import { simpleTableHtml } from "../fixtures/richTextTables";
 
@@ -13,8 +13,8 @@ const schema = new Schema({ nodes: {
   tableShell: { content: "caption? tableGrid+", attrs },
   tableGrid: { content: "tableRow+", tableRole: "table", attrs },
   tableRow: { content: "(tableCell | tableHeader)+", tableRole: "row", attrs },
-  tableCell: { content: "cellText+", tableRole: "cell", attrs: { ...attrs, colspan: { default: 1 }, rowspan: { default: 1 }, colwidth: { default: null } } },
-  tableHeader: { content: "cellText+", tableRole: "header_cell", attrs: { ...attrs, colspan: { default: 1 }, rowspan: { default: 1 }, colwidth: { default: null } } },
+  tableCell: { content: "(cellText | paragraph)+", tableRole: "cell", attrs: { ...attrs, colspan: { default: 1 }, rowspan: { default: 1 }, colwidth: { default: null } } },
+  tableHeader: { content: "(cellText | paragraph)+", tableRole: "header_cell", attrs: { ...attrs, colspan: { default: 1 }, rowspan: { default: 1 }, colwidth: { default: null } } },
 } });
 function state(raw = simpleTableHtml): EditorState {
   const doc = schema.nodeFromJSON(admitVisual(raw).document);
@@ -33,7 +33,7 @@ test("insert table preserves the current paragraph, places the cursor in the fir
   strictEqual(inserted.selection.$from.parent.type.name, "cellText");
   strictEqual((raw(apply(inserted, "rowAfter")).match(/<tr>/gu) ?? []).length, 3);
   strictEqual(current.doc.textContent, "BeforeAfter", "Insertion does not mutate the previous state");
-  throws(() => tableCommand(current.apply(current.tr.setSelection(TextSelection.create(doc, 1, 4))), "insertTable"), /without selecting/);
+  match(raw(apply(current.apply(current.tr.setSelection(TextSelection.create(doc, 1, 4))), "insertTable")), /<td><p class="keep">Before<\/p><\/td>/);
 });
 
 test("insert table works in an empty document and never nests inside an existing table", () => {
@@ -92,4 +92,25 @@ test("rowspan split stays within its section and never duplicates cell content",
   const current = apply(state(original), "splitCell");
   strictEqual(raw(current), simpleTableHtml);
   admitVisual(raw(current));
+});
+
+
+test("selected paragraphs become individual one-column rows without content loss", () => {
+  const html = '<p class="one">First</p><p>Second</p><p>Outside</p>';
+  const doc = schema.nodeFromJSON(admitVisual(html).document);
+  const value = EditorState.create({ doc, selection: TextSelection.create(doc, 1, 14) });
+  const result = apply(value, 'insertTable');
+  strictEqual(raw(result), '<table><tbody><tr><td><p class="one">First</p></td></tr><tr><td><p>Second</p></td></tr></tbody></table><p>Outside</p>');
+  strictEqual(result.doc.textContent, value.doc.textContent);
+});
+test("explicit populated row/column/table deletion retains all outside content and metadata", () => {
+  const html = '<p>Before</p><table class="keep"><tbody><tr><td>A</td><td>B</td></tr><tr><td>C</td><td>D</td></tr></tbody></table><p>After</p>';
+  const doc = schema.nodeFromJSON(admitVisual(html).document);let pos = 0;
+  doc.descendants((node, at) => { if (node.isText && node.text === 'A') pos = at; });
+  const value = EditorState.create({ doc, selection: TextSelection.create(doc, pos) });
+  strictEqual(raw(apply(value, 'removeRows')), '<p>Before</p><table class="keep"><tbody><tr><td>C</td><td>D</td></tr></tbody></table><p>After</p>');
+  strictEqual(raw(apply(value, 'removeColumns')), '<p>Before</p><table class="keep"><tbody><tr><td>B</td></tr><tr><td>D</td></tr></tbody></table><p>After</p>');
+  strictEqual(raw(apply(value, 'deleteTable')), '<p>Before</p><p>After</p>');
+  const selected = value.apply(value.tr.setSelection(NodeSelection.create(doc, doc.firstChild!.nodeSize)));
+  strictEqual(wholeTableSelected(selected), true); strictEqual(raw(apply(selected, 'deleteTable')), '<p>Before</p><p>After</p>');
 });
