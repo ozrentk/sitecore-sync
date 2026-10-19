@@ -7,6 +7,7 @@ These reports contain experiments, dated observations, unresolved questions and 
 For Rich Text implementation instructions, start with the [agent development guide](../development/rich-text-editor.md). The reports below remain dated evidence.
 
 - [Fallback investigation](fallback-spike.md)
+- [B27 authoring component/reference discovery](b27-authoring-discovery-spike.md)
 - [Tiptap/CodeMirror compatibility](richtext-compatibility-spike.md)
 - [Direct ProseMirror comparison](prosemirror-compatibility-spike.md)
 - [Custom Rich Text editing compatibility and decision](custom-richtext-compatibility-spike.md)
