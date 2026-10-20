@@ -4,6 +4,26 @@
 
 ## Current decision — updated 2026-10-20
 
+**Controlled partial-design and unpublished-value checks passed.** With explicit user authorization, created four isolated items in Dev's demo site through Content Editor: a page, page design, partial design and text datasource beneath the partial design. Existing items were not edited and no publish action was performed. The demo site was used because it exposes the standard headless partial-design templates; the earlier real-page checks used a different site on the same Dev connection.
+
+The new page selected only the new page design, which selected only the new partial design. The partial's shared presentation contained one RichText instance in `headless-main`, with `local:/b27-marker` as datasource and `label=B27&empty=` as parameters. Its text datasource contained a unique marker A, subsequently changed to marker B without publication.
+
+Verified observations:
+
+- Preview returned the expected new page and page-design identities. The page's own raw presentation had a layout but no rendering instances, and its final presentation was empty.
+- Effective `headless-main` contained a `PartialDesignDynamicPlaceholder` wrapper, whose UID and `sid` matched the partial-design item. Its signature-named nested placeholder contained the exact RichText UID configured on the partial.
+- Preview resolved `local:/b27-marker` to the datasource path beneath the partial design, not beneath the page. The returned Text value matched the controlled marker.
+- Preview returned marker A, then marker B after a direct save, with one HTTP 200 attempt each (272 ms and 264 ms transport timings). Exact Authoring readback confirmed B. This establishes visibility of these newly created, never-published items and their changed value in this fixture; it is not a universal freshness guarantee or a Delivery comparison.
+- Unlike the earlier navigation sample, the fixture retained `"empty": ""` in its parameter object. Do not generalize empty-parameter removal across renderings. Preview parameters remain effective projections, separate from raw strings.
+
+Cleanup: deleted the page, page design and partial-design subtree (including the datasource) through Content Editor, then deleted the three thumbnails Sitecore generated for those new presentation items. Exact-ID index searches returned zero results for all seven items; the test route returned HTTP 200 with null layout (`status: unresolved`, 24 response bytes). Restored Raw values to its original off setting. No recycle-bin purge or existing media-folder deletion was performed. Index absence alone is not proof of physical erasure; these were normal Content Editor deletions.
+
+**Next implementation boundary:** the sampled provider now has evidence for ordinary layouts, standard partial-design expansion, owner-relative datasource resolution and unpublished changes. Proceed with a bounded read-only component/immediate-datasource tree, retaining effective nesting and occurrence identity, explicit unknown provenance and the agreed implicit-device constraint. Treat custom resolvers, nested/base partial-design inheritance and other datasource expressions as unverified. Do not derive writable source locales or reconstruct raw presentation from effective output.
+
+Validation: live fixture creation/readback, two fixture layout reads, post-delete null-layout check, targeted cleanup searches and documentation diff review. Runtime source is unchanged, so automated runtime suites were not rerun. No fixture payloads, private IDs or credentials are committed.
+
+## Earlier dedicated diagnostic evidence — 2026-10-20
+
 **The extension's dedicated CM Preview diagnostic now works against Dev.** After saving the separate Preview token, two fixed layout queries succeeded through MCP for the same known page in `en` and `en-AU`. No Sitecore writes or publications were performed. The IDE observations below remain earlier evidence.
 
 Both responses returned the expected page identity, `master`, their requested context/item language and route version 1. Each contained 20 unique instance UIDs. Traversing only explicit placeholder arrays confirmed identical instance UIDs, component names, datasource strings, nesting, placeholder-local order and parameter objects across the two locales. This replaces the discarded earlier cross-locale analysis, not the underlying observations. The rendered payloads differ; structural equality does not establish content equality or fallback source provenance.
