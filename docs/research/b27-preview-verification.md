@@ -1,14 +1,45 @@
-# B27 CM Preview verification: access gate and query protocol
+# B27 CM Preview verification: live evidence and query protocol
 
 2026-10-19. Continues the [Authoring discovery spike](b27-authoring-discovery-spike.md). Research only. Open work remains in [BACKLOG.md](../../BACKLOG.md).
 
-## Current decision
+## Current decision — updated 2026-10-20
+
+**Preview access is now verified through the user-configured Dev IDE.** The earlier access blocker below is historical. Five read-only queries succeeded: root introspection, root operation contract, site catalog, and the known page in English and Australian English. This establishes a useful provider candidate, not full B27 acceptance: unpublished freshness, partial designs, raw-parameter fidelity and non-default devices remain unverified.
+
+The live root schema exposes `layout(site: String!, routePath: String!, language: String!)` returning `LayoutData`, with no device argument. `item` accepts optional `path: String`, required `language: String!`, and optional `version: String`. No undocumented selectors were attempted.
+
+The catalog returned four entries, including two entries with the intended site name but different root paths. Site-name matching alone is therefore insufficient. The page layout itself returned the expected page ID, `master` database, English language/version 1 and the standard default-device ID. It contained four top-level placeholders and **20 distinct instance UIDs**, nested to depth two. One component type appeared three times with distinct UIDs and datasources. Array order and explicit parent nesting are observable without parsing placeholder names. Raw placeholder expressions differ from the normalized keys in Preview; preserve the two representations separately.
+
+The Australian English query returned the same page ID and device, context language and route item language `en-AU`, and route version 1. A fresh exact Authoring read on 2026-10-20 returned version 0 with no fields, confirming the previous day's observation. This is evidence of different read semantics, not proof that a local version exists or that English is the source. No writable locale is inferred.
+
+Inspected component records expose `uid`, `componentName`, `dataSource`, `isContentResolved` and, where applicable, `params`, `fields`, and `placeholders`. They do not expose a raw parameter string or rendering-definition ID in this sample. Preserve raw Authoring presentation separately; associating it with effective instances still needs verification. A sixth identity query was submitted but its result was not verified before the browser tool timed out on large response observation. No reliable per-request latency was captured. An attempted cross-locale count comparison was discarded because of a local analysis-state error; no order/parameter equivalence claim is made.
+
+After the user restarted MCP, three targeted Authoring reads succeeded: the page in English (version 1, 124 fields), the same page in Australian English (version 0, no fields), and one Preview datasource in English (matching identity, version 1, 85 fields). Shared presentation still contains 14 UID occurrences and final presentation 20; these are not effective counts.
+
+Three specific raw/effective comparisons support patch resolution in this sample: an instance explicitly deleted by final `<p:d />` is absent from Preview; an inherited instance absent from the final patch remains in Preview; and a footer instance uses the final `s:ds` override instead of the shared datasource. This is stronger evidence than matching total counts. It does not validate every patch directive or custom resolver, and reads are nontransactional.
+
+Browser observation failed on the large response, so five successful Preview queries plus the three fresh Authoring reads are the verified boundary. No Sitecore content was changed, and no unpublished difference was manufactured. Private payloads and identifiers are not stored in this report.
+
+| Capability | Current status |
+| --- | --- |
+| Configured Dev Preview authentication and layout query | Verified through IDE |
+| Expected page identity and master database | Verified in returned layout; fresh Authoring identity agrees |
+| Nested placement, distinct instances, repeated component types | Verified for one English page, including the three patch comparisons above |
+| Datasource identity | One returned GUID verified by fresh Authoring read |
+| Fallback source provenance | Unverified; exact/effective locale-version discrepancy reproduced |
+| Device | Returned default device observed; root layout schema has no device selector |
+| Raw parameters, partial designs, custom datasource expressions | Not verified |
+| Unpublished freshness | Not verified; no known unpublished difference supplied |
+
+**Recommendation:** proceed with designing a dedicated read-only Preview connection/diagnostic boundary, but do not claim full B27 coverage or enable writes. Complete partial-design and parameter association checks before promising a complete authoring tree. A limited provider must expose its coverage and unresolved evidence rather than silently substituting raw XML or published Delivery.
+
+## Historical access gate — 2026-10-19
 
 **No-go for claiming a verified effective-layout provider yet.** The concrete blocker is the available authenticated execution boundary: MCP exposes fixed Authoring operations, with no CM Preview query operation. The extension has no separately configured Preview credential slot. This does not establish that the remote Preview endpoint is unavailable, or that the user has no Preview credential.
 
 Asked the user to open Dev's Preview GraphQL IDE through Sitecore Deploy and configure its Preview token in that UI, without sharing it in chat. No credentials were extracted from content, local application storage or browser storage. The existing Delivery token and Authoring OAuth credentials were not reused. No live Preview API request has been attempted; there is no HTTP status, response timing or live Preview schema result to report.
 
-## Verified versus candidate evidence
+## Historical verified versus candidate evidence — 2026-10-19
 
 | Area | Evidence status | Consequence |
 | --- | --- | --- |
@@ -60,6 +91,6 @@ The existing synthetic [B27 fixtures](../../test/unit/b27Discovery.test.ts) exer
 
 ## Bounded next implementation decision
 
-Resume the live protocol once the configured Preview IDE is accessible. If identity, layout coverage and raw-parameter association can be established, implement a separately authenticated, read-only provider with explicit coverage/provenance, followed by the initial component/immediate-datasource view. If access through the extension is needed, design a dedicated SecretStorage-backed Preview configuration and narrowly scoped diagnostic command first; that is a separate implementation task, not accomplished by exposing Authoring MCP. If provider semantics fail, report the specific gap before selecting a server-side alternative.
+Resume the remaining live checks once browser observation recovers, or through a separately implemented diagnostic boundary. If identity, layout coverage and raw-parameter association can be established, implement a separately authenticated, read-only provider with explicit coverage/provenance, followed by the initial component/immediate-datasource view. If access through the extension is needed, design a dedicated SecretStorage-backed Preview configuration and narrowly scoped diagnostic command first; that is a separate implementation task, not accomplished by exposing Authoring MCP. If provider semantics fail, report the specific gap before selecting a server-side alternative.
 
-Validation for this follow-up: query syntax/operation names, source audit, documentation links and diff review. No TypeScript/runtime change, package, release or live Preview acceptance test. Earlier live Authoring observations remain dated evidence in the preceding report; they were not rerun as Preview verification.
+Validation: the initial follow-up checked query syntax/operation names, source and documentation. The 2026-10-20 continuation adds the live checks above and a documentation diff review. No TypeScript/runtime change, package, release or full live acceptance test. Earlier observations remain dated evidence; the three fresh Authoring reads are explicitly distinguished above.
