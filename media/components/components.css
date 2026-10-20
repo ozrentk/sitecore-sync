@@ -29,7 +29,13 @@ button:disabled { opacity: .65; cursor: default; }
 ul { list-style: none; padding-left: 18px; }
 .tree { padding: 0; }
 li { margin: 8px 0; }
-.datasource,.info,.muted { margin: 8px 0 8px 12px; }
+.component-row { display: flex; align-items: flex-start; gap: 4px; }
+.component-select { flex: 1; min-width: 0; text-align: left; white-space: normal; overflow-wrap: anywhere; }
+.component-select:hover { background: var(--vscode-list-hoverBackground); }
+.branch-toggle,.branch-spacer { flex: 0 0 22px; width: 22px; box-sizing: border-box; }
+.branch-toggle { padding: 5px 0; background: transparent; }
+.branch-toggle span { display: inline-block; }
+.branch-toggle[aria-expanded=true] span { transform: rotate(90deg); }
 .muted,summary span { color: var(--vscode-descriptionForeground); }
 pre,p,.datasource { white-space: pre-wrap; overflow-wrap: anywhere; }
 .field { margin: 16px 8px; border-bottom: 1px solid var(--vscode-panel-border); padding-bottom: 12px; }

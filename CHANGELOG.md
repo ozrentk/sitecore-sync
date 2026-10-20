@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.59.2 — 2026-10-20
+
+- Show each component as one full-width datasource-name/type selection row, with independent child expansion and explicit unavailable datasource state.
+- Collapse system-only field groups when opening Components details; keep content and mixed groups expanded and all values inspectable.
+
 ## 0.59.1 — 2026-10-20
 
 - Move component count and compact layout context into the full-width header with a theme-aware separator. Show verified device names while retaining IDs; remove redundant Preview prose without changing locale/edit guards.

@@ -35,6 +35,7 @@ export function componentItemDetails(item: AuthoringItemDetails, expectedId: str
     editReason: editable ? "" : "Edit requires an ordinary content item with a verified exact-locale version and no fallback values.",
     fields: orderEditorFields(item.fields).map(field => ({
       id: field.fieldId, name: field.label || field.name, section: field.sectionName || "Fields",
+      isStandardTemplate: field.isStandardTemplate || field.name.startsWith("__"),
       type: field.type, scope: field.scope, raw: field.value, presentation: fieldPresentation(field.type, field.value),
       provenance: field.containsFallbackValue ? "Fallback source unknown" : field.containsStandardValue ? "Standard value" : "Exact locale",
     })),

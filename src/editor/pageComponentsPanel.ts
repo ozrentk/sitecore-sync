@@ -158,7 +158,7 @@ export class PageComponentsPanel implements vscode.Disposable {
       const signal = AbortSignal.any([detailRequest.signal, this.lifetime.signal, AbortSignal.timeout(30_000)]);
       const currentSelection = (): boolean => !disposed && current === detailRevision && layoutRevision === revision && validConnection();
       const component = components.get(key);
-      const instance = component ? { name: component.name, uid: component.uid, datasource: component.datasource, parameters: component.parameters } : undefined;
+      const instance = component ? { name: component.name, uid: component.uid, datasource: component.datasource, parameters: component.parameters, issues: component.issues } : undefined;
       const targetId = referenceId ?? targets.get(key);
       try {
         await panel.webview.postMessage({ type: "details", revision, selection: current, intent, key, loading: true, instance });

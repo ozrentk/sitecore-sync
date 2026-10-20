@@ -208,11 +208,11 @@ export const pageComponentsTests: readonly IntegrationTest[] = [{
     const spy = mock.method(vscode.window, "createWebviewPanel", (...args: Parameters<typeof original>) => { panel = original(...args); return panel; });
     const originalLoad = authoring.loadItem;
     const load = mock.method(authoring, "loadItem", async (...args: Parameters<AuthoringContentClient["loadItem"]>) =>
-      "itemId" in args[2] && args[2].itemId === id ? originalLoad(...args) : details(datasourceId));
-    const lookup = mock.method(authoring, "loadSelectionItem", async () => ({ itemId: datasourceId, name: "Text", displayName: "Text", path: "/sitecore/content/Example/Data", hasChildren: false }));
+      "itemId" in args[2] && args[2].itemId === id ? originalLoad(...args) : groupedDetails());
+    const lookup = mock.method(authoring, "loadSelectionItem", async () => ({ itemId: datasourceId, name: "Text", displayName: "SW - Title - Rich Text with a long descriptive name that should wrap", path: "/sitecore/content/Example/Data", hasChildren: false }));
     const provider = new PageComponentsPanel(connections, authoring, { collect: async () => ({ ...report, rendered: { sitecore: {
       ...report.rendered.sitecore, route: { ...report.rendered.sitecore.route, placeholders: {
-        main: [{ uid: id, componentName: "Component", dataSource: datasourceId, isContentResolved: true }, { componentName: "Instance only" }],
+        main: [{ uid: id, componentName: "Component", dataSource: datasourceId, isContentResolved: true, placeholders: { nested: [{ componentName: "Instance only" }] } }],
       } },
     } } }) });
     let timer: ReturnType<typeof setTimeout> | undefined, listener: vscode.Disposable | undefined;
@@ -230,7 +230,7 @@ export const pageComponentsTests: readonly IntegrationTest[] = [{
       if (!narrowExpected) {
         const extensionUri = vscode.extensions.getExtension("OzrenTK.sitecore-xm-cloud-sync")!.extensionUri;
         await vscode.workspace.fs.writeFile(vscode.Uri.joinPath(extensionUri, ".test-out", "components-ux-fixture.json"), Buffer.from(JSON.stringify({ html: panel!.webview.html,
-          item: { ...componentItemDetails(details(datasourceId), datasourceId, "en"), role: "Datasource", references: [] } })));
+          item: { ...componentItemDetails(groupedDetails(), datasourceId, "en"), role: "Datasource", references: [] } })));
       }
       const nonce = /nonce="([a-f0-9]+)"/u.exec(panel!.webview.html)![1];
       const script = `(async()=>{
@@ -243,10 +243,22 @@ export const pageComponentsTests: readonly IntegrationTest[] = [{
           if(!toggle.hidden||!toggle.disabled)throw Error("Empty pane offers expansion");
           toggle.click();if(workspace.classList.contains("expanded"))throw Error("Empty pane expanded");
           if(!header.textContent.includes("Default")||header.textContent.includes("not proof"))throw Error("Device or prose incorrect");
-          const button=document.querySelector("[data-component]");button.click();
+          const button=document.querySelector("[data-component]"), chevron=document.querySelector(".branch-toggle");
+          if(document.querySelector("[data-datasource]")||!button.textContent.endsWith("[Component]"))throw Error("Duplicate or incorrect selection row");
+          const row=button.closest(".component-row");
+          if(Math.abs(button.getBoundingClientRect().right-row.getBoundingClientRect().right)>1||getComputedStyle(button).whiteSpace!=="normal")throw Error("Row does not fill/wrap");
+          chevron.click();
+          if(!document.getElementById(chevron.getAttribute("aria-controls")).hidden||workspace.classList.contains("show-details"))throw Error("Chevron selected component");
+          chevron.click(); button.click();
+          if(chevron.getAttribute("aria-expanded")!=="true")throw Error("Selection collapsed children");
           await wait(()=>document.querySelector(".field"));
           if(!document.getElementById("detail-content").textContent.includes("${datasourceId}"))throw Error("Wrong datasource identity");
           if(document.querySelector(".field input,.field textarea"))throw Error("Fields became editable");
+          const groups=[...document.querySelectorAll(".field-group")];
+          const standard=groups.find(group=>group.querySelector("summary").textContent==="Statistics");
+          if(!standard||standard.open||!standard.querySelector(".field"))throw Error("Standard fields not retained/collapsed");
+          for(const name of ["Content","Mixed"]){if(!groups.find(group=>group.querySelector("summary").textContent===name)?.open)throw Error("Content hidden");}
+          standard.querySelector("summary").click();if(!standard.open)throw Error("Standard fields cannot expand");
           const split=document.getElementById("divider");
           split.dispatchEvent(new KeyboardEvent("keydown",{key:"ArrowLeft",bubbles:true}));
           if(split.getAttribute("aria-valuenow")!=="45")throw Error("Keyboard resize failed");
@@ -310,4 +322,14 @@ function details(itemId: string): AuthoringItemDetails {
     fields: [{ fieldId: id, name: "Related", label: "Related", type: "Droplink", typeKey: "droplink", value: "{33333333-3333-3333-3333-333333333333}",
       scope: "VERSIONED", sectionName: "Content", sectionSortOrder: 0, sortOrder: 0, isStandardTemplate: false,
       containsFallbackValue: false, containsInheritedValue: false, containsStandardValue: false, textual: false }] };
+}
+
+function groupedDetails(): AuthoringItemDetails {
+  const item = details(datasourceId), field = item.fields[0];
+  return { ...item, fields: [
+    { ...field, containsStandardValue: true },
+    { ...field, fieldId: referenceId, name: "__Updated", label: "Updated", sectionName: "Statistics", isStandardTemplate: true },
+    { ...field, name: "__System", sectionName: "Mixed", isStandardTemplate: true },
+    { ...field, sectionName: "Mixed" },
+  ] };
 }

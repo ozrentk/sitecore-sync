@@ -27,3 +27,14 @@ test("component details deduplicates supported references and bounds displayed f
   throws(() => componentItemDetails({ ...item, fields: Array.from({ length: 501 }, () => field) }, id, "en-AU"));
   throws(() => componentItemDetails({ ...item, fields: [{ ...field, value: "x".repeat(1024 * 1024 + 1) }] }, id, "en-AU"));
 });
+
+test("standard section classification does not collapse ordinary standard-value content", () => {
+  const fields = componentItemDetails({ ...item, fields: [
+    { ...field, containsStandardValue: true },
+    { ...field, name: "__Updated", isStandardTemplate: false },
+    { ...field, name: "System", isStandardTemplate: true },
+  ] }, id, "en-AU").fields;
+  equal(fields.find(value => value.provenance === "Standard value")?.isStandardTemplate, false);
+  equal(fields.filter(value => value.isStandardTemplate).length, 2);
+  equal(fields.length, 3);
+});

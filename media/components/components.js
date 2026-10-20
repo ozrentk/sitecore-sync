@@ -58,12 +58,20 @@ expand.onclick = () => {
 };
 document.getElementById("refresh").onclick = () => post({ type: "load", language: document.getElementById("language").value });
 document.getElementById("language").onchange = event => post({ type: "load", language: event.target.value });
-document.querySelectorAll("[data-component],[data-datasource]").forEach(button => {
+document.querySelectorAll("[aria-controls][data-branch-label]").forEach(button => {
+  button.onclick = () => {
+    const expanded = button.getAttribute("aria-expanded") !== "true";
+    document.getElementById(button.getAttribute("aria-controls")).hidden = !expanded;
+    button.setAttribute("aria-expanded", String(expanded));
+    button.setAttribute("aria-label", `${expanded ? "Collapse" : "Expand"} children of ${button.dataset.branchLabel}`);
+  };
+});
+document.querySelectorAll("[data-component]").forEach(button => {
   button.onclick = event => {
     event.preventDefault(); event.stopPropagation();
-    key = button.dataset.component || button.dataset.datasource;
+    key = button.dataset.component;
     selection = -1; returnFocus = button;
-    document.querySelectorAll("[aria-pressed=true][data-component],[aria-pressed=true][data-datasource]").forEach(node => node.setAttribute("aria-pressed", "false"));
+    document.querySelectorAll("[aria-pressed=true][data-component]").forEach(node => node.setAttribute("aria-pressed", "false"));
     button.setAttribute("aria-pressed", "true");
     workspace.classList.add("show-details");
     detailsAvailable(false);
@@ -96,6 +104,7 @@ window.addEventListener("message", event => {
     text("summary", "Component instance", info);
     text("p", `Instance: ${data.instance.uid || "Unknown"}\nDeclared datasource: ${data.instance.datasource || "None"}\nPreview source locale: unknown`, info);
     text("pre", JSON.stringify(data.instance.parameters, null, 2), info);
+    for (const issue of data.instance.issues || []) text("p", issue, info);
   }
   if (data.loading) { text("p", "Loading item fields…"); return; }
   if (data.error) { text("p", data.error); return; }
@@ -123,7 +132,8 @@ window.addEventListener("message", event => {
   let group, groupName;
   for (const field of item.fields) {
     if (field.section !== groupName) {
-      groupName = field.section; group = document.createElement("details"); group.open = true; content.append(group);
+      groupName = field.section; group = document.createElement("details"); group.className = "field-group";
+      group.open = !item.fields.filter(candidate => candidate.section === groupName).every(candidate => candidate.isStandardTemplate); content.append(group);
       text("summary", groupName, group);
     }
     const row = document.createElement("section"); row.className = "field"; group.append(row);
