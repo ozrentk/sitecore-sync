@@ -10,6 +10,7 @@ const connectionsKey = "sitecoreXmCloudSync.connections.v1";
 const secretPrefix = "sitecoreXmCloudSync.connectionSecret.v1";
 const deploymentSecretPrefix = "sitecoreXmCloudSync.deploymentSecret.v1";
 const speCredentialSecretPrefix = "sitecoreXmCloudSync.speCredential.v1";
+const previewTokenSecretKey = (id: string): string => `sitecoreXmCloudSync.previewToken.v1.${id}`;
 const edgeTokenSecretPrefix = "sitecoreXmCloudSync.edgeToken.v1";
 const favoritePathsKey = "sitecoreXmCloudSync.favoritePaths.v1";
 const verifiedSitesKey = "sitecoreXmCloudSync.verifiedSites.v1";
@@ -181,15 +182,15 @@ export class ConnectionStore implements vscode.Disposable {
 
   async saveSettings(
     connection: XmCloudConnection,
-    edits: { clientSecret: SecretEdit; deploymentSecret: SecretEdit; edgeToken: SecretEdit },
+    edits: { clientSecret: SecretEdit; deploymentSecret: SecretEdit; edgeToken: SecretEdit; previewToken?: SecretEdit },
     profile: PublishingSiteProfile | undefined,
     savePublicSettings: () => Promise<void>,
   ): Promise<void> {
     const previous = this.get(connection.id);
     const snapshots = [connectionsKey, publishingProfilesKey, verifiedSitesKey].map(key => ({ key, value: this.globalState.get<unknown>(key) }));
-    const keys = [secretKey(connection.id), deploymentSecretKey(connection.id), edgeTokenSecretKey(connection.id)];
+    const keys = [secretKey(connection.id), deploymentSecretKey(connection.id), edgeTokenSecretKey(connection.id), previewTokenSecretKey(connection.id)];
     const oldSecrets = await Promise.all(keys.map(key => this.secrets.get(key)));
-    const changes = [edits.clientSecret, edits.deploymentSecret, edits.edgeToken];
+    const changes = [edits.clientSecret, edits.deploymentSecret, edits.edgeToken, edits.previewToken ?? { action: "keep", value: "" }];
     const undo: (() => PromiseLike<void>)[] = [];
     try {
       for (let index = 0; index < keys.length; index += 1) {
@@ -256,6 +257,10 @@ export class ConnectionStore implements vscode.Disposable {
     return this.secrets.get(deploymentSecretKey(connectionId));
   }
 
+  async getPreviewToken(connectionId: string): Promise<string | undefined> {
+    return this.secrets.get(previewTokenSecretKey(connectionId));
+  }
+
   async getEdgeToken(connectionId: string): Promise<string | undefined> {
     return this.secrets.get(edgeTokenSecretKey(connectionId));
   }
@@ -320,6 +325,7 @@ export class ConnectionStore implements vscode.Disposable {
     await this.secrets.delete(deploymentSecretKey(connectionId));
     await this.secrets.delete(speCredentialSecretKey(connectionId));
     await this.secrets.delete(edgeTokenSecretKey(connectionId));
+    await this.secrets.delete(previewTokenSecretKey(connectionId));
     this.changeEmitter.fire();
   }
 

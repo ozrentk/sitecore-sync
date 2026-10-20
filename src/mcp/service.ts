@@ -1,3 +1,4 @@
+import { PreviewDiagnosticClient } from "../sitecore/previewDiagnostic";
 import { createHash, randomUUID } from "node:crypto";
 import * as z from "zod";
 import type { ConnectionStore } from "../connections/connectionStore";
@@ -10,7 +11,7 @@ import { fieldStateFingerprint } from "../transfers/transferTypes";
 import { prepareScopeRule, executeScopeRule, type ScopeRulePlan } from "../sitecore/scopeRules";
 import { isMcpToolName, McpAccessError, toolSchemas } from "./tools";
 
-type Connections = Pick<ConnectionStore, "get" | "listVerifiedSites" | "getClientSecret">;
+type Connections = Pick<ConnectionStore, "get" | "listVerifiedSites" | "getClientSecret"> & Partial<Pick<ConnectionStore, "getPreviewToken">>;
 type Client = Pick<AuthoringContentClient, "loadItem" | "loadLanguages" | "searchItemsByName" | "collectFallbackDiagnostic" | "createItem" | "updateItemFields" | "resetItemField" | "validateAddItemVersion" | "addItemVersion">;
 const operationSchema = z.object({ id: z.string().uuid(), connectionId: z.string(), serverUrl: z.string(),
   kind: z.enum(["create-fixtures", "update-field", "reset-field", "create-version", "create-scope-fixture", "update-scope-rule"]), startedAt: z.string(),
@@ -48,7 +49,7 @@ export class McpService {
   private readonly lifetime = new AbortController();
   private executing = false;
   constructor(private readonly connections: Connections, private readonly client: Client,
-    private readonly allowed: readonly XmCloudConnection[], private readonly host: McpServiceHost) {}
+    private readonly allowed: readonly XmCloudConnection[], private readonly host: McpServiceHost, private readonly preview = new PreviewDiagnosticClient()) {}
 
   dispose(): void { this.lifetime.abort(); this.plans.clear(); this.mutationConnections.clear(); }
   enableMutations(connectionId: string): void { this.connection(connectionId); this.mutationConnections.add(connectionId); }
@@ -73,6 +74,12 @@ export class McpService {
     if (!("connectionId" in args)) { throw new McpAccessError("Missing connection."); }
     const connection = this.connection(args.connectionId);
     if (name === "list_sites") { return { source: "saved discovery", sites: this.connections.listVerifiedSites(connection.id) }; }
+    if (name === "collect_preview_diagnostic") {
+      const value = toolSchemas.collect_preview_diagnostic.parse(input);
+      const token = await this.connections.getPreviewToken?.(connection.id);
+      if (!token) throw new McpAccessError("Configure a Preview token in Connection settings first.");
+      return this.preview.collect(connection.serverUrl, token, { site: value.site, route: value.route, language: value.language }, signal);
+    }
     const secret = await this.secret(connection.id);
     let result: unknown;
     switch (name) {

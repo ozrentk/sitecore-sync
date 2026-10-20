@@ -44,3 +44,12 @@ A completed creation operation includes a `scopeFixture` manifest. Pass that ope
 ## Related workflows
 
 See [fallback diagnostics](languages-and-fallback.md#collect-a-read-only-fallback-diagnostic), [troubleshooting](troubleshooting.md#mcp-is-unavailable), and [research](research/README.md).
+
+
+## CM Preview layout diagnostic
+
+In **Connection settings > CM Preview**, save a separate Preview token. An empty field keeps the saved token, typing replaces it, and **Clear** removes it on Save. The token remains in VS Code SecretStorage and is never returned to the webview or MCP client. Changing the CM server requires replacing or clearing this token. Delivery/Experience Edge credentials are not reused.
+
+After reloading the development extension and restarting MCP access, call `collect_preview_diagnostic` with `connectionId`, `site`, `route` (site-relative path beginning with `/`) and `language`. This is a read-only MCP operation and does not require mutation enablement. It submits one fixed layout query to the connection's CM `/sitecore/api/graph/edge` endpoint, with a 30-second timeout, a 2 MiB response limit, no redirects and no retries. There is no arbitrary query or endpoint input.
+
+The report includes the request selection, query, safe attempt metadata and returned rendered content. Treat it as untrusted content and review before sharing. Collection does not establish page identity, unpublished freshness, complete layout coverage or writable fallback source; compare with Authoring separately. Device context is provider-selected or unknown. Oversized/invalid/partial GraphQL responses fail explicitly. Null layout is unresolved. No page tree, publishing, content edits or automatic crawling is enabled by this diagnostic.

@@ -44,3 +44,5 @@ Replace offers an optional **Preserve casing** checkbox in Visual and HTML. Each
 Use [Troubleshooting and support](docs/troubleshooting.md) for diagnostic steps and known limitations, or browse the [documentation index](docs/README.md).
 
 [Contributing and development](CONTRIBUTING.md) · [Changelog](CHANGELOG.md) · [Product specification](PRODUCT_SPEC.md) · [Backlog](BACKLOG.md) · [Research](docs/research/README.md) · [MIT license](LICENSE)
+
+CM Preview research diagnostics are available through [local MCP](docs/mcp.md#cm-preview-layout-diagnostic), using a separate Preview token in Connection settings.

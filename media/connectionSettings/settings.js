@@ -1,9 +1,9 @@
 const vscode = acquireVsCodeApi();
 const get = id => document.getElementById(id);
 const textFields = ["name", "serverUrl", "clientId", "deploymentClientId", "deploymentEnvironmentId", "edgeEndpoint", "siteName", "applicationBaseUrl", "publicTemplate", "defaultSite"];
-const secretNames = { clientSecret: "Client secret", deploymentSecret: "Organization client secret", edgeToken: "Experience Edge token" };
+const secretNames = { clientSecret: "Client secret", deploymentSecret: "Organization client secret", edgeToken: "Experience Edge token", previewToken: "Preview token" };
 let storedSecrets = {};
-function secretAction(id) { return get(id).value ? "replace" : "keep"; }
+function secretAction(id) { return get(id).value ? "replace" : get(id).dataset.remove === "true" ? "remove" : "keep"; }
 let sites = [];
 let isNew = true;
 let busy = false;
@@ -16,6 +16,7 @@ for (const [id, title] of Object.entries(secretNames)) {
   const error = document.createElement("span"); error.className = "error"; error.id = `${id}-error`;
   input.setAttribute("aria-describedby", `${stored.id} ${error.id}`);
   label.append(input, stored, error); root.append(label);
+  if (id === "previewToken") { const clear = document.createElement("button"); clear.type = "button"; clear.textContent = "Clear"; clear.addEventListener("click", () => { input.value = ""; input.dataset.remove = "true"; stored.textContent = "Will be cleared on Save."; setDirty(true); }); root.append(clear); }
 }
 for (const error of document.querySelectorAll(".error[id]")) { const input = get(error.id.replace(/-error$/, "")); if (input && !input.hasAttribute("aria-describedby")) input.setAttribute("aria-describedby", error.id); }
 function setDirty(value) { get("dirty").textContent = value ? "Unsaved changes" : "No unsaved changes"; }
@@ -107,6 +108,7 @@ window.addEventListener("message", event => {
     for (const id of Object.keys(secretNames)) {
       get(id).value = "";
       get(id).disabled = false;
+      delete get(id).dataset.remove;
       get(id).placeholder = "Enter new secret or leave empty to keep the old one";
       get(`${id}-stored`).textContent = message.stored[id] ? "A secret is stored." : "No secret stored.";
     }

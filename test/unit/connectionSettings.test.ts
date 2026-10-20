@@ -3,7 +3,7 @@ import { test } from "node:test";
 import { parseConnectionSettings, SettingsValidationError, type ConnectionSettingsInput } from "../../src/connections/connectionSettingsValidation";
 
 function input(): ConnectionSettingsInput {
-  return { name: "Development", serverUrl: "https://cm.example.test", clientId: "client", clientSecret: { action: "keep", value: "" },
+  return { name: "Development", serverUrl: "https://cm.example.test", clientId: "client", previewToken: { action: "keep", value: "" }, clientSecret: { action: "keep", value: "" },
     deploymentEnabled: false, deploymentClientId: "", deploymentEnvironmentId: "", deploymentSecret: { action: "keep", value: "" },
     publishingEnabled: false, edgeEndpoint: "https://edge.example.test/graphql", siteName: "", edgeToken: { action: "keep", value: "" },
     applicationBaseUrl: "", publicTemplate: "{publicBaseUrl}/{language}{route}", defaultSite: "", sites: [] };
