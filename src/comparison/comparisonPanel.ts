@@ -1089,13 +1089,13 @@ export class ComparisonPanelManager implements vscode.Disposable {
       return;
     }
 
-    if (message.type === "editItem") {
+    if (message.type === "editItem" || message.type === "viewPageComponents") {
       if (this.pendingLanguageView || message.viewContext !== this.contentSession.revisionId ||
         (message.side !== "left" && message.side !== "right") || typeof message.itemId !== "string") return;
       const selection = this.getSelection();
       const connectionId = message.side === "left" ? selection.leftConnectionId : selection.rightConnectionId;
       const language = message.side === "left" ? selection.leftLanguage : selection.rightLanguage;
-      if (connectionId) await vscode.commands.executeCommand("xmCloudSync.editItem", { connectionId, itemId: message.itemId, language });
+      if (connectionId) await vscode.commands.executeCommand(message.type === "editItem" ? "xmCloudSync.editItem" : "xmCloudSync.viewPageComponents", { connectionId, itemId: message.itemId, language });
       return;
     }
 

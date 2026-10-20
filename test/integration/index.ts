@@ -1,4 +1,5 @@
 import { actionIconTests } from "./actionIconTests";
+import { pageComponentsTests } from "./pageComponentsTests";
 import { itemEditorTests } from "./itemEditorTests";
 import { htmlSourceTests } from "./htmlSourceTests";
 import { richTextVisualTests } from "./richTextVisualTests";
@@ -37,6 +38,7 @@ interface IntegrationTest {
 }
 
 const integrationTests: readonly IntegrationTest[] = [
+  ...pageComponentsTests,
   ...fallbackWebviewTests,
   ...itemEditorTests,
   ...htmlSourceTests,

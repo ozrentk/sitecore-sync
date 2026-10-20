@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.57.0 — 2026-10-20
+
+- Add View components… in Browse and Compare: a read-only CM Preview tree with nested placeholders, partial-design wrappers, component occurrences and immediate datasource references.
+- Add language reload and Refresh, strict page/site/locale validation, bounded traversal and cancellation. Keep unknown fallback provenance and effective versus raw parameters explicit.
+- Include separate CM Preview credentials and the fixed read-only MCP layout diagnostic. Recursive reference expansion and page-layout editing remain deferred.
+
 ## 0.56.0 — 2026-10-17
 
 - Add optional Preserve casing to Replace in Visual and HTML: pro/Pro/PRO becomes aqua/Aqua/AQUA. Mixed casing uses the replacement as entered.
