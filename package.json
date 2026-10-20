@@ -2,7 +2,7 @@
   "name": "sitecore-xm-cloud-sync",
   "displayName": "XM Cloud Sync",
   "description": "Compare and synchronize Sitecore XM Cloud authoring content from VS Code.",
-  "version": "0.56.0",
+  "version": "0.57.0",
   "publisher": "OzrenTK",
   "license": "MIT",
   "repository": {
@@ -301,6 +301,10 @@
         "command": "xmCloudSync.enableMcpMutations",
         "title": "Enable MCP Mutations",
         "category": "XM Cloud Sync"
+      },
+      {
+        "command": "xmCloudSync.viewPageComponents",
+        "title": "XM Cloud Sync: View Page Components…"
       },
       {
         "command": "xmCloudSync.editItem",
@@ -649,6 +653,10 @@
         },
         {
           "command": "xmCloudSync.browseConnection",
+          "when": "false"
+        },
+        {
+          "command": "xmCloudSync.viewPageComponents",
           "when": "false"
         },
         {

@@ -1,4 +1,5 @@
 import { ItemEditorProvider, itemEditorViewType } from "./editor/itemEditorProvider";
+import { PageComponentsPanel } from "./editor/pageComponentsPanel";
 import { McpAccessManager } from "./mcp/accessManager";
 import { FallbackFixtureCommands } from "./connections/fallbackFixtureCommands";
 import { ConnectionSettingsPanel } from "./connections/connectionSettingsPanel";
@@ -134,6 +135,11 @@ export function activate(context: vscode.ExtensionContext): void {
     log,
   );
   const itemEditors = new ItemEditorProvider(context, connectionStore, authoringClient);
+  const pageComponents = new PageComponentsPanel(connectionStore, authoringClient);
+  context.subscriptions.push(pageComponents, vscode.commands.registerCommand("xmCloudSync.viewPageComponents", async (args: unknown) => {
+    try { await pageComponents.open(args); }
+    catch { await vscode.window.showErrorMessage("Unable to open page components. Select a content page and check its connection, discovered sites and CM Preview token."); }
+  }));
   context.subscriptions.push(itemEditors,
     vscode.window.registerCustomEditorProvider(itemEditorViewType, itemEditors, { supportsMultipleEditorsPerDocument: false }),
     vscode.commands.registerCommand("xmCloudSync.editItem", async (args: unknown) => {

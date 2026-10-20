@@ -1244,8 +1244,17 @@ function showContextMenu(event, pair, clickedSide, forceDisabled = false) {
   editItem.className = "context-menu-item";
   editItem.type = "button";
   editItem.textContent = "Edit…";
+  const viewComponents = document.createElement("button");
+  viewComponents.className = "context-menu-item";
+  viewComponents.type = "button";
+  viewComponents.textContent = "View components…";
   const editSide = state.mode === "browse" ? "left" : clickedSide;
   editItem.disabled = disabled || !editSide || !pair[editSide];
+  viewComponents.disabled = editItem.disabled;
+  viewComponents.addEventListener("click", () => {
+    if (editSide && pair[editSide]) vscode.postMessage({ type: "viewPageComponents", side: editSide, itemId: pair[editSide].itemId });
+    closeContextMenu();
+  });
   editItem.addEventListener("click", () => {
     if (editSide && pair[editSide]) vscode.postMessage({ type: "editItem", side: editSide, itemId: pair[editSide].itemId });
     closeContextMenu();
@@ -1391,10 +1400,11 @@ function showContextMenu(event, pair, clickedSide, forceDisabled = false) {
       });
       return action;
     });
-    menu.append(editItem, detailedDiff, publishMenu, runTask, ...identityActions, addFavorite,
+    menu.append(editItem, viewComponents, detailedDiff, publishMenu, runTask, ...identityActions, addFavorite,
       createContextMenuSeparator(), itemAction, expandLoaded, load, refreshItem, refreshSubtree);
   } else menu.append(
     editItem,
+    viewComponents,
     detailedDiff,
     publishMenu,
     addFavorite,
