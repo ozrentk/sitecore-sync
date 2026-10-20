@@ -48,4 +48,4 @@ Use [Troubleshooting and support](docs/troubleshooting.md) for diagnostic steps 
 
 CM Preview research diagnostics are available through [local MCP](docs/mcp.md#cm-preview-layout-diagnostic), using a separate Preview token in Connection settings.
 
-Page component datasource labels open Item Details in Browse using the same connection and requested language; see [Page components](docs/page-components.md).
+Components has a resizable read-only details pane, with explicit Reveal in Browse and Edit actions for the actual datasource; see [Page components](docs/page-components.md).

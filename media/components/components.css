@@ -1,0 +1,40 @@
+:root { --tree-width: 50%; }
+body { font-family: var(--vscode-font-family); color: var(--vscode-foreground); padding: 12px; }
+header,nav { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+h1,h2 { font-size: 1.2em; }
+button,select { font: inherit; color: var(--vscode-input-foreground); background: var(--vscode-input-background); border: 1px solid var(--vscode-input-border, var(--vscode-contrastBorder, transparent)); padding: 5px 8px; }
+button,summary { cursor: pointer; }
+button:focus-visible,summary:focus-visible,[tabindex]:focus-visible { outline: 2px solid var(--vscode-focusBorder); outline-offset: 2px; }
+button[aria-pressed=true] { border-color: var(--vscode-focusBorder); background: var(--vscode-list-activeSelectionBackground); color: var(--vscode-list-activeSelectionForeground); }
+button:disabled { opacity: .65; cursor: default; }
+#workspace { display: grid; grid-template-columns: minmax(200px,var(--tree-width)) 9px minmax(0,1fr); height: calc(100vh - 130px); min-height: 280px; }
+#tree,#details { overflow: auto; min-width: 0; padding: 8px; }
+#divider { cursor: col-resize; border-inline: 1px solid var(--vscode-panel-border); background: var(--vscode-editorWidget-background); touch-action: none; }
+#divider:focus,#divider:hover { background: var(--vscode-focusBorder); }
+#details { border: 1px solid var(--vscode-panel-border); }
+#details nav { position: sticky; top: 0; background: var(--vscode-editor-background); padding-bottom: 8px; z-index: 1; }
+ul { list-style: none; padding-left: 18px; }
+.tree { padding: 0; }
+li { margin: 8px 0; }
+.datasource,.info,.muted { margin: 8px 0 8px 12px; }
+.muted,summary span { color: var(--vscode-descriptionForeground); }
+pre,p,.datasource { white-space: pre-wrap; overflow-wrap: anywhere; }
+.field { margin: 16px 8px; border-bottom: 1px solid var(--vscode-panel-border); padding-bottom: 12px; }
+.field h3 { font-size: 1em; }
+.field-info { font-size: .9em; color: var(--vscode-descriptionForeground); }
+#workspace.expanded { grid-template-columns: 1fr; }
+#workspace.expanded #tree,#workspace.expanded #divider { display: none; }
+#back { display: none; }
+#workspace.expanded #back { display: inline-block; }
+@media (max-width: 700px) {
+  #workspace { display: block; }
+  #tree,#details { height: 100%; box-sizing: border-box; }
+  #divider,#expand,#details { display: none; }
+  #workspace.show-details #tree { display: none; }
+  #workspace.show-details #details,#workspace.expanded #details { display: block; }
+  #back { display: inline-block; }
+}
+@media (forced-colors: active) {
+  button,#details,#divider { border: 1px solid CanvasText; }
+  button[aria-pressed=true] { outline: 2px solid Highlight; }
+}

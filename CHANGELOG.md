@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.59.0 — 2026-10-20
+
+- Keep Components inspection in a resizable right-hand details pane, with expand/restore, keyboard resizing and narrow-width Back navigation. Reuse read-only field rendering and show exact Authoring locale/version separately from Preview provenance.
+- Fix datasource navigation to reveal the actual datasource path in Browse. Offer explicit version-pinned Edit through the existing item editor; component selection no longer changes global Item Details.
+- Add bounded, lazy inspection of supported referenced items, with cancellation and stale selection/locale/action guards.
+
 ## 0.58.0 — 2026-10-20
 
 - Resolve component datasource GUIDs and absolute paths to item labels with bounded Authoring lookups. Show unavailable targets and unresolved expressions explicitly.

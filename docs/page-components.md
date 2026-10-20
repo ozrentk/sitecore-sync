@@ -4,13 +4,45 @@ In Browse or Compare, right-click a page and choose **View components…**.
 Save the environment's separate **CM Preview** token in Connection settings first.
 The extension uses the clicked side's connection and language.
 
-The read-only panel shows Preview's nested placeholders and component occurrences,
-including standard partial-design wrappers. Expand or collapse sections to inspect
-the layout. Each component shows its immediate datasource reference; Details
-contains the full reference, instance UID and effective parameter object.
-GUID and absolute-path datasources resolve to item labels using Authoring in the requested language. Click a resolved label to open Item Details in Browse on the same connection and language. This switches the comparison workspace to Browse. Missing or inaccessible targets remain visibly unavailable; custom expressions stay unresolved. These lookups do not establish fallback provenance or write eligibility. References inside a datasource are not recursively expanded.
+The Components tab keeps its tree beside a read-only details pane. Select a component
+or datasource to inspect its instance UID, effective parameters and the actual
+datasource's name, ID, path and fields. Selection stays inside Components and does
+not change Browse or another editor's drafts. Repeated components remain separate
+occurrences even when they use the same datasource.
 
-Duplicate references share a lookup within each layout load, with at most four lookups in flight and a 30-second overall load deadline. Refresh and language changes resolve labels again.
+Drag the divider or focus it and use Left/Right (Home/End for the limits) to resize.
+**Expand details** uses the whole tab. At narrow widths, selection opens Details;
+**Back to tree** or Escape returns to the tree and restores selection focus.
+
+GUID and absolute-path datasources resolve to item labels using Authoring in the
+requested language. Unresolved expressions, missing or inaccessible targets stay
+explicit; the owning page is never substituted. Duplicate references share a
+label lookup per layout load, with at most four requests in flight.
+
+**Reveal datasource in Browse** explicitly switches to Browse and reveals the
+resolved datasource path, retaining the connection and requested language. Browse
+shows its usual latest version. **Edit datasource** opens or reuses the ordinary
+item editor at the exact numbered version shown in Details; existing drafts and
+all editor validation/save rules remain intact. Editing is disabled for pages,
+non-content items, version zero and unverified fallback values. These actions refer
+to the selected referenced item when inspecting a reference, never its owner page.
+
+Supported relationships from Droplink, Droptree, Multilist, Treelist, Checklist,
+General Link and Image/File fields appear under **Referenced items**. Select one
+to inspect that item's fields in the same pane. Layout fields are not relationships
+here. This is explicit, one-item-at-a-time inspection, not automatic recursive
+graph expansion; cycles do not trigger background traversal. Missing references
+stay unavailable. At most 100 distinct references are listed, with a visible
+limit notice. Each item read is limited to 500 fields and 1 MiB of field text;
+excessive details fail visibly rather than showing silently truncated fields.
+
+Details uses exact-locale Authoring reads, with requested locale, returned locale,
+numbered version and field provenance shown separately. Preview may contain
+fallback content even when Authoring has no local version; no fallback source or
+writable target is guessed. Shared read-only field rendering retains raw values
+and the existing isolated Rich Text preview; external resources remain blocked.
+Selection, refresh, locale changes and closing the tab cancel pending reads and
+reject stale replies/actions. Each layout/details load has a 30-second deadline.
 
 Change Language to reload that page's layout in another configured locale.
 Refresh reads the current saved content again. Closing the panel cancels pending reads.
