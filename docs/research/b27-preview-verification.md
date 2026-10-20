@@ -4,7 +4,7 @@
 
 ## Current decision — updated 2026-10-20
 
-**Preview access is now verified through the user-configured Dev IDE.** The earlier access blocker below is historical. Five read-only queries succeeded: root introspection, root operation contract, site catalog, and the known page in English and Australian English. This establishes a useful provider candidate, not full B27 acceptance: unpublished freshness, partial designs, raw-parameter fidelity and non-default devices remain unverified.
+**Preview access is now verified through the user-configured Dev IDE.** The earlier access blocker below is historical. Five read-only queries succeeded: root introspection, root operation contract, site catalog, and the known page in English and Australian English. This establishes a useful provider candidate, not full B27 acceptance: unpublished freshness, partial designs and raw-parameter fidelity remain unverified. Arbitrary-device support is excluded by the agreed constraint below.
 
 The live root schema exposes `layout(site: String!, routePath: String!, language: String!)` returning `LayoutData`, with no device argument. `item` accepts optional `path: String`, required `language: String!`, and optional `version: String`. No undocumented selectors were attempted.
 
@@ -32,6 +32,10 @@ Browser observation failed on the large response, so five successful Preview que
 | Unpublished freshness | Not verified; no known unpublished difference supplied |
 
 **Recommendation:** proceed with designing a dedicated read-only Preview connection/diagnostic boundary, but do not claim full B27 coverage or enable writes. Complete partial-design and parameter association checks before promising a complete authoring tree. A limited provider must expose its coverage and unresolved evidence rather than silently substituting raw XML or published Delivery.
+
+## Agreed device constraint — 2026-10-20
+
+B27 uses the provider’s implicit device context. Arbitrary device selection, multi-device support and non-default-device verification are out of scope and are not acceptance blockers. Preserve a returned device ID as evidence; otherwise use unknown. Missing device identity alone must not reject an otherwise valid read-only layout. “Invariant” may describe the absence of a user-selectable dimension, but must not claim that content is identical across devices. This decision supersedes the earlier spike’s requirement to pin and verify a requested device; its synthetic device-mismatch fixtures remain historical research, not the production acceptance contract.
 
 ## Historical access gate — 2026-10-19
 
@@ -85,7 +89,7 @@ Budget for the initial live pass: at most 12 sequential Preview operations and f
 - **Placement/order:** provider nesting supplies candidate parent relationships; preserve placeholder-local array order and path-specific occurrences. Do not infer a universal order between unrelated placeholders. Duplicate/missing UIDs, flattened placement or partial-design ambiguity need explicit unresolved records.
 - **Parameters:** keep Preview's parameter object distinct from raw per-instance `s:par`/`par`. For the synthetic string `label=A%26B&empty=&label=C`, a plain object cannot preserve both `label` occurrences and original ordering/encoding. Do not reconstruct a raw string from the object. Correlation with raw Authoring data requires verified instance and effective-layout ownership; patch/inherited/partial-design values cannot be guessed.
 - **Datasource/context:** retain the returned raw expression and separately verified target. `local:/` needs the owning partial-design context. Custom resolver fields are effective rendering output, not a guaranteed item-field snapshot.
-- **Device:** only probe a non-default device when the live schema and documentation establish a selector. Otherwise report device coverage unverified and restrict any later provider claim accordingly.
+- **Device:** use the provider’s implicit context; preserve returned identity or record unknown. Do not probe arbitrary devices or block acceptance on non-default-device coverage.
 
 The existing synthetic [B27 fixtures](../../test/unit/b27Discovery.test.ts) exercise conservative discovery contracts; they do not supply missing live provider evidence. No production parser or UI was added in this follow-up.
 
