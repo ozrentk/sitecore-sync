@@ -24,6 +24,10 @@ export interface PageComponents {
   readonly count: number;
 }
 export interface ComponentSelection { readonly itemId: string; readonly language: string; readonly site: string; }
+/** Verified in Dev at /sitecore/layout/Devices/Default; never infer Default from a missing ID. */
+export function componentDeviceName(device: string): string {
+  return normalized(device) === "fe5d7fdf89c04d999aa3b5fbd009c9f3" ? "Default" : device;
+}
 function fail(): never { throw Error("Preview did not return a complete layout for the selected page, site and language."); }
 
 /** Preserve occurrences, not a UID-keyed map: repeated UIDs must never silently overwrite nodes. */
