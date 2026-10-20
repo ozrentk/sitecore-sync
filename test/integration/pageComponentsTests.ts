@@ -1,5 +1,5 @@
 import * as vscode from "vscode";
-import { strictEqual, match, doesNotMatch, rejects } from "node:assert/strict";
+import { strictEqual, match, doesNotMatch, rejects, deepStrictEqual } from "node:assert/strict";
 import { mock } from "node:test";
 import { PageComponentsPanel } from "../../src/editor/pageComponentsPanel";
 import type { ConnectionStore } from "../../src/connections/connectionStore";
@@ -17,6 +17,7 @@ function dependencies() {
     authoring: {
       loadItem: async () => ({ itemId: id, name: "Page", displayName: "Page", path: "/sitecore/content/Example/home/Page" }),
       loadLanguages: async () => [{ name: "en" }, { name: "en-AU" }],
+      loadSelectionItem: async () => ({ itemId: id, name: "Datasource", displayName: "Datasource", path: "/sitecore/content/Example/Data", hasChildren: false }),
     } as unknown as AuthoringContentClient,
   };
 }
@@ -45,6 +46,42 @@ export const pageComponentsTests: readonly IntegrationTest[] = [{
       doesNotMatch(panel!.webview.html, /preview-secret|authoring-secret|<RichText>/u);
       strictEqual(panel!.webview.options.localResourceRoots?.length, 0);
     } finally { provider.dispose(); spy.mock.restore(); }
+  },
+}, {
+  name: "component datasource navigation uses host-owned identity and requested language and rejects stale messages",
+  async execute() {
+    const { connections, authoring } = dependencies();
+    let panel: vscode.WebviewPanel | undefined;
+    let receive: ((message: unknown) => unknown) | undefined;
+    let listenerSpy: ReturnType<typeof mock.method> | undefined;
+    const original = vscode.window.createWebviewPanel;
+    const spy = mock.method(vscode.window, "createWebviewPanel", (...args: Parameters<typeof original>) => {
+      panel = original(...args);
+      listenerSpy = mock.method(panel.webview, "onDidReceiveMessage", (listener: (message: unknown) => unknown) => {
+        receive = listener; return new vscode.Disposable(() => {});
+      });
+      return panel;
+    });
+    const lookup = mock.method(authoring, "loadSelectionItem", async (...args: Parameters<AuthoringContentClient["loadSelectionItem"]>) => {
+      const [, , locator, language] = args;
+      deepStrictEqual(locator, { itemId: id }); strictEqual(language, "en");
+      return { itemId: id, name: "Datasource", displayName: "Datasource label", path: "/sitecore/content/Example/Data", hasChildren: false };
+    });
+    const opened: unknown[] = [];
+    const withDatasource = { ...report, rendered: { sitecore: { ...report.rendered.sitecore, route: {
+      ...report.rendered.sitecore.route, placeholders: { main: [{ uid: id, componentName: "Text", dataSource: id, isContentResolved: true }] },
+    } } } };
+    const provider = new PageComponentsPanel(connections, authoring, { collect: async () => withDatasource },
+      async (...args) => { opened.push(args); });
+    try {
+      await provider.open({ connectionId: "test", itemId: id, language: "en" });
+      match(panel!.webview.html, /Datasource label/u);
+      receive!({ type: "openDatasource", key: '["main",0]', revision: 0 });
+      receive!({ type: "openDatasource", key: '["invented",0]', revision: 1 });
+      strictEqual(opened.length, 0);
+      receive!({ type: "openDatasource", key: '["main",0]', revision: 1, itemId: "forged" });
+      deepStrictEqual(opened, [["test", id, "en"]]);
+    } finally { provider.dispose(); listenerSpy?.mock.restore(); spy.mock.restore(); lookup.mock.restore(); }
   },
 }, {
   name: "closing page components cancels an outstanding Preview read",

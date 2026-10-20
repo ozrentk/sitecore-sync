@@ -191,6 +191,35 @@ export const comparisonPanelTests: readonly IntegrationTest[] = [{
     session.dispose();
   },
 }, {
+  name: "component datasource details switches to Browse preserving the requested connection and language",
+  async execute(): Promise<void> {
+    const one = connection("one", "One");
+    const session = new ContentSession();
+    session.openCompare({ connectionId: "other", language: "fr", rootPath: "/" }, { connectionId: one.id, language: "en", rootPath: "/" });
+    const manager = Object.create(ComparisonPanelManager.prototype) as {
+      openDatasourceDetails(connectionId: string, itemId: string, language: string): Promise<void>;
+      selectedFieldDiffItem: unknown;
+    };
+    let refreshed = false;
+    Object.assign(manager, { contentSession: session, modeIntent: 0, workspaceState: new MemoryMemento(),
+      connectionStore: { get: (id: string) => id === one.id ? one : undefined },
+      cancelRequests: () => session.cancelPending(), clearFieldDiffSelection: async () => undefined,
+      openPanel: async () => undefined, postState: async () => undefined, loadInitialTrees: async () => undefined,
+      refreshFieldDiffView: async () => { refreshed = true; },
+    });
+    const command = mock.method(vscode.commands, "executeCommand", async () => undefined);
+    try {
+      await manager.openDatasourceDetails(one.id, "datasource", "en-NZ");
+      strictEqual(session.state?.mode, "browse");
+      const state = session.state;
+      if (state?.mode !== "browse") throw Error("Expected Browse");
+      strictEqual(state.source.connectionId, one.id);
+      strictEqual(state.source.language, "en-NZ");
+      deepStrictEqual(manager.selectedFieldDiffItem, { mode: "browse", leftItemId: "datasource" });
+      strictEqual(refreshed, true);
+    } finally { command.mock.restore(); session.dispose(); }
+  },
+}, {
   name: "connection deletion returns Compare to Browse without substituting another endpoint and clears old caches",
   async execute(): Promise<void> {
     for (const removed of ["left", "right"] as const) {

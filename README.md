@@ -47,3 +47,5 @@ Use [Troubleshooting and support](docs/troubleshooting.md) for diagnostic steps 
 [Contributing and development](CONTRIBUTING.md) · [Changelog](CHANGELOG.md) · [Product specification](PRODUCT_SPEC.md) · [Backlog](BACKLOG.md) · [Research](docs/research/README.md) · [MIT license](LICENSE)
 
 CM Preview research diagnostics are available through [local MCP](docs/mcp.md#cm-preview-layout-diagnostic), using a separate Preview token in Connection settings.
+
+Page component datasource labels open Item Details in Browse using the same connection and requested language; see [Page components](docs/page-components.md).

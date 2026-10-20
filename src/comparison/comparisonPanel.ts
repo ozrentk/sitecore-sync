@@ -381,6 +381,26 @@ export class ComparisonPanelManager implements vscode.Disposable {
     await this.loadInitialTrees();
   }
 
+  /** Open a component datasource in Browse, retaining its requested locale, never inferred provenance. */
+  async openDatasourceDetails(connectionId: string, itemId: string, language: string): Promise<void> {
+    if (!this.connectionStore.get(connectionId)) throw Error("Connection no longer exists.");
+    const intent = ++this.modeIntent;
+    this.cancelRequests();
+    this.contentSession.openConnection({ connectionId, language, rootPath: "/" });
+    await this.clearFieldDiffSelection();
+    if (intent !== this.modeIntent) return;
+    await this.openPanel();
+    if (intent !== this.modeIntent) return;
+    await this.postState();
+    if (intent !== this.modeIntent) return;
+    await this.loadInitialTrees();
+    if (intent !== this.modeIntent) return;
+    this.selectedFieldDiffItem = { mode: "browse", leftItemId: itemId };
+    await vscode.commands.executeCommand(`${fieldDiffViewId}.focus`);
+    if (intent !== this.modeIntent) return;
+    await this.refreshFieldDiffView();
+  }
+
   private get browseMode(): boolean { return this.contentSession?.state?.mode === "browse"; }
 
   async open(): Promise<void> {
