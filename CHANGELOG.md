@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.59.1 — 2026-10-20
+
+- Move component count and compact layout context into the full-width header with a theme-aware separator. Show verified device names while retaining IDs; remove redundant Preview prose without changing locale/edit guards.
+- Use one accessible icon toggle for desktop details expansion/restoration, shown only for loaded item details. Reserve Back to tree for narrow navigation and preserve instance-only inspection.
+
 ## 0.59.0 — 2026-10-20
 
 - Keep Components inspection in a resizable right-hand details pane, with expand/restore, keyboard resizing and narrow-width Back navigation. Reuse read-only field rendering and show exact Authoring locale/version separately from Preview provenance.

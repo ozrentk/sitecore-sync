@@ -5,6 +5,7 @@ const workspace = document.getElementById("workspace");
 const content = document.getElementById("detail-content");
 const divider = document.getElementById("divider");
 const expand = document.getElementById("expand");
+const narrowLayout = matchMedia("(max-width:700px)");
 let key, selection = -1, returnFocus, intent = 0;
 const post = message => api.postMessage({ ...message, revision });
 const state = api.getState() || {};
@@ -28,17 +29,32 @@ divider.addEventListener("pointermove", event => {
   resize((event.clientX - bounds.left) * 100 / bounds.width);
 });
 divider.addEventListener("pointerup", event => { if (divider.hasPointerCapture(event.pointerId)) divider.releasePointerCapture(event.pointerId); });
+function setExpanded(expanded) {
+  workspace.classList.toggle("expanded", expanded);
+  expand.setAttribute("aria-pressed", String(expanded));
+  const label = expanded ? "Restore split view" : "Expand details";
+  expand.setAttribute("aria-label", label); expand.title = label;
+}
+function detailsAvailable(available) {
+  expand.hidden = !available; expand.disabled = !available;
+  if (!available) setExpanded(false);
+}
 function back() {
-  workspace.classList.remove("expanded", "show-details");
-  expand.setAttribute("aria-pressed", "false"); expand.textContent = "Expand details";
+  workspace.classList.remove("show-details"); setExpanded(false);
   returnFocus?.focus();
 }
 document.getElementById("back").onclick = back;
-document.addEventListener("keydown", event => { if (event.key === "Escape" && (workspace.classList.contains("expanded") || matchMedia("(max-width:700px)").matches)) back(); });
+const context = document.getElementById("layout-context");
+document.addEventListener("click", event => { if (context?.open && !context.contains(event.target)) context.open = false; });
+document.addEventListener("keydown", event => {
+  if (event.key !== "Escape") return;
+  if (context?.open) { context.open = false; context.querySelector("summary").focus(); return; }
+  if (workspace.classList.contains("expanded") || narrowLayout.matches) back();
+});
+narrowLayout.addEventListener("change", () => { if (narrowLayout.matches) setExpanded(false); });
 expand.onclick = () => {
-  const expanded = workspace.classList.toggle("expanded");
-  expand.setAttribute("aria-pressed", String(expanded));
-  expand.textContent = expanded ? "Restore split view" : "Expand details";
+  if (expand.disabled || expand.hidden || narrowLayout.matches) return;
+  setExpanded(!workspace.classList.contains("expanded"));
 };
 document.getElementById("refresh").onclick = () => post({ type: "load", language: document.getElementById("language").value });
 document.getElementById("language").onchange = event => post({ type: "load", language: event.target.value });
@@ -50,6 +66,7 @@ document.querySelectorAll("[data-component],[data-datasource]").forEach(button =
     document.querySelectorAll("[aria-pressed=true][data-component],[aria-pressed=true][data-datasource]").forEach(node => node.setAttribute("aria-pressed", "false"));
     button.setAttribute("aria-pressed", "true");
     workspace.classList.add("show-details");
+    detailsAvailable(false);
     content.textContent = "Loading details…";
     document.getElementById("back").focus();
     if (!matchMedia("(max-width:700px)").matches && !workspace.classList.contains("expanded")) button.focus();
@@ -59,7 +76,10 @@ document.querySelectorAll("[data-component],[data-datasource]").forEach(button =
 const text = (tag, value, parent = content) => { const element = document.createElement(tag); element.textContent = value; parent.append(element); return element; };
 const action = (label, type, parent, extra = {}) => {
   const button = text("button", label, parent);
-  button.onclick = () => post({ type, selection, ...extra, ...(type === "reference" ? { intent: ++intent } : {}) });
+  button.onclick = () => {
+    if (type === "reference") detailsAvailable(false);
+    post({ type, selection, ...extra, ...(type === "reference" ? { intent: ++intent } : {}) });
+  };
   return button;
 };
 window.addEventListener("message", event => {
@@ -68,6 +88,7 @@ window.addEventListener("message", event => {
   if (!data || typeof data !== "object") return;
   if (data.type !== "details" || data.revision !== revision || data.intent !== intent || data.key !== key || data.selection < selection) return;
   selection = data.selection; content.replaceChildren();
+  detailsAvailable(Boolean(data.item) && !data.loading && !data.error);
   content.setAttribute("aria-busy", String(Boolean(data.loading)));
   if (data.instance) {
     text("h2", data.instance.name);

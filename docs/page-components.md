@@ -11,8 +11,10 @@ not change Browse or another editor's drafts. Repeated components remain separat
 occurrences even when they use the same datasource.
 
 Drag the divider or focus it and use Left/Right (Home/End for the limits) to resize.
-**Expand details** uses the whole tab. At narrow widths, selection opens Details;
+The compact **Expand details / Restore split view** icon appears in the details header only after a datasource or referenced item loads. It toggles the whole-tab view without a second desktop Back control. At narrow widths, selection opens Details;
 **Back to tree** or Escape returns to the tree and restores selection focus.
+
+The full-width header contains the component count and a compact **Layout context** info disclosure, above a theme-aware divider. Device names retain their raw IDs in the disclosure/tooltip. The standard device `FE5D7FDF-89C0-4D99-9AA3-B5FBD009C9F3` is shown as **Default**, verified by a read-only device-item lookup and [Sitecore documentation](https://doc.sitecore.com/xp/en/developers/104/sitecore-experience-platform/restful-api-endpoints-for-collection-service.html). Other device names use verified Authoring metadata when available; otherwise their IDs remain visible. Missing device identity stays Unknown.
 
 GUID and absolute-path datasources resolve to item labels using Authoring in the
 requested language. Unresolved expressions, missing or inaccessible targets stay

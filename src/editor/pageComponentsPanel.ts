@@ -4,7 +4,8 @@ import type { ConnectionStore } from "../connections/connectionStore";
 import type { AuthoringContentClient } from "../sitecore/authoringClient";
 import { PreviewDiagnosticClient } from "../sitecore/previewDiagnostic";
 import { isGuid, isLocale } from "./itemEditorModel";
-import { componentRoute, escapeComponentHtml as esc, parsePageComponents, renderComponentTree, resolveComponentDatasources, type ComponentPlaceholder, type ComponentOccurrence } from "./pageComponents";
+import { componentRoute, componentDeviceName, escapeComponentHtml as esc, parsePageComponents, renderComponentTree, resolveComponentDatasources, type ComponentPlaceholder, type ComponentOccurrence, type PageComponents } from "./pageComponents";
+import { actionIconSvg } from "../ui/actionIcons";
 
 import { componentItemDetails } from "./componentDetails";
 import type { AuthoringItemDetails } from "../sitecore/authoringClient";
@@ -80,19 +81,24 @@ export class PageComponentsPanel implements vscode.Disposable {
     const media = vscode.Uri.joinPath(extensionUri, "media", "components");
     const shared = vscode.Uri.joinPath(extensionUri, "media", "shared");
     panel.webview.options = { enableScripts: true, localResourceRoots: [media, shared] };
-    const html = (body: string, busy: boolean): string => {
+    const html = (body: string, busy: boolean, layout?: PageComponents, deviceName?: string): string => {
       const nonce = randomBytes(18).toString("hex");
       const uri = (root: vscode.Uri, file: string): string => panel.webview.asWebviewUri(vscode.Uri.joinPath(root, file)).toString();
       return `<!DOCTYPE html><html><head><meta charset="utf-8">
       <meta http-equiv="Content-Security-Policy" content="default-src 'none'; frame-src data:; style-src ${panel.webview.cspSource} 'nonce-${nonce}'; script-src 'nonce-${nonce}';">
       <meta name="viewport" content="width=device-width,initial-scale=1">
       <link rel="stylesheet" href="${uri(media, "components.css")}"><link rel="stylesheet" href="${uri(shared, "readOnlyField.css")}"><style id="pane-size" nonce="${nonce}">:root{--tree-width:50%}</style></head>
-      <body data-revision="${revision}"><header><h1>${esc(item.displayName || item.name)}</h1><label>Language <select id="language" ${busy ? "disabled" : ""}>${languages.map(value =>
-        `<option ${value === language ? "selected" : ""}>${esc(value)}</option>`).join("")}</select></label><button id="refresh" ${busy ? "disabled" : ""}>Refresh</button></header>
+      <body data-revision="${revision}"><header id="page-header"><div class="header-controls"><h1>${esc(item.displayName || item.name)}</h1><label>Language <select id="language" ${busy ? "disabled" : ""}>${languages.map(value =>
+        `<option ${value === language ? "selected" : ""}>${esc(value)}</option>`).join("")}</select></label><button id="refresh" ${busy ? "disabled" : ""}>Refresh</button></div>
       <p>${esc(connection.name)} · ${esc(site.name)} · Source locale: unknown (Preview)</p>
+      ${layout ? `<div class="layout-summary"><span id="component-count">${layout.count} component occurrence(s)</span>
+        <details id="layout-context"><summary title="Layout context" aria-label="Layout context">${actionIconSvg("info")}</summary><div class="layout-metadata">
+        <p>Returned locale/version: ${esc(layout.returnedLanguage)} / ${layout.returnedVersion}</p>
+        <p>Device: <span title="${esc(layout.device)}">${esc(deviceName ?? componentDeviceName(layout.device))}</span></p>
+        <p class="device-id">Device ID: ${esc(layout.device)}</p></div></details></div>` : ""}</header>
       <div id="workspace"><section id="tree" aria-label="Components" aria-busy="${busy}">${body}</section>
       <div id="divider" role="separator" tabindex="0" aria-label="Resize details" aria-orientation="vertical" aria-valuemin="25" aria-valuemax="75" aria-valuenow="50"></div>
-      <section id="details" aria-label="Selection details"><nav><button id="back">Back to tree</button><button id="expand" aria-pressed="false">Expand details</button></nav><div id="detail-content" aria-live="polite"><p>Select a component or datasource.</p></div></section></div>
+      <section id="details" aria-label="Selection details"><nav id="details-toolbar"><button id="back">Back to tree</button><button id="expand" class="icon-toggle" aria-pressed="false" aria-label="Expand details" title="Expand details" hidden disabled><span class="expand-icon">${actionIconSvg("expandPane")}</span><span class="restore-icon">${actionIconSvg("restorePane")}</span></button></nav><div id="detail-content" aria-live="polite"><p>Select a component or datasource.</p></div></section></div>
       <script nonce="${nonce}" src="${uri(shared, "readOnlyField.js")}"></script><script nonce="${nonce}" src="${uri(media, "components.js")}"></script></body></html>`;
     };
     const resetDetails = (): void => {
@@ -119,6 +125,15 @@ export class PageComponentsPanel implements vscode.Disposable {
             isGuid(reference) ? { itemId: reference } : { path: reference }, selectedLanguage, active);
           return { itemId: resolved.itemId, label: resolved.displayName || resolved.name, path: resolved.path };
         }, active);
+        let deviceName = componentDeviceName(tree.device);
+        if (isGuid(tree.device) && deviceName !== "Default" && authoringSecret) {
+          try {
+            const device = await this.authoring.loadSelectionItem(connection, authoringSecret, { itemId: tree.device }, selectedLanguage,
+              AbortSignal.any([active, AbortSignal.timeout(3_000)]));
+            if (device.itemId.replace(/[{}-]/gu, "").toLowerCase() === tree.device.replace(/[{}-]/gu, "").toLowerCase()
+              && device.path.toLowerCase().startsWith("/sitecore/layout/devices/")) deviceName = device.displayName || device.name;
+          } catch { active.throwIfAborted(); /* Keep the returned ID when metadata is unavailable. */ }
+        }
         if (disposed || current !== revision) return;
         if (!validConnection()) throw Error("Connection changed.");
         const collectTargets = (placeholders: readonly ComponentPlaceholder[]): void => {
@@ -130,9 +145,7 @@ export class PageComponentsPanel implements vscode.Disposable {
           }
         };
         collectTargets(tree.placeholders);
-        panel.webview.html = html(`<p>${tree.count} component occurrence(s).</p>
-          <details class="info"><summary>Layout context</summary><p>Returned locale/version: ${esc(tree.returnedLanguage)} / ${tree.returnedVersion}</p>
-          <p>Device: ${esc(tree.device)}</p><p>Preview is effective content. Returned locale/version is not proof of a local editable version.</p></details>${renderComponentTree(tree, datasources)}`, false);
+        panel.webview.html = html(renderComponentTree(tree, datasources), false, tree, deviceName);
       } catch {
         if (disposed || current !== revision || request.signal.aborted || this.lifetime.signal.aborted) return;
         panel.webview.html = html("<p>Components unavailable. Check the CM Preview token and site route. The response must match this page and language and fit the layout limits (500 components, 20 levels).</p>", false);

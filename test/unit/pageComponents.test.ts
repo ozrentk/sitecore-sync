@@ -1,9 +1,15 @@
 import { test } from "node:test";
 import { deepStrictEqual, equal, throws, match, doesNotMatch, rejects } from "node:assert/strict";
-import { componentRoute, parsePageComponents, renderComponentTree, resolveComponentDatasources } from "../../src/editor/pageComponents";
+import { componentRoute, componentDeviceName, parsePageComponents, renderComponentTree, resolveComponentDatasources } from "../../src/editor/pageComponents";
 
 const id = "11111111111111111111111111111111";
 const selected = { itemId: id, language: "en-AU", site: "Example" };
+test("device display recognizes only the verified Default identity", () => {
+  equal(componentDeviceName("{FE5D7FDF-89C0-4D99-9AA3-B5FBD009C9F3}"), "Default");
+  equal(componentDeviceName("fe5d7fdf89c04d999aa3b5fbd009c9f3"), "Default");
+  equal(componentDeviceName(id), id);
+  equal(componentDeviceName("Unknown"), "Unknown");
+});
 const instance = (extra: Record<string, unknown> = {}): Record<string, unknown> => ({
   uid: id, componentName: "RichText", dataSource: "/sitecore/content/Example/Partial/Data/Text",
   isContentResolved: true, params: { empty: "", label: "A&B" }, ...extra,

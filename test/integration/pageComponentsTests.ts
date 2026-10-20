@@ -1,6 +1,7 @@
 import * as vscode from "vscode";
 import { strictEqual, match, doesNotMatch, rejects, deepStrictEqual } from "node:assert/strict";
 import { mock } from "node:test";
+import { componentItemDetails } from "../../src/editor/componentDetails";
 import { PageComponentsPanel } from "../../src/editor/pageComponentsPanel";
 import type { ConnectionStore } from "../../src/connections/connectionStore";
 import type { AuthoringContentClient, AuthoringItemDetails } from "../../src/sitecore/authoringClient";
@@ -25,7 +26,7 @@ function dependencies() {
 }
 const report = { status: "collected", rendered: { sitecore: {
   context: { site: { name: "Example" }, language: "en" },
-  route: { itemId: id, name: "Page", databaseName: "master", itemLanguage: "en", itemVersion: 1,
+  route: { deviceId: "fe5d7fdf-89c0-4d99-9aa3-b5fbd009c9f3", itemId: id, name: "Page", databaseName: "master", itemLanguage: "en", itemVersion: 1,
     placeholders: { main: [{ uid: id, componentName: "<RichText>", dataSource: "", isContentResolved: true }] } },
 } } };
 export const pageComponentsTests: readonly IntegrationTest[] = [{
@@ -48,6 +49,29 @@ export const pageComponentsTests: readonly IntegrationTest[] = [{
       doesNotMatch(panel!.webview.html, /preview-secret|authoring-secret|<RichText>/u);
       strictEqual(panel!.webview.options.localResourceRoots?.length, 2);
     } finally { provider.dispose(); spy.mock.restore(); }
+  },
+}, {
+  name: "Components uses verified device metadata and retains raw unknown identities",
+  async execute() {
+    for (const available of [true, false]) {
+      const { connections, authoring } = dependencies();
+      let panel: vscode.WebviewPanel | undefined;
+      const original = vscode.window.createWebviewPanel;
+      const spy = mock.method(vscode.window, "createWebviewPanel", (...args: Parameters<typeof original>) => { panel = original(...args); return panel; });
+      const lookup = mock.method(authoring, "loadSelectionItem", async () => {
+        if (!available) throw Error("Unavailable");
+        return { itemId: referenceId, name: "Print", displayName: "Print", path: "/sitecore/layout/Devices/Print", hasChildren: false };
+      });
+      const provider = new PageComponentsPanel(connections, authoring, { collect: async () => ({ ...report, rendered: { sitecore: {
+        ...report.rendered.sitecore, route: { ...report.rendered.sitecore.route, deviceId: referenceId },
+      } } }) });
+      try {
+        await provider.open({ connectionId: "test", itemId: id, language: "en" });
+        match(panel!.webview.html, new RegExp(`title="${referenceId}"`));
+        if (available) match(panel!.webview.html, />Print<\/span>/u);
+        else doesNotMatch(panel!.webview.html, />Default<\/span>|>Print<\/span>/u);
+      } finally { provider.dispose(); spy.mock.restore(); lookup.mock.restore(); }
+    }
   },
 }, {
   name: "Components details separates page, datasource and reference identities and fences actions",
@@ -174,8 +198,9 @@ export const pageComponentsTests: readonly IntegrationTest[] = [{
       pending[2].resolve({ ...details(datasourceId), language: "en-AU" });
     } finally { provider.dispose(); restores.forEach(restore => restore()); spy.mock.restore(); load.mock.restore(); lookup.mock.restore(); }
   },
-}, {
-  name: "Components real webview selects in place, renders fields and supports split resizing and Back",
+},
+  ...([false, true] as const).map(narrowExpected => ({
+  name: `Components ${narrowExpected ? "narrow" : "desktop"} header and details controls preserve selection, resize and focus`,
   async execute() {
     const { connections, authoring } = dependencies();
     let panel: vscode.WebviewPanel | undefined;
@@ -187,25 +212,37 @@ export const pageComponentsTests: readonly IntegrationTest[] = [{
     const lookup = mock.method(authoring, "loadSelectionItem", async () => ({ itemId: datasourceId, name: "Text", displayName: "Text", path: "/sitecore/content/Example/Data", hasChildren: false }));
     const provider = new PageComponentsPanel(connections, authoring, { collect: async () => ({ ...report, rendered: { sitecore: {
       ...report.rendered.sitecore, route: { ...report.rendered.sitecore.route, placeholders: {
-        main: [{ uid: id, componentName: "Component", dataSource: datasourceId, isContentResolved: true }],
+        main: [{ uid: id, componentName: "Component", dataSource: datasourceId, isContentResolved: true }, { componentName: "Instance only" }],
       } },
     } } }) });
     let timer: ReturnType<typeof setTimeout> | undefined, listener: vscode.Disposable | undefined;
     try {
-      await vscode.commands.executeCommand("workbench.action.editorLayoutTwoColumns");
+      await vscode.commands.executeCommand(narrowExpected ? "workbench.action.editorLayoutTwoColumns" : "workbench.action.editorLayoutSingle");
       await provider.open({ connectionId: "test", itemId: id, language: "en" });
       const result = new Promise<void>((resolve, reject) => {
         timer = setTimeout(() => reject(Error("Components UI timeout")), 20000);
         listener = panel!.webview.onDidReceiveMessage(message => {
           if (message.type === "componentsSmoke") {
-            try { strictEqual(message.ok, true, message.error); strictEqual(message.narrow, true, "Expected a narrow editor group"); resolve(); } catch (error) { reject(error); }
+            try { strictEqual(message.ok, true, message.error); strictEqual(message.narrow, narrowExpected, "Unexpected editor group width"); resolve(); } catch (error) { reject(error); }
           }
         });
       });
+      if (!narrowExpected) {
+        const extensionUri = vscode.extensions.getExtension("OzrenTK.sitecore-xm-cloud-sync")!.extensionUri;
+        await vscode.workspace.fs.writeFile(vscode.Uri.joinPath(extensionUri, ".test-out", "components-ux-fixture.json"), Buffer.from(JSON.stringify({ html: panel!.webview.html,
+          item: { ...componentItemDetails(details(datasourceId), datasourceId, "en"), role: "Datasource", references: [] } })));
+      }
       const nonce = /nonce="([a-f0-9]+)"/u.exec(panel!.webview.html)![1];
       const script = `(async()=>{
         try{
           const wait=async fn=>{for(let n=0;n<200;n++){if(fn())return;await new Promise(r=>setTimeout(r,25));}throw Error("Details UI did not settle");};
+          const header=document.getElementById("page-header"), tree=document.getElementById("tree"), toggle=document.getElementById("expand");
+          if(!header.contains(document.getElementById("component-count"))||!header.contains(document.getElementById("layout-context")))throw Error("Metadata is not in header");
+          if(tree.contains(document.getElementById("layout-context")))throw Error("Metadata still in tree");
+          if(getComputedStyle(header).borderBottomStyle!=="solid"||header.getBoundingClientRect().width!==document.getElementById("workspace").getBoundingClientRect().width)throw Error("Full-width header divider missing");
+          if(!toggle.hidden||!toggle.disabled)throw Error("Empty pane offers expansion");
+          toggle.click();if(workspace.classList.contains("expanded"))throw Error("Empty pane expanded");
+          if(!header.textContent.includes("Default")||header.textContent.includes("not proof"))throw Error("Device or prose incorrect");
           const button=document.querySelector("[data-component]");button.click();
           await wait(()=>document.querySelector(".field"));
           if(!document.getElementById("detail-content").textContent.includes("${datasourceId}"))throw Error("Wrong datasource identity");
@@ -215,10 +252,22 @@ export const pageComponentsTests: readonly IntegrationTest[] = [{
           if(split.getAttribute("aria-valuenow")!=="45")throw Error("Keyboard resize failed");
           const narrow=matchMedia("(max-width:700px)").matches;
           if(narrow && getComputedStyle(document.getElementById("tree")).display!=="none")throw Error("Narrow details did not replace tree");
-          document.getElementById("expand").click();
-          if(getComputedStyle(document.getElementById("tree")).display!=="none")throw Error("Expand failed");
-          document.getElementById("back").click();
-          if(document.activeElement!==button||getComputedStyle(document.getElementById("tree")).display==="none")throw Error("Back/focus failed");
+          if(toggle.hidden||toggle.disabled||toggle.getAttribute("aria-label")!=="Expand details"||!toggle.querySelector("svg"))throw Error("Loaded toggle invalid");
+          if(narrow){
+            if(getComputedStyle(toggle).display!=="none")throw Error("Narrow expand duplicates Back");
+            document.getElementById("back").click();
+            if(document.activeElement!==button||getComputedStyle(tree).display==="none")throw Error("Back/focus failed");
+          }else{
+            if(getComputedStyle(document.getElementById("back")).display!=="none")throw Error("Desktop Back visible");
+            toggle.focus();toggle.click();
+            if(getComputedStyle(tree).display!=="none"||toggle.title!=="Restore split view")throw Error("Expand failed");
+            if(getComputedStyle(document.getElementById("back")).display!=="none")throw Error("Duplicate restore action");
+            toggle.click();
+            if(getComputedStyle(tree).display==="none"||toggle.title!=="Expand details"||document.activeElement!==toggle)throw Error("Restore/focus failed");
+          }
+          document.querySelectorAll("[data-component]")[1].click();
+          await wait(()=>document.getElementById("detail-content").textContent.includes("No datasource is declared"));
+          if(!toggle.hidden||!toggle.disabled||!document.getElementById("detail-content").textContent.includes("Component instance"))throw Error("Instance-only control state invalid");
           api.postMessage({type:"componentsSmoke",ok:true,narrow});
         }catch(error){api.postMessage({type:"componentsSmoke",error:String(error)});}
       })();`;
@@ -229,7 +278,7 @@ export const pageComponentsTests: readonly IntegrationTest[] = [{
       await vscode.commands.executeCommand("workbench.action.editorLayoutSingle");
     }
   },
-}, {
+})), {
   name: "closing page components cancels an outstanding Preview read",
   async execute() {
     const { connections, authoring } = dependencies();
