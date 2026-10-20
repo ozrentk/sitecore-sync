@@ -4,6 +4,25 @@
 
 ## Current decision — updated 2026-10-20
 
+**The extension's dedicated CM Preview diagnostic now works against Dev.** After saving the separate Preview token, two fixed layout queries succeeded through MCP for the same known page in `en` and `en-AU`. No Sitecore writes or publications were performed. The IDE observations below remain earlier evidence.
+
+Both responses returned the expected page identity, `master`, their requested context/item language and route version 1. Each contained 20 unique instance UIDs. Traversing only explicit placeholder arrays confirmed identical instance UIDs, component names, datasource strings, nesting, placeholder-local order and parameter objects across the two locales. This replaces the discarded earlier cross-locale analysis, not the underlying observations. The rendered payloads differ; structural equality does not establish content equality or fallback source provenance.
+
+| Diagnostic | UTC start | HTTP attempts | HTTP attempt elapsed | Response bytes |
+| --- | --- | --- | --- | --- |
+| English | 2026-10-20 08:38:03.406 | 1, HTTP 200, no retry | 1,803 ms | 734,383 |
+| Australian English | 2026-10-20 08:38:03.392 | 1, HTTP 200, no retry | 1,340 ms | 453,958 |
+
+These two reads ran concurrently, unlike the sequential initial protocol below. Timings are single-request transport observations, not performance benchmarks or full body-consumption timings. Reports completed approximately 1.92 s and 1.45 s after their respective starts. Both stayed below the diagnostic's 2 MiB bound. No transactional snapshot or server-instance identity is established.
+
+A subsequent exact English Authoring read confirmed the same page identity/version and supplied raw shared/final presentation. A targeted UID association for one navigation instance found eight entries in the final `s:par` string, including three empty entries. Preview returned five parameter properties: all five nonempty values agreed, and the three empty entries were absent. This is direct evidence that Preview parameters are a projection, not a raw-string-preserving representation. Keep raw presentation and effective parameter objects separate; never reconstruct authoritative raw parameters from Preview. This targeted comparison is not a general XML patch resolver.
+
+**Next boundary:** the authenticated diagnostic and sampled locale structure/parameter checks are verified. Partial designs, context-dependent datasource expressions, complete raw/effective ownership and known unpublished freshness remain unverified. A bounded read-only provider can preserve effective occurrences and explicitly unresolved provenance under the agreed implicit-device constraint; a complete authoring tree still needs the remaining coverage checks. No production tree UI or write capability is authorized by this evidence.
+
+Validation: two live Preview reads, one targeted Authoring read, bounded local response traversal (500 occurrences / 20 nested levels), and documentation diff review. No runtime source changed; automated runtime suites were not rerun. Raw payloads, private identifiers and credentials are not committed.
+
+## Earlier IDE evidence — 2026-10-20
+
 **Preview access is now verified through the user-configured Dev IDE.** The earlier access blocker below is historical. Five read-only queries succeeded: root introspection, root operation contract, site catalog, and the known page in English and Australian English. This establishes a useful provider candidate, not full B27 acceptance: unpublished freshness, partial designs and raw-parameter fidelity remain unverified. Arbitrary-device support is excluded by the agreed constraint below.
 
 The live root schema exposes `layout(site: String!, routePath: String!, language: String!)` returning `LayoutData`, with no device argument. `item` accepts optional `path: String`, required `language: String!`, and optional `version: String`. No undocumented selectors were attempted.
