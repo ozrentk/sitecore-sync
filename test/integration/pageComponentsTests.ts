@@ -3,8 +3,10 @@ import { strictEqual, match, doesNotMatch, rejects, deepStrictEqual } from "node
 import { mock } from "node:test";
 import { PageComponentsPanel } from "../../src/editor/pageComponentsPanel";
 import type { ConnectionStore } from "../../src/connections/connectionStore";
-import type { AuthoringContentClient } from "../../src/sitecore/authoringClient";
+import type { AuthoringContentClient, AuthoringItemDetails } from "../../src/sitecore/authoringClient";
 import type { IntegrationTest } from "./testSupport";
+const datasourceId = "22222222222222222222222222222222";
+const referenceId = "33333333333333333333333333333333";
 const id = "11111111111111111111111111111111";
 function dependencies() {
   const connection = { id: "test", name: "Test", serverUrl: "https://example.test", clientId: "client" };
@@ -44,44 +46,188 @@ export const pageComponentsTests: readonly IntegrationTest[] = [{
       match(panel!.webview.html, /Source locale: unknown/u);
       match(panel!.webview.html, /default-src 'none'/u);
       doesNotMatch(panel!.webview.html, /preview-secret|authoring-secret|<RichText>/u);
-      strictEqual(panel!.webview.options.localResourceRoots?.length, 0);
+      strictEqual(panel!.webview.options.localResourceRoots?.length, 2);
     } finally { provider.dispose(); spy.mock.restore(); }
   },
 }, {
-  name: "component datasource navigation uses host-owned identity and requested language and rejects stale messages",
+  name: "Components details separates page, datasource and reference identities and fences actions",
   async execute() {
-    const { connections, authoring } = dependencies();
+    const { connections, authoring, connection } = dependencies();
     let panel: vscode.WebviewPanel | undefined;
-    let receive: ((message: unknown) => unknown) | undefined;
-    let listenerSpy: ReturnType<typeof mock.method> | undefined;
+    let receive!: (message: unknown) => unknown;
+    const messages: Array<Record<string, unknown>> = [];
+    const restores: Array<() => void> = [];
     const original = vscode.window.createWebviewPanel;
     const spy = mock.method(vscode.window, "createWebviewPanel", (...args: Parameters<typeof original>) => {
       panel = original(...args);
-      listenerSpy = mock.method(panel.webview, "onDidReceiveMessage", (listener: (message: unknown) => unknown) => {
-        receive = listener; return new vscode.Disposable(() => {});
-      });
+      const listener = mock.method(panel.webview, "onDidReceiveMessage", (fn: typeof receive) => { receive = fn; return new vscode.Disposable(() => {}); });
+      const post = mock.method(panel.webview, "postMessage", async (message: Record<string, unknown>) => { messages.push(message); return true; });
+      restores.push(() => listener.mock.restore(), () => post.mock.restore());
       return panel;
     });
     const lookup = mock.method(authoring, "loadSelectionItem", async (...args: Parameters<AuthoringContentClient["loadSelectionItem"]>) => {
-      const [, , locator, language] = args;
-      deepStrictEqual(locator, { itemId: id }); strictEqual(language, "en");
-      return { itemId: id, name: "Datasource", displayName: "Datasource label", path: "/sitecore/content/Example/Data", hasChildren: false };
+      const locator = args[2]; const target = "itemId" in locator ? locator.itemId.replace(/[{}-]/gu, "").toLowerCase() : datasourceId;
+      return { itemId: target, name: "Datasource", displayName: "Datasource label", path: "/sitecore/content/Example/Data", hasChildren: false };
     });
-    const opened: unknown[] = [];
+    const originalLoad = authoring.loadItem;
+    const load = mock.method(authoring, "loadItem", async (...args: Parameters<AuthoringContentClient["loadItem"]>) => {
+      const locator = args[2];
+      if ("itemId" in locator && locator.itemId === id) return originalLoad(...args);
+      strictEqual(args[3], "en"); strictEqual(args[6], false); strictEqual(args[7], true);
+      return details("itemId" in locator ? locator.itemId : datasourceId);
+    });
+    const opened: unknown[] = [], edited: unknown[] = [];
     const withDatasource = { ...report, rendered: { sitecore: { ...report.rendered.sitecore, route: {
-      ...report.rendered.sitecore.route, placeholders: { main: [{ uid: id, componentName: "Text", dataSource: id, isContentResolved: true }] },
+      ...report.rendered.sitecore.route, placeholders: { main: [
+        { uid: id, componentName: "Text", dataSource: datasourceId, isContentResolved: true },
+        { uid: referenceId, componentName: "Repeated", dataSource: datasourceId, isContentResolved: true },
+        { componentName: "Unresolved", dataSource: "local:/unknown" },
+      ] },
     } } } };
-    const provider = new PageComponentsPanel(connections, authoring, { collect: async () => withDatasource },
-      async (...args) => { opened.push(args); });
+    const provider = new PageComponentsPanel(connections, authoring, { collect: async () => withDatasource }, {
+      extensionUri: vscode.extensions.getExtension("OzrenTK.sitecore-xm-cloud-sync")!.extensionUri,
+      reveal: async (...args) => { opened.push(args); }, edit: async (...args) => { edited.push(args); },
+    });
+    const wait = async (predicate: () => boolean): Promise<void> => {
+      for (let n = 0; n < 100; n++) { if (predicate()) return; await new Promise(resolve => setTimeout(resolve, 10)); }
+      throw Error("Details did not arrive.");
+    };
     try {
       await provider.open({ connectionId: "test", itemId: id, language: "en" });
-      match(panel!.webview.html, /Datasource label/u);
-      receive!({ type: "openDatasource", key: '["main",0]', revision: 0 });
-      receive!({ type: "openDatasource", key: '["invented",0]', revision: 1 });
-      strictEqual(opened.length, 0);
-      receive!({ type: "openDatasource", key: '["main",0]', revision: 1, itemId: "forged" });
-      deepStrictEqual(opened, [["test", id, "en"]]);
-    } finally { provider.dispose(); listenerSpy?.mock.restore(); spy.mock.restore(); lookup.mock.restore(); }
+      strictEqual(lookup.mock.calls.length, 1); // repeated component, one label lookup
+      receive({ type: "select", key: '["main",0]', revision: 0, intent: 1 });
+      strictEqual(messages.length, 0);
+      receive({ type: "select", key: '["main",0]', revision: 1, intent: 1 });
+      await wait(() => Boolean(messages.at(-1)?.item));
+      const selection = messages.at(-1)!.selection;
+      strictEqual((messages.at(-1)!.item as { itemId: string }).itemId, datasourceId);
+      strictEqual(opened.length, 0); // inspecting does not change global Browse
+      receive({ type: "reveal", revision: 1, selection, itemId: id });
+      receive({ type: "edit", revision: 1, selection });
+      deepStrictEqual(opened, [["test", datasourceId, "en", "/sitecore/content/Example/Data"]]);
+      deepStrictEqual(edited, [["test", datasourceId, "en", 2]]);
+      receive({ type: "reference", revision: 1, selection, key: "reference:0", intent: 2 });
+      await wait(() => (messages.at(-1)?.item as { itemId?: string } | undefined)?.itemId === referenceId);
+      receive({ type: "edit", revision: 1, selection }); // stale datasource context
+      strictEqual(edited.length, 1);
+      receive({ type: "reveal", revision: 1, selection: messages.at(-1)!.selection });
+      deepStrictEqual(opened[1], ["test", referenceId, "en", "/sitecore/content/Example/Data"]);
+      receive({ type: "select", key: '["main",2]', revision: 1, intent: 3 });
+      await wait(() => Boolean(messages.at(-1)?.error));
+      receive({ type: "edit", revision: 1, selection: messages.at(-1)!.selection });
+      strictEqual(edited.length, 1);
+      connection.serverUrl = "https://changed.test";
+      receive({ type: "select", key: '["main",1]', revision: 1, intent: 4 });
+      strictEqual(messages.at(-1)!.intent, 3);
+    } finally { provider.dispose(); restores.forEach(restore => restore()); spy.mock.restore(); lookup.mock.restore(); load.mock.restore(); }
+  },
+}, {
+  name: "Components cancels and fences detail responses after selection, locale changes and disposal",
+  async execute() {
+    const { connections, authoring } = dependencies();
+    let receive!: (message: unknown) => unknown;
+    const messages: Array<Record<string, unknown>> = [];
+    const restores: Array<() => void> = [];
+    const pending: Array<{ signal: AbortSignal; resolve: (value: AuthoringItemDetails) => void }> = [];
+    const original = vscode.window.createWebviewPanel;
+    const spy = mock.method(vscode.window, "createWebviewPanel", (...args: Parameters<typeof original>) => {
+      const panel = original(...args);
+      const listener = mock.method(panel.webview, "onDidReceiveMessage", (fn: typeof receive) => { receive = fn; return new vscode.Disposable(() => {}); });
+      const post = mock.method(panel.webview, "postMessage", async (message: Record<string, unknown>) => { messages.push(message); return true; });
+      restores.push(() => listener.mock.restore(), () => post.mock.restore());
+      return panel;
+    });
+    const originalLoad = authoring.loadItem;
+    const load = mock.method(authoring, "loadItem", async (...args: Parameters<AuthoringContentClient["loadItem"]>) =>
+      "itemId" in args[2] && args[2].itemId === id ? originalLoad(...args)
+        : new Promise<AuthoringItemDetails>(resolve => pending.push({ signal: args[5], resolve })));
+    const lookup = mock.method(authoring, "loadSelectionItem", async () => ({ itemId: datasourceId, name: "Text", displayName: "Text", path: "/sitecore/content/Example/Data", hasChildren: false }));
+    const provider = new PageComponentsPanel(connections, authoring, { collect: async (_origin, _token, selection) => ({ ...report, rendered: { sitecore: {
+      context: { site: { name: "Example" }, language: selection.language },
+      route: { ...report.rendered.sitecore.route, itemLanguage: selection.language, placeholders: {
+        main: [{ uid: id, componentName: "Text", dataSource: datasourceId }, { componentName: "No datasource" }],
+      } },
+    } } }) });
+    const wait = async (predicate: () => boolean): Promise<void> => {
+      for (let n = 0; n < 100; n++) { if (predicate()) return; await new Promise(resolve => setTimeout(resolve, 10)); }
+      throw Error("Async details did not start.");
+    };
+    try {
+      await provider.open({ connectionId: "test", itemId: id, language: "en" });
+      receive({ type: "select", key: '["main",0]', revision: 1, intent: 1 });
+      await wait(() => pending.length === 1);
+      receive({ type: "select", key: '["main",1]', revision: 1, intent: 2 });
+      strictEqual(pending[0].signal.aborted, true);
+      pending[0].resolve(details(datasourceId));
+      await wait(() => Boolean(messages.at(-1)?.error));
+      receive({ type: "select", key: '["main",0]', revision: 1, intent: 3 });
+      await wait(() => pending.length === 2);
+      receive({ type: "load", language: "en-AU", revision: 1 });
+      strictEqual(pending[1].signal.aborted, true);
+      pending[1].resolve(details(datasourceId));
+      await new Promise(resolve => setTimeout(resolve, 30));
+      strictEqual(messages.some(message => Boolean(message.item)), false);
+      receive({ type: "select", key: '["main",0]', revision: 2, intent: 1 });
+      await wait(() => pending.length === 3);
+      provider.dispose();
+      strictEqual(pending[2].signal.aborted, true);
+      pending[2].resolve({ ...details(datasourceId), language: "en-AU" });
+    } finally { provider.dispose(); restores.forEach(restore => restore()); spy.mock.restore(); load.mock.restore(); lookup.mock.restore(); }
+  },
+}, {
+  name: "Components real webview selects in place, renders fields and supports split resizing and Back",
+  async execute() {
+    const { connections, authoring } = dependencies();
+    let panel: vscode.WebviewPanel | undefined;
+    const original = vscode.window.createWebviewPanel;
+    const spy = mock.method(vscode.window, "createWebviewPanel", (...args: Parameters<typeof original>) => { panel = original(...args); return panel; });
+    const originalLoad = authoring.loadItem;
+    const load = mock.method(authoring, "loadItem", async (...args: Parameters<AuthoringContentClient["loadItem"]>) =>
+      "itemId" in args[2] && args[2].itemId === id ? originalLoad(...args) : details(datasourceId));
+    const lookup = mock.method(authoring, "loadSelectionItem", async () => ({ itemId: datasourceId, name: "Text", displayName: "Text", path: "/sitecore/content/Example/Data", hasChildren: false }));
+    const provider = new PageComponentsPanel(connections, authoring, { collect: async () => ({ ...report, rendered: { sitecore: {
+      ...report.rendered.sitecore, route: { ...report.rendered.sitecore.route, placeholders: {
+        main: [{ uid: id, componentName: "Component", dataSource: datasourceId, isContentResolved: true }],
+      } },
+    } } }) });
+    let timer: ReturnType<typeof setTimeout> | undefined, listener: vscode.Disposable | undefined;
+    try {
+      await vscode.commands.executeCommand("workbench.action.editorLayoutTwoColumns");
+      await provider.open({ connectionId: "test", itemId: id, language: "en" });
+      const result = new Promise<void>((resolve, reject) => {
+        timer = setTimeout(() => reject(Error("Components UI timeout")), 20000);
+        listener = panel!.webview.onDidReceiveMessage(message => {
+          if (message.type === "componentsSmoke") {
+            try { strictEqual(message.ok, true, message.error); strictEqual(message.narrow, true, "Expected a narrow editor group"); resolve(); } catch (error) { reject(error); }
+          }
+        });
+      });
+      const nonce = /nonce="([a-f0-9]+)"/u.exec(panel!.webview.html)![1];
+      const script = `(async()=>{
+        try{
+          const wait=async fn=>{for(let n=0;n<200;n++){if(fn())return;await new Promise(r=>setTimeout(r,25));}throw Error("Details UI did not settle");};
+          const button=document.querySelector("[data-component]");button.click();
+          await wait(()=>document.querySelector(".field"));
+          if(!document.getElementById("detail-content").textContent.includes("${datasourceId}"))throw Error("Wrong datasource identity");
+          if(document.querySelector(".field input,.field textarea"))throw Error("Fields became editable");
+          const split=document.getElementById("divider");
+          split.dispatchEvent(new KeyboardEvent("keydown",{key:"ArrowLeft",bubbles:true}));
+          if(split.getAttribute("aria-valuenow")!=="45")throw Error("Keyboard resize failed");
+          const narrow=matchMedia("(max-width:700px)").matches;
+          if(narrow && getComputedStyle(document.getElementById("tree")).display!=="none")throw Error("Narrow details did not replace tree");
+          document.getElementById("expand").click();
+          if(getComputedStyle(document.getElementById("tree")).display!=="none")throw Error("Expand failed");
+          document.getElementById("back").click();
+          if(document.activeElement!==button||getComputedStyle(document.getElementById("tree")).display==="none")throw Error("Back/focus failed");
+          api.postMessage({type:"componentsSmoke",ok:true,narrow});
+        }catch(error){api.postMessage({type:"componentsSmoke",error:String(error)});}
+      })();`;
+      panel!.webview.html = panel!.webview.html.replace("</body>", `<script nonce="${nonce}">${script}</script></body>`);
+      await result;
+    } finally {
+      clearTimeout(timer); listener?.dispose(); provider.dispose(); spy.mock.restore(); load.mock.restore(); lookup.mock.restore();
+      await vscode.commands.executeCommand("workbench.action.editorLayoutSingle");
+    }
   },
 }, {
   name: "closing page components cancels an outstanding Preview read",
@@ -108,3 +254,11 @@ export const pageComponentsTests: readonly IntegrationTest[] = [{
     } finally { provider.dispose(); spy.mock.restore(); }
   },
 }];
+
+function details(itemId: string): AuthoringItemDetails {
+  return { itemId, name: "Datasource", displayName: "Datasource", path: "/sitecore/content/Example/Data", hasChildren: false,
+    language: "en", version: 2, template: { templateId: id, name: "Text" }, availableVersions: [{ language: "en", version: 2 }],
+    fields: [{ fieldId: id, name: "Related", label: "Related", type: "Droplink", typeKey: "droplink", value: "{33333333-3333-3333-3333-333333333333}",
+      scope: "VERSIONED", sectionName: "Content", sectionSortOrder: 0, sortOrder: 0, isStandardTemplate: false,
+      containsFallbackValue: false, containsInheritedValue: false, containsStandardValue: false, textual: false }] };
+}

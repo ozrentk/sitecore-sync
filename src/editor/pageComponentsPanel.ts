@@ -4,7 +4,16 @@ import type { ConnectionStore } from "../connections/connectionStore";
 import type { AuthoringContentClient } from "../sitecore/authoringClient";
 import { PreviewDiagnosticClient } from "../sitecore/previewDiagnostic";
 import { isGuid, isLocale } from "./itemEditorModel";
-import { componentRoute, escapeComponentHtml as esc, parsePageComponents, renderComponentTree, resolveComponentDatasources, type ComponentPlaceholder } from "./pageComponents";
+import { componentRoute, escapeComponentHtml as esc, parsePageComponents, renderComponentTree, resolveComponentDatasources, type ComponentPlaceholder, type ComponentOccurrence } from "./pageComponents";
+
+import { componentItemDetails } from "./componentDetails";
+import type { AuthoringItemDetails } from "../sitecore/authoringClient";
+
+interface ComponentActions {
+  readonly extensionUri: vscode.Uri;
+  reveal(connectionId: string, itemId: string, language: string, path: string): Promise<void>;
+  edit(connectionId: string, itemId: string, language: string, version: number): Promise<void>;
+}
 
 type Connections = Pick<ConnectionStore, "get" | "getClientSecret" | "getPreviewToken" | "listVerifiedSites">;
 type Authoring = Pick<AuthoringContentClient, "loadItem" | "loadLanguages" | "testConnection" | "loadSelectionItem">;
@@ -14,15 +23,16 @@ export class PageComponentsPanel implements vscode.Disposable {
   private readonly lifetime = new AbortController();
   constructor(private readonly connections: Connections, private readonly authoring: Authoring,
     private readonly preview: Pick<PreviewDiagnosticClient, "collect"> = new PreviewDiagnosticClient(),
-    private readonly openDatasource?: (connectionId: string, itemId: string, language: string) => Promise<void>) {}
+    private readonly actions?: ComponentActions) {}
   dispose(): void { this.lifetime.abort(); for (const panel of this.panels) panel.dispose(); this.panels.clear(); }
 
   async open(args: unknown): Promise<void> {
     if (!args || typeof args !== "object") throw Error("Choose View components… from a page's context menu.");
     const target = args as Record<string, unknown>;
     if (typeof target.connectionId !== "string" || !isGuid(target.itemId) || !isLocale(target.language)) throw Error("Invalid page target.");
-    const connection = this.connections.get(target.connectionId);
-    if (!connection) throw Error("Connection no longer exists.");
+    const savedConnection = this.connections.get(target.connectionId);
+    if (!savedConnection) throw Error("Connection no longer exists.");
+    const connection = { ...savedConnection };
     const initialLanguage = target.language, itemId = target.itemId;
     const validConnection = (): boolean => {
       const current = this.connections.get(connection.id);
@@ -58,32 +68,40 @@ export class PageComponentsPanel implements vscode.Disposable {
     const panel = vscode.window.createWebviewPanel("xmCloudSync.pageComponents", `${item.displayName || item.name} · Components`,
       vscode.ViewColumn.Active, { enableScripts: true, localResourceRoots: [] });
     this.panels.add(panel);
-    let request: AbortController | undefined, revision = 0, disposed = false;
-    let language = initialLanguage;
+    let request: AbortController | undefined, detailRequest: AbortController | undefined;
+    let revision = 0, detailRevision = 0, disposed = false, language = initialLanguage;
     const targets = new Map<string, string>();
+    const components = new Map<string, ComponentOccurrence>();
+    let selectedItem: AuthoringItemDetails | undefined;
+    let selectedKey: string | undefined;
+    let lastIntent = 0;
+    const references = new Map<string, string>();
+    const extensionUri = this.actions?.extensionUri ?? vscode.extensions.getExtension("OzrenTK.sitecore-xm-cloud-sync")!.extensionUri;
+    const media = vscode.Uri.joinPath(extensionUri, "media", "components");
+    const shared = vscode.Uri.joinPath(extensionUri, "media", "shared");
+    panel.webview.options = { enableScripts: true, localResourceRoots: [media, shared] };
     const html = (body: string, busy: boolean): string => {
       const nonce = randomBytes(18).toString("hex");
+      const uri = (root: vscode.Uri, file: string): string => panel.webview.asWebviewUri(vscode.Uri.joinPath(root, file)).toString();
       return `<!DOCTYPE html><html><head><meta charset="utf-8">
-      <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'nonce-${nonce}'; script-src 'nonce-${nonce}';">
+      <meta http-equiv="Content-Security-Policy" content="default-src 'none'; frame-src data:; style-src ${panel.webview.cspSource} 'nonce-${nonce}'; script-src 'nonce-${nonce}';">
       <meta name="viewport" content="width=device-width,initial-scale=1">
-      <style nonce="${nonce}">body{font-family:var(--vscode-font-family);color:var(--vscode-foreground);padding:16px}
-      header{display:flex;align-items:center;gap:12px;flex-wrap:wrap}h1{font-size:1.3em}button,select{font:inherit;color:var(--vscode-input-foreground);background:var(--vscode-input-background);border:1px solid var(--vscode-input-border);padding:5px}
-      ul{list-style:none;padding-left:20px}.tree{padding:0}li{margin:10px 0}summary{cursor:pointer}summary:focus-visible{outline:1px solid var(--vscode-focusBorder)}
-      .datasource,.info,.muted{margin:8px 0 8px 18px;font-size:.95em}.muted,summary span{color:var(--vscode-descriptionForeground)}
-      pre,.datasource{white-space:pre-wrap;overflow-wrap:anywhere}.info{font-size:.9em}button{cursor:pointer}</style></head>
-      <body><header><h1>${esc(item.displayName || item.name)}</h1><label>Language <select id="language" ${busy ? "disabled" : ""}>${languages.map(value =>
+      <link rel="stylesheet" href="${uri(media, "components.css")}"><link rel="stylesheet" href="${uri(shared, "readOnlyField.css")}"><style id="pane-size" nonce="${nonce}">:root{--tree-width:50%}</style></head>
+      <body data-revision="${revision}"><header><h1>${esc(item.displayName || item.name)}</h1><label>Language <select id="language" ${busy ? "disabled" : ""}>${languages.map(value =>
         `<option ${value === language ? "selected" : ""}>${esc(value)}</option>`).join("")}</select></label><button id="refresh" ${busy ? "disabled" : ""}>Refresh</button></header>
-      <p class="muted">${esc(connection.name)} · ${esc(site.name)} · Read-only components and immediate datasource references</p>
-      <main aria-live="polite" aria-busy="${busy}">${body}</main>
-      <script nonce="${nonce}">const api=acquireVsCodeApi();document.getElementById("refresh").onclick=()=>api.postMessage({type:"load",language:document.getElementById("language").value});
-      document.getElementById("language").onchange=e=>api.postMessage({type:"load",language:e.target.value});
-      document.querySelectorAll("[data-datasource]").forEach(button=>button.onclick=()=>api.postMessage({type:"openDatasource",key:button.dataset.datasource,revision:${revision}}));</script></body></html>`;
+      <p>${esc(connection.name)} · ${esc(site.name)} · Source locale: unknown (Preview)</p>
+      <div id="workspace"><section id="tree" aria-label="Components" aria-busy="${busy}">${body}</section>
+      <div id="divider" role="separator" tabindex="0" aria-label="Resize details" aria-orientation="vertical" aria-valuemin="25" aria-valuemax="75" aria-valuenow="50"></div>
+      <section id="details" aria-label="Selection details"><nav><button id="back">Back to tree</button><button id="expand" aria-pressed="false">Expand details</button></nav><div id="detail-content" aria-live="polite"><p>Select a component or datasource.</p></div></section></div>
+      <script nonce="${nonce}" src="${uri(shared, "readOnlyField.js")}"></script><script nonce="${nonce}" src="${uri(media, "components.js")}"></script></body></html>`;
+    };
+    const resetDetails = (): void => {
+      detailRequest?.abort(); detailRevision++; selectedItem = undefined; selectedKey = undefined; references.clear();
     };
     const load = async (): Promise<void> => {
-      request?.abort();
-      request = new AbortController();
+      request?.abort(); resetDetails(); request = new AbortController();
       const current = ++revision;
-      targets.clear();
+      targets.clear(); components.clear(); lastIntent = 0;
       const selectedLanguage = language;
       const active = AbortSignal.any([this.lifetime.signal, request.signal, AbortSignal.timeout(30_000)]);
       panel.webview.html = html("<p>Loading components…</p>", true);
@@ -105,36 +123,88 @@ export class PageComponentsPanel implements vscode.Disposable {
         if (!validConnection()) throw Error("Connection changed.");
         const collectTargets = (placeholders: readonly ComponentPlaceholder[]): void => {
           for (const placeholder of placeholders) for (const component of placeholder.components) {
+            components.set(component.key, component);
             const resolved = datasources.get(component.datasource);
             if (resolved?.itemId) targets.set(component.key, resolved.itemId);
             collectTargets(component.placeholders);
           }
         };
         collectTargets(tree.placeholders);
-        panel.webview.html = html(`<p class="muted">${tree.count} component occurrence(s). Requested locale: ${esc(tree.requestedLanguage)}. Source locale: unknown.</p>
+        panel.webview.html = html(`<p>${tree.count} component occurrence(s).</p>
           <details class="info"><summary>Layout context</summary><p>Returned locale/version: ${esc(tree.returnedLanguage)} / ${tree.returnedVersion}</p>
-          <p>Device: ${esc(tree.device)}</p><p>Preview is effective content. Returned locale/version is not proof of a local editable version.
-          Custom resolver and reference-graph coverage is not established. Datasources below are references, not verified writable targets.</p></details>${renderComponentTree(tree, datasources)}`, false);
+          <p>Device: ${esc(tree.device)}</p><p>Preview is effective content. Returned locale/version is not proof of a local editable version.</p></details>${renderComponentTree(tree, datasources)}`, false);
       } catch {
         if (disposed || current !== revision || request.signal.aborted || this.lifetime.signal.aborted) return;
-        panel.webview.html = html("<p>Components unavailable. Check the CM Preview token and site route. The response must match this page and language and fit the layout limits (500 components, 20 levels). No partial tree is shown.</p>", false);
+        panel.webview.html = html("<p>Components unavailable. Check the CM Preview token and site route. The response must match this page and language and fit the layout limits (500 components, 20 levels).</p>", false);
+      }
+    };
+    const select = async (key: string, intent: number, referenceId?: string): Promise<void> => {
+      resetDetails(); selectedKey = key;
+      detailRequest = new AbortController();
+      const current = detailRevision, layoutRevision = revision, locale = language;
+      const signal = AbortSignal.any([detailRequest.signal, this.lifetime.signal, AbortSignal.timeout(30_000)]);
+      const currentSelection = (): boolean => !disposed && current === detailRevision && layoutRevision === revision && validConnection();
+      const component = components.get(key);
+      const instance = component ? { name: component.name, uid: component.uid, datasource: component.datasource, parameters: component.parameters } : undefined;
+      const targetId = referenceId ?? targets.get(key);
+      try {
+        await panel.webview.postMessage({ type: "details", revision, selection: current, intent, key, loading: true, instance });
+        if (!targetId) {
+          if (currentSelection()) await panel.webview.postMessage({ type: "details", revision, selection: current, intent, key, instance,
+            error: component?.datasource ? "Datasource unresolved or unavailable. No item has been substituted." : "No datasource is declared for this component." });
+          return;
+        }
+        const secret = await this.connections.getClientSecret(connection.id);
+        if (!secret || !currentSelection()) throw Error("Connection unavailable.");
+        const details = await this.authoring.loadItem(connection, secret, { itemId: targetId }, locale, undefined, signal, false, true);
+        const view = componentItemDetails(details, targetId, locale);
+        const resolvedReferences: { key: string; label: string; field: string; unavailable: boolean }[] = [];
+        const localReferences = new Map<string, string>();
+        for (let offset = 0; offset < view.references.length; offset += 4) {
+          signal.throwIfAborted();
+          await Promise.all(view.references.slice(offset, offset + 4).map(async (reference, index) => {
+            const refKey = `reference:${offset + index}`;
+            try {
+              const result = await this.authoring.loadSelectionItem(connection, secret, { itemId: reference.id }, locale, signal);
+              if (!isGuid(result.itemId) || result.itemId.replace(/[{}-]/gu, "").toLowerCase() !== reference.id.replace(/[{}-]/gu, "").toLowerCase()) throw Error("Mismatched reference.");
+              localReferences.set(refKey, result.itemId);
+              resolvedReferences.push({ key: refKey, label: result.displayName || result.name, field: reference.field, unavailable: false });
+            } catch { signal.throwIfAborted(); resolvedReferences.push({ key: refKey, label: `${reference.id} — unavailable`, field: reference.field, unavailable: true }); }
+          }));
+        }
+        signal.throwIfAborted();
+        if (!currentSelection()) return;
+        selectedItem = details;
+        for (const [refKey, id] of localReferences) references.set(refKey, id);
+        await panel.webview.postMessage({ type: "details", revision, selection: current, intent, key, instance,
+          connectionName: connection.name, item: { ...view, role: referenceId ? "Referenced item" : "Datasource", references: resolvedReferences.sort((a, b) => Number(a.key.slice(10)) - Number(b.key.slice(10))) } });
+      } catch {
+        if (currentSelection() && !detailRequest.signal.aborted) await panel.webview.postMessage({ type: "details", revision, selection: current, intent, key, instance,
+          error: "Item details unavailable. Check the connection and requested locale; the item may be missing, inaccessible or exceed inspection limits." });
       }
     };
     const listener = panel.webview.onDidReceiveMessage((message: unknown) => {
       if (!message || typeof message !== "object" || disposed) return;
       const value = message as Record<string, unknown>;
-      if (value.type === "openDatasource") {
-        if (value.revision !== revision || typeof value.key !== "string" || !validConnection()) return;
-        const datasourceId = targets.get(value.key);
-        if (datasourceId && this.openDatasource) void this.openDatasource(connection.id, datasourceId, language)
-          .catch(() => vscode.window.showErrorMessage("Unable to open datasource. Check its connection and requested language."));
+      if (value.revision !== revision || !validConnection()) return;
+      if (value.type === "select" && typeof value.key === "string" && components.has(value.key) && Number.isSafeInteger(value.intent) && Number(value.intent) > lastIntent) {
+        lastIntent = Number(value.intent); void select(value.key, lastIntent); return;
+      }
+      if (value.type === "reference" && value.selection === detailRevision && typeof value.key === "string" && selectedKey
+        && Number.isSafeInteger(value.intent) && Number(value.intent) > lastIntent) {
+        const id = references.get(value.key); if (id) { lastIntent = Number(value.intent); void select(selectedKey, lastIntent, id); } return;
+      }
+      if ((value.type === "reveal" || value.type === "edit") && value.selection === detailRevision && selectedItem && this.actions) {
+        const target = selectedItem;
+        const operation = value.type === "reveal" ? this.actions.reveal(connection.id, target.itemId, language, target.path)
+          : componentItemDetails(target, target.itemId, language).editable ? this.actions.edit(connection.id, target.itemId, language, target.version) : undefined;
+        void operation?.catch(() => vscode.window.showErrorMessage("Unable to open the selected datasource. Check its connection and exact-locale version."));
         return;
       }
       if (value.type !== "load" || typeof value.language !== "string" || !languages.includes(value.language)) return;
-      language = value.language;
-      void load();
+      language = value.language; void load();
     });
-    panel.onDidDispose(() => { disposed = true; request?.abort(); listener.dispose(); this.panels.delete(panel); });
+    panel.onDidDispose(() => { disposed = true; request?.abort(); resetDetails(); listener.dispose(); this.panels.delete(panel); });
     await load();
   }
 }

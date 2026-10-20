@@ -130,11 +130,9 @@ export function renderComponentTree(tree: PageComponents, datasources: ReadonlyM
   };
   const render = (placeholders: readonly ComponentPlaceholder[]): string => placeholders.map(placeholder =>
     `<li class="placeholder"><details open><summary>${esc(placeholder.name)} <span>(${placeholder.components.length})</span></summary><ul>${placeholder.components.map(component =>
-      `<li class="component"><details open><summary>${esc(component.name)}</summary>
+      `<li class="component"><details open><summary><button data-component="${esc(component.key)}">${esc(component.name)}</button></summary>
       <div class="datasource">Datasource: ${datasource(component)}</div>
       ${component.issues.map(issue => `<p class="muted">${esc(issue)}</p>`).join("")}
-      <details class="info"><summary>Details</summary><p>Instance: ${esc(component.uid ?? "Unknown")}</p><p>Datasource: ${esc(component.datasource || "None declared")}</p><p>${esc(datasources.get(component.datasource)?.path ?? "")}</p><p>Source locale: unknown</p>
-      <p>Effective parameters (not raw presentation)</p><pre>${esc(JSON.stringify(component.parameters, null, 2))}</pre></details>
       <ul>${render(component.placeholders)}</ul></details></li>`).join("")}</ul></details></li>`).join("");
   return tree.count ? `<ul class="tree">${render(tree.placeholders)}</ul>` : "<p>No components were returned for this page.</p>";
 }
