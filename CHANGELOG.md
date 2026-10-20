@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.58.0 — 2026-10-20
+
+- Resolve component datasource GUIDs and absolute paths to item labels with bounded Authoring lookups. Show unavailable targets and unresolved expressions explicitly.
+- Open resolved datasources in Item Details in Browse, preserving the connection and requested language. Reject stale navigation after layout changes. Fallback source provenance remains unknown.
+
 ## 0.57.0 — 2026-10-20
 
 - Add View components… in Browse and Compare: a read-only CM Preview tree with nested placeholders, partial-design wrappers, component occurrences and immediate datasource references.

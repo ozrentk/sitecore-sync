@@ -90,14 +90,50 @@ export function componentRoute(path: string, site: AuthoringSite): string {
 export const escapeComponentHtml = (value: string): string => value.replace(/[&<>"']/gu, character =>
   ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[character]!);
 
-export function renderComponentTree(tree: PageComponents): string {
+export interface ComponentDatasource {
+  readonly itemId?: string;
+  readonly label: string;
+  readonly path?: string;
+}
+
+/** Deduplicate only lookups, never component occurrences. Four readers bound server pressure. */
+export async function resolveComponentDatasources(tree: PageComponents,
+  read: (reference: string) => Promise<ComponentDatasource>, signal: AbortSignal): Promise<ReadonlyMap<string, ComponentDatasource>> {
+  const references = new Set<string>();
+  const walk = (placeholders: readonly ComponentPlaceholder[]): void => {
+    for (const placeholder of placeholders) for (const component of placeholder.components) {
+      if (component.datasourceKind === "item") references.add(component.datasource);
+      walk(component.placeholders);
+    }
+  };
+  walk(tree.placeholders);
+  const pending = [...references], result = new Map<string, ComponentDatasource>();
+  await Promise.all(Array.from({ length: Math.min(4, pending.length) }, async () => {
+    while (pending.length) {
+      signal.throwIfAborted();
+      const reference = pending.shift()!;
+      try { result.set(reference, await read(reference)); }
+      catch { signal.throwIfAborted(); result.set(reference, { label: "Missing or unavailable in the requested language" }); }
+    }
+  }));
+  signal.throwIfAborted();
+  return result;
+}
+
+export function renderComponentTree(tree: PageComponents, datasources: ReadonlyMap<string, ComponentDatasource> = new Map()): string {
   const esc = escapeComponentHtml;
+  const datasource = (component: ComponentOccurrence): string => {
+    const resolved = datasources.get(component.datasource);
+    if (resolved?.itemId) return `<button data-datasource="${esc(component.key)}">${esc(resolved.label)}</button>`;
+    if (resolved) return esc(resolved.label);
+    return component.datasource ? `${esc(component.datasource.startsWith("/sitecore/") ? component.datasource.split("/").at(-1)! : component.datasource)} — ${component.datasourceKind === "unresolved" ? "resolution unknown" : "reference only"}` : "None declared";
+  };
   const render = (placeholders: readonly ComponentPlaceholder[]): string => placeholders.map(placeholder =>
     `<li class="placeholder"><details open><summary>${esc(placeholder.name)} <span>(${placeholder.components.length})</span></summary><ul>${placeholder.components.map(component =>
       `<li class="component"><details open><summary>${esc(component.name)}</summary>
-      <div class="datasource">Datasource: ${component.datasource ? `<span>${esc(component.datasource.startsWith("/sitecore/") ? component.datasource.split("/").at(-1)! : component.datasource)}</span>${component.datasourceKind === "unresolved" ? " — resolution unknown" : " — reference only"}` : "None declared"}</div>
+      <div class="datasource">Datasource: ${datasource(component)}</div>
       ${component.issues.map(issue => `<p class="muted">${esc(issue)}</p>`).join("")}
-      <details class="info"><summary>Details</summary><p>Instance: ${esc(component.uid ?? "Unknown")}</p><p>Datasource: ${esc(component.datasource || "None declared")}</p><p>Source locale: unknown</p>
+      <details class="info"><summary>Details</summary><p>Instance: ${esc(component.uid ?? "Unknown")}</p><p>Datasource: ${esc(component.datasource || "None declared")}</p><p>${esc(datasources.get(component.datasource)?.path ?? "")}</p><p>Source locale: unknown</p>
       <p>Effective parameters (not raw presentation)</p><pre>${esc(JSON.stringify(component.parameters, null, 2))}</pre></details>
       <ul>${render(component.placeholders)}</ul></details></li>`).join("")}</ul></details></li>`).join("");
   return tree.count ? `<ul class="tree">${render(tree.placeholders)}</ul>` : "<p>No components were returned for this page.</p>";

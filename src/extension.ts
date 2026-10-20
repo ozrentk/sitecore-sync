@@ -135,7 +135,8 @@ export function activate(context: vscode.ExtensionContext): void {
     log,
   );
   const itemEditors = new ItemEditorProvider(context, connectionStore, authoringClient);
-  const pageComponents = new PageComponentsPanel(connectionStore, authoringClient);
+  const pageComponents = new PageComponentsPanel(connectionStore, authoringClient, undefined,
+    (connectionId, itemId, language) => comparisonPanelManager.openDatasourceDetails(connectionId, itemId, language));
   context.subscriptions.push(pageComponents, vscode.commands.registerCommand("xmCloudSync.viewPageComponents", async (args: unknown) => {
     try { await pageComponents.open(args); }
     catch { await vscode.window.showErrorMessage("Unable to open page components. Select a content page and check its connection, discovered sites and CM Preview token."); }

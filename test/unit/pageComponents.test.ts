@@ -1,12 +1,44 @@
 import { test } from "node:test";
-import { deepStrictEqual, equal, throws, match, doesNotMatch } from "node:assert/strict";
-import { componentRoute, parsePageComponents, renderComponentTree } from "../../src/editor/pageComponents";
+import { deepStrictEqual, equal, throws, match, doesNotMatch, rejects } from "node:assert/strict";
+import { componentRoute, parsePageComponents, renderComponentTree, resolveComponentDatasources } from "../../src/editor/pageComponents";
 
 const id = "11111111111111111111111111111111";
 const selected = { itemId: id, language: "en-AU", site: "Example" };
 const instance = (extra: Record<string, unknown> = {}): Record<string, unknown> => ({
   uid: id, componentName: "RichText", dataSource: "/sitecore/content/Example/Partial/Data/Text",
   isContentResolved: true, params: { empty: "", label: "A&B" }, ...extra,
+});
+test("datasource lookups deduplicate references, isolate failures and escape resolved labels", async () => {
+  const tree = parsePageComponents(fixture({ main: [instance(), instance(), instance({ dataSource: id }),
+    instance({ dataSource: "local:/unknown" })] }), selected);
+  const reads: string[] = [];
+  const resolved = await resolveComponentDatasources(tree, async reference => {
+    reads.push(reference);
+    if (reference === id) throw Error("private server error");
+    return { itemId: id, label: "<Label>", path: "/sitecore/content/label" };
+  }, new AbortController().signal);
+  equal(reads.length, 2);
+  equal(resolved.get(id)?.itemId, undefined);
+  const html = renderComponentTree(tree, resolved);
+  match(html, /&lt;Label&gt;/u);
+  match(html, /data-datasource=/u);
+  match(html, /Missing or unavailable/u);
+  doesNotMatch(html, /private server error|<Label>/u);
+});
+test("datasource resolution bounds concurrency and stops on cancellation", async () => {
+  const tree = parsePageComponents(fixture({ main: Array.from({ length: 12 }, (_, n) =>
+    instance({ dataSource: `/sitecore/content/Item${n}` })) }), selected);
+  let active = 0, maximum = 0;
+  await resolveComponentDatasources(tree, async reference => {
+    maximum = Math.max(maximum, ++active);
+    await new Promise(resolve => setTimeout(resolve, 1));
+    active--;
+    return { label: reference };
+  }, new AbortController().signal);
+  equal(maximum, 4);
+  const controller = new AbortController();
+  controller.abort();
+  await rejects(resolveComponentDatasources(tree, async () => { throw Error("must not read"); }, controller.signal));
 });
 function fixture(placeholders: unknown = { main: [instance()] }, route: Record<string, unknown> = {}): unknown {
   return { status: "collected", rendered: { sitecore: { context: { site: { name: "Example" }, language: "en-AU" },

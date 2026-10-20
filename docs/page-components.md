@@ -8,7 +8,9 @@ The read-only panel shows Preview's nested placeholders and component occurrence
 including standard partial-design wrappers. Expand or collapse sections to inspect
 the layout. Each component shows its immediate datasource reference; Details
 contains the full reference, instance UID and effective parameter object.
-Datasource references do not open an editor or recursively load referenced items.
+GUID and absolute-path datasources resolve to item labels using Authoring in the requested language. Click a resolved label to open Item Details in Browse on the same connection and language. This switches the comparison workspace to Browse. Missing or inaccessible targets remain visibly unavailable; custom expressions stay unresolved. These lookups do not establish fallback provenance or write eligibility. References inside a datasource are not recursively expanded.
+
+Duplicate references share a lookup within each layout load, with at most four lookups in flight and a 30-second overall load deadline. Refresh and language changes resolve labels again.
 
 Change Language to reload that page's layout in another configured locale.
 Refresh reads the current saved content again. Closing the panel cancels pending reads.

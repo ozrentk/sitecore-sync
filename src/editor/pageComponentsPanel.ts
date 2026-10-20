@@ -4,16 +4,17 @@ import type { ConnectionStore } from "../connections/connectionStore";
 import type { AuthoringContentClient } from "../sitecore/authoringClient";
 import { PreviewDiagnosticClient } from "../sitecore/previewDiagnostic";
 import { isGuid, isLocale } from "./itemEditorModel";
-import { componentRoute, escapeComponentHtml as esc, parsePageComponents, renderComponentTree } from "./pageComponents";
+import { componentRoute, escapeComponentHtml as esc, parsePageComponents, renderComponentTree, resolveComponentDatasources, type ComponentPlaceholder } from "./pageComponents";
 
 type Connections = Pick<ConnectionStore, "get" | "getClientSecret" | "getPreviewToken" | "listVerifiedSites">;
-type Authoring = Pick<AuthoringContentClient, "loadItem" | "loadLanguages" | "testConnection">;
+type Authoring = Pick<AuthoringContentClient, "loadItem" | "loadLanguages" | "testConnection" | "loadSelectionItem">;
 
 export class PageComponentsPanel implements vscode.Disposable {
   private readonly panels = new Set<vscode.WebviewPanel>();
   private readonly lifetime = new AbortController();
   constructor(private readonly connections: Connections, private readonly authoring: Authoring,
-    private readonly preview: Pick<PreviewDiagnosticClient, "collect"> = new PreviewDiagnosticClient()) {}
+    private readonly preview: Pick<PreviewDiagnosticClient, "collect"> = new PreviewDiagnosticClient(),
+    private readonly openDatasource?: (connectionId: string, itemId: string, language: string) => Promise<void>) {}
   dispose(): void { this.lifetime.abort(); for (const panel of this.panels) panel.dispose(); this.panels.clear(); }
 
   async open(args: unknown): Promise<void> {
@@ -59,6 +60,7 @@ export class PageComponentsPanel implements vscode.Disposable {
     this.panels.add(panel);
     let request: AbortController | undefined, revision = 0, disposed = false;
     let language = initialLanguage;
+    const targets = new Map<string, string>();
     const html = (body: string, busy: boolean): string => {
       const nonce = randomBytes(18).toString("hex");
       return `<!DOCTYPE html><html><head><meta charset="utf-8">
@@ -74,14 +76,16 @@ export class PageComponentsPanel implements vscode.Disposable {
       <p class="muted">${esc(connection.name)} · ${esc(site.name)} · Read-only components and immediate datasource references</p>
       <main aria-live="polite" aria-busy="${busy}">${body}</main>
       <script nonce="${nonce}">const api=acquireVsCodeApi();document.getElementById("refresh").onclick=()=>api.postMessage({type:"load",language:document.getElementById("language").value});
-      document.getElementById("language").onchange=e=>api.postMessage({type:"load",language:e.target.value});</script></body></html>`;
+      document.getElementById("language").onchange=e=>api.postMessage({type:"load",language:e.target.value});
+      document.querySelectorAll("[data-datasource]").forEach(button=>button.onclick=()=>api.postMessage({type:"openDatasource",key:button.dataset.datasource,revision:${revision}}));</script></body></html>`;
     };
     const load = async (): Promise<void> => {
       request?.abort();
       request = new AbortController();
       const current = ++revision;
+      targets.clear();
       const selectedLanguage = language;
-      const active = AbortSignal.any([this.lifetime.signal, request.signal]);
+      const active = AbortSignal.any([this.lifetime.signal, request.signal, AbortSignal.timeout(30_000)]);
       panel.webview.html = html("<p>Loading components…</p>", true);
       try {
         if (!validConnection()) throw Error("Connection changed.");
@@ -90,20 +94,42 @@ export class PageComponentsPanel implements vscode.Disposable {
         active.throwIfAborted();
         const report = await this.preview.collect(connection.serverUrl, token, { site: site.name, route: selectedRoute, language: selectedLanguage }, active);
         const tree = parsePageComponents(report, { itemId, language: selectedLanguage, site: site.name }, active);
+        const authoringSecret = await this.connections.getClientSecret(connection.id);
+        const datasources = await resolveComponentDatasources(tree, async reference => {
+          if (!authoringSecret || !validConnection()) throw Error("Connection unavailable.");
+          const resolved = await this.authoring.loadSelectionItem(connection, authoringSecret,
+            isGuid(reference) ? { itemId: reference } : { path: reference }, selectedLanguage, active);
+          return { itemId: resolved.itemId, label: resolved.displayName || resolved.name, path: resolved.path };
+        }, active);
         if (disposed || current !== revision) return;
         if (!validConnection()) throw Error("Connection changed.");
+        const collectTargets = (placeholders: readonly ComponentPlaceholder[]): void => {
+          for (const placeholder of placeholders) for (const component of placeholder.components) {
+            const resolved = datasources.get(component.datasource);
+            if (resolved?.itemId) targets.set(component.key, resolved.itemId);
+            collectTargets(component.placeholders);
+          }
+        };
+        collectTargets(tree.placeholders);
         panel.webview.html = html(`<p class="muted">${tree.count} component occurrence(s). Requested locale: ${esc(tree.requestedLanguage)}. Source locale: unknown.</p>
           <details class="info"><summary>Layout context</summary><p>Returned locale/version: ${esc(tree.returnedLanguage)} / ${tree.returnedVersion}</p>
           <p>Device: ${esc(tree.device)}</p><p>Preview is effective content. Returned locale/version is not proof of a local editable version.
-          Custom resolver and reference-graph coverage is not established. Datasources below are references, not verified writable targets.</p></details>${renderComponentTree(tree)}`, false);
+          Custom resolver and reference-graph coverage is not established. Datasources below are references, not verified writable targets.</p></details>${renderComponentTree(tree, datasources)}`, false);
       } catch {
-        if (disposed || current !== revision || active.aborted) return;
+        if (disposed || current !== revision || request.signal.aborted || this.lifetime.signal.aborted) return;
         panel.webview.html = html("<p>Components unavailable. Check the CM Preview token and site route. The response must match this page and language and fit the layout limits (500 components, 20 levels). No partial tree is shown.</p>", false);
       }
     };
     const listener = panel.webview.onDidReceiveMessage((message: unknown) => {
       if (!message || typeof message !== "object" || disposed) return;
       const value = message as Record<string, unknown>;
+      if (value.type === "openDatasource") {
+        if (value.revision !== revision || typeof value.key !== "string" || !validConnection()) return;
+        const datasourceId = targets.get(value.key);
+        if (datasourceId && this.openDatasource) void this.openDatasource(connection.id, datasourceId, language)
+          .catch(() => vscode.window.showErrorMessage("Unable to open datasource. Check its connection and requested language."));
+        return;
+      }
       if (value.type !== "load" || typeof value.language !== "string" || !languages.includes(value.language)) return;
       language = value.language;
       void load();
