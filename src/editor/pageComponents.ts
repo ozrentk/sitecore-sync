@@ -126,17 +126,21 @@ export async function resolveComponentDatasources(tree: PageComponents,
 
 export function renderComponentTree(tree: PageComponents, datasources: ReadonlyMap<string, ComponentDatasource> = new Map()): string {
   const esc = escapeComponentHtml;
-  const datasource = (component: ComponentOccurrence): string => {
+  let branch = 0;
+  const row = (component: ComponentOccurrence): string => {
     const resolved = datasources.get(component.datasource);
-    if (resolved?.itemId) return `<button data-datasource="${esc(component.key)}">${esc(resolved.label)}</button>`;
-    if (resolved) return esc(resolved.label);
-    return component.datasource ? `${esc(component.datasource.startsWith("/sitecore/") ? component.datasource.split("/").at(-1)! : component.datasource)} — ${component.datasourceKind === "unresolved" ? "resolution unknown" : "reference only"}` : "None declared";
+    const label = resolved?.itemId ? `${resolved.label} [${component.name}]`
+      : component.datasource ? `[${component.name}] — Datasource unavailable` : `[${component.name}]`;
+    const title = [component.datasource ? `Declared datasource: ${component.datasource}` : "No datasource declared",
+      ...component.issues].join("\n");
+    const children = component.placeholders.length ? `component-branch-${++branch}` : undefined;
+    return `<li class="component"><div class="component-row">${children
+      ? `<button class="branch-toggle" aria-expanded="true" aria-controls="${children}" aria-label="Collapse children of ${esc(label)}" data-branch-label="${esc(label)}"><span aria-hidden="true">›</span></button>`
+      : '<span class="branch-spacer" aria-hidden="true"></span>'}
+      <button class="component-select" data-component="${esc(component.key)}" aria-pressed="false" title="${esc(title)}">${esc(label)}</button></div>
+      ${children ? `<ul id="${children}">${render(component.placeholders)}</ul>` : ""}</li>`;
   };
   const render = (placeholders: readonly ComponentPlaceholder[]): string => placeholders.map(placeholder =>
-    `<li class="placeholder"><details open><summary>${esc(placeholder.name)} <span>(${placeholder.components.length})</span></summary><ul>${placeholder.components.map(component =>
-      `<li class="component"><details open><summary><button data-component="${esc(component.key)}">${esc(component.name)}</button></summary>
-      <div class="datasource">Datasource: ${datasource(component)}</div>
-      ${component.issues.map(issue => `<p class="muted">${esc(issue)}</p>`).join("")}
-      <ul>${render(component.placeholders)}</ul></details></li>`).join("")}</ul></details></li>`).join("");
+    `<li class="placeholder"><details open><summary>${esc(placeholder.name)} <span>(${placeholder.components.length})</span></summary><ul>${placeholder.components.map(row).join("")}</ul></details></li>`).join("");
   return tree.count ? `<ul class="tree">${render(tree.placeholders)}</ul>` : "<p>No components were returned for this page.</p>";
 }

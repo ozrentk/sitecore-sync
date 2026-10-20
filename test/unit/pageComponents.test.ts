@@ -27,8 +27,9 @@ test("datasource lookups deduplicate references, isolate failures and escape res
   equal(resolved.get(id)?.itemId, undefined);
   const html = renderComponentTree(tree, resolved);
   match(html, /&lt;Label&gt;/u);
-  match(html, /data-datasource=/u);
-  match(html, /Missing or unavailable/u);
+  doesNotMatch(html, /data-datasource=|Datasource: /u);
+  equal((html.match(/data-component=/gu) || []).length, 4);
+  match(html, /Datasource unavailable/u);
   doesNotMatch(html, /private server error|<Label>/u);
 });
 test("datasource resolution bounds concurrency and stops on cancellation", async () => {
@@ -89,7 +90,7 @@ test("unknown identity remains visible and HTML cannot execute remote content", 
   const html = renderComponentTree(tree);
   doesNotMatch(html, /<script|<iframe|<img|href=/u);
   match(html, /&lt;script&gt;/u);
-  match(html, /resolution unknown/u);
+  match(html, /Datasource unavailable/u);
   equal(tree.placeholders[0]!.components[0]!.issues.length, 2);
   equal(parsePageComponents(fixture({}), selected).count, 0);
 });
@@ -100,4 +101,19 @@ test("route candidate preserves item names and requires a home boundary inside t
   throws(() => componentRoute("/sitecore/content/ExampleOther/Home/Page", site));
   throws(() => componentRoute("/sitecore/content/Example/Settings", site));
   deepStrictEqual(parsePageComponents(fixture({}), selected).placeholders, []);
+});
+
+test("component rows combine labels and types, retain unresolved expressions and branch independently", () => {
+  const tree = parsePageComponents(fixture({ main: [instance({ dataSource: "", componentName: "MainHeroBanner", placeholders: {
+    nested: [instance(), instance({ dataSource: "local:/query<value>" })],
+  } }), instance()] }), selected);
+  const html = renderComponentTree(tree, new Map([["/sitecore/content/Example/Partial/Data/Text", { itemId: id, label: "SW - Title - Rich Text" }]]));
+  match(html, />\[MainHeroBanner\]<\/button>/u);
+  equal((html.match(/SW - Title - Rich Text \[RichText\]<\/button>/gu) || []).length, 2);
+  equal((html.match(/class="branch-toggle"/gu) || []).length, 1);
+  match(html, /aria-controls="component-branch-1"/u);
+  match(html, /id="component-branch-1"/u);
+  match(html, /Declared datasource: local:\/query&lt;value&gt;/u);
+  match(html, /\[RichText\] — Datasource unavailable/u);
+  doesNotMatch(html, /data-datasource|<value>|None declared/u);
 });

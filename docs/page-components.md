@@ -5,10 +5,14 @@ Save the environment's separate **CM Preview** token in Connection settings firs
 The extension uses the clicked side's connection and language.
 
 The Components tab keeps its tree beside a read-only details pane. Select a component
-or datasource to inspect its instance UID, effective parameters and the actual
+row to inspect its instance UID, effective parameters and the actual
 datasource's name, ID, path and fields. Selection stays inside Components and does
 not change Browse or another editor's drafts. Repeated components remain separate
 occurrences even when they use the same datasource.
+
+Each full-width row shows `Datasource display name [Rendering type]`. Without a declared datasource it shows `[Rendering type]`; unresolved declarations show **Datasource unavailable** and retain the expression in the tooltip and instance details. Labels wrap without truncation. A separate chevron expands child placeholders without changing selection.
+
+Field groups containing only Standard Template/system fields start collapsed. Ordinary content and mixed groups stay expanded, including content inherited from standard values. Expand any group to inspect its complete values.
 
 Drag the divider or focus it and use Left/Right (Home/End for the limits) to resize.
 The compact **Expand details / Restore split view** icon appears in the details header only after a datasource or referenced item loads. It toggles the whole-tab view without a second desktop Back control. At narrow widths, selection opens Details;
