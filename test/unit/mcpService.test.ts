@@ -275,3 +275,11 @@ test("scope rule failures retain unknown outcomes and strict boolean arguments",
   await rejects(f.call("execute_plan", { planId: plan.planId }), /Inspect list_operations/u);
   strictEqual(f.records().at(-1)!.status, "outcome-unknown"); strictEqual(f.writes(), 1);
 });
+
+
+test("Preview diagnostic requires its own saved credential without Authoring reads or writes", async () => {
+  const f = fixture();
+  await rejects(f.call("collect_preview_diagnostic", { connectionId: testConnection.id, site: "Example", route: "/", language: "en" }), /Preview token/);
+  strictEqual(f.reads(), 0); strictEqual(f.writes(), 0);
+  strictEqual(toolSchemas.collect_preview_diagnostic.safeParse({ connectionId: testConnection.id, site: "Example", route: "https://other.example", language: "en" }).success, false);
+});

@@ -17,6 +17,24 @@ const favoritePathsKey = "sitecoreXmCloudSync.favoritePaths.v1";
 const verifiedSitesKey = "sitecoreXmCloudSync.verifiedSites.v1";
 
 export const connectionStoreTests: readonly IntegrationTest[] = [
+  { name: "Preview token is separate, transactional and removable", async execute() {
+    const secrets = new MemorySecretStorage(); const store = new ConnectionStore(new MemoryMemento(), secrets);
+    const value = connection("preview", "Preview");
+    const keep = { action: "keep" as const, value: "" };
+    const edits = { clientSecret: keep, deploymentSecret: keep, edgeToken: keep };
+    try {
+      await store.saveSettings(value, { ...edits, previewToken: { action: "replace", value: "preview-fixture" } }, undefined, async () => undefined);
+      strictEqual(await store.getPreviewToken(value.id), "preview-fixture");
+      strictEqual(await store.getEdgeToken(value.id), undefined);
+      await rejects(store.saveSettings(value, { ...edits, previewToken: { action: "replace", value: "replacement" } }, undefined, async () => { throw Error("save failed"); }));
+      strictEqual(await store.getPreviewToken(value.id), "preview-fixture");
+      await store.saveSettings(value, edits, undefined, async () => undefined);
+      strictEqual(await store.getPreviewToken(value.id), "preview-fixture");
+      await store.saveSettings(value, { ...edits, previewToken: { action: "remove", value: "" } }, undefined, async () => undefined);
+      strictEqual(await store.getPreviewToken(value.id), undefined);
+    } finally { store.dispose(); secrets.dispose(); }
+  } },
+
   {
     name: "ConnectionStore filters malformed state and sorts persisted connections",
     async execute(): Promise<void> {
@@ -291,7 +309,7 @@ export const connectionStoreTests: readonly IntegrationTest[] = [
         strictEqual(await store.getDeploymentClientSecret(added.id), undefined);
         strictEqual(await store.getSpeCredential(added.id), undefined);
         strictEqual(await store.getEdgeToken(added.id), undefined);
-        strictEqual(secrets.deletes.length, 4);
+        strictEqual(secrets.deletes.length, 5);
       } finally {
         store.dispose();
         secrets.dispose();
