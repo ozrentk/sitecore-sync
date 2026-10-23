@@ -1,8 +1,8 @@
-# Edit ordinary items
+# Edit content fields
 
 [Documentation index](README.md) · [Project overview](../README.md)
 
-Right-click an ordinary content or component datasource item in **Browse**, or on its specific side in **Compare**, and choose **Edit…**. The editor opens in the main editor area; Item Details remains a read-only inspector. Tabs are pinned to the connection, item, locale and concrete numbered version. Reopening the same target reveals its draft. Tree navigation does not retarget the tab. **Open existing locale/version…** opens another tab without creating versions.
+Right-click a page, ordinary content item or component datasource in **Browse**, or on its specific side in **Compare**, and choose **Edit…**. The editor opens in the main editor area; Item Details remains a read-only inspector. Tabs are pinned to the connection, item, locale and concrete numbered version. Reopening the same target reveals its draft. Tree navigation does not retarget the tab. **Open existing locale/version…** opens another tab without creating versions.
 
 ## Field support
 
@@ -25,7 +25,7 @@ Eligibility also depends on an existing exact-locale version, valid metadata and
 
 ## Rich Text HTML source
 
-Eligible ordinary-item Rich Text fields open in **HTML** mode. Edit the source directly, choose **Visual** for supported basic markup, use **Preview** to inspect the current draft, and use the ordinary **Save** workflow. Preview is read-only, script-free and isolated; it blocks external requests and navigation. It is not a website preview or a visual editor. Item Details remains read-only.
+Eligible content Rich Text fields, including ordinary fields on pages, open in **HTML** mode. Edit the source directly, choose **Visual** for supported basic markup, use **Preview** to inspect the current draft, and use the ordinary **Save** workflow. Preview is read-only, script-free and isolated; it blocks external requests and navigation. It is not a website preview or a visual editor. Item Details remains read-only.
 
 Opening a field or switching between HTML and Preview does not serialize or change its source. The raw draft preserves comments, malformed markup, attributes, whitespace and mixed CRLF/LF/lone-CR line endings. The textarea displays normalized line breaks while retaining the original raw string separately. Newly typed line breaks use the nearest preceding convention, then the first existing convention, or LF. Pasted/dropped plain text preserves the string supplied by the browser; external clipboard software may itself normalize text. Drops insert at the current selection. **Clear** stores an explicit empty value.
 
@@ -116,7 +116,7 @@ Droplist and Grouped Droplist store the selected item's **name**. Droplink, Grou
 
 Supported Sources are an absolute `/sitecore/...` root path or a root item GUID. Flat lists offer direct children, grouped lists offer grandchildren, and Droptree offers descendants (not the root itself), following [Sitecore's selection-source rules](https://doc.sitecore.com/xp/en/developers/92/sitecore-experience-manager/controlling-the-list-of-items-in-a-selection-field.html) and [field value representations](https://doc.sitecore.com/sai/en/developers/sitecoreai/introduction-to-framework-agnostic-sitecore-development/content-rendering/field-types-in-rendering-data.html). The [bounded child queries](#bounded-child-query-sources) are also supported for flat lists. Empty Sources, other queries, relative paths, SXA tokens and parameter/filter expressions remain read-only. No unsupported expression falls back to unrestricted browsing or a tree crawl.
 
-Source and Type are read from the template field item. If it has no version in the editor locale, an advertised existing version supplies only verified **shared** metadata; content choices and writes retain the editor locale. Missing/inaccessible metadata keeps that field read-only. Limits are 64 field definitions per item, 1,000 choices per list or expanded branch, 50 groups, 20 child pages and a 30-second request timeout. Incomplete/over-limit lists are rejected, not offered as partial selections. Save rechecks field Source and allowed membership; moving, deleting or renaming a selected item can therefore block Save. These checks do not claim an atomic lock against concurrent server changes. Existing fallback/system/page restrictions still apply.
+Source and Type are read from the template field item. If it has no version in the editor locale, an advertised existing version supplies only verified **shared** metadata; content choices and writes retain the editor locale. Missing/inaccessible metadata keeps that field read-only. Limits are 64 field definitions per item, 1,000 choices per list or expanded branch, 50 groups, 20 child pages and a 30-second request timeout. Incomplete/over-limit lists are rejected, not offered as partial selections. Save rechecks field Source and allowed membership; moving, deleting or renaming a selected item can therefore block Save. These checks do not claim an atomic lock against concurrent server changes. Existing fallback/system/layout restrictions still apply.
 
 ## Multiple-selection fields
 
@@ -126,7 +126,7 @@ Supported Sources are absolute Sitecore root paths and item GUIDs. Checklist/Mul
 
 [Values are pipe-separated item IDs](https://doc.sitecore.com/sai/en/developers/sitecoreai/content-modeling-and-presentation/data-templates/data-template-fields/the-data-template-field-types/the-simple-field-types.html). Retained IDs preserve their original representation and order; newly selected IDs use braced GUIDs. Unknown or out-of-source references remain until explicitly removed, including when adding/reordering valid choices. Duplicate IDs, malformed lists and lists over 256 selections remain read-only. Loading, filtering, incomplete pages and failures never clear selections. Limits remain 1,000 choices per list/branch, 20 pages, 64 Source definitions per editor and 30-second request/validation windows. Complete branches load on demand; partial results are not offered.
 
-Save rereads the pinned exact-locale version and Source metadata, rejects value/type/Source drift, and validates **newly added** IDs against current membership. Retained unavailable references may remain or be explicitly removed. No content version is created; fallback-derived, page and system fields remain protected. The existing non-retried mutation, journal and readback rules apply.
+Save rereads the pinned exact-locale version and Source metadata, rejects value/type/Source drift, and validates **newly added** IDs against current membership. Retained unavailable references may remain or be explicitly removed. No content version is created; fallback-derived, layout and system fields remain protected. The existing non-retried mutation, journal and readback rules apply.
 
 ## Structured fields
 
@@ -209,3 +209,7 @@ Each Replace or Replace all produces one ordinary document edit. **Undo/Redo** u
 - Changed Visual output receives two-space HTML indentation, with nested tags and text on separate lines. This intentionally normalizes whitespace around inline wrappers and clears NBSP-only paragraph contents. Attribute tokens, internal entities, opaque content and explicitly whitespace-sensitive sections are preserved. Untouched source and manually edited HTML are not automatically formatted.
 - **Insert table / paragraphs to rows** inserts the existing 2×2 table at a caret, or converts selected adjacent top-level paragraphs/headings into a single-column table, one whole paragraph per row (up to 100). It retains their text, inline markup and attributes. Partial paragraph selections convert the whole intersecting paragraph, without discarding unselected text. Mixed/non-top-level structures remain unsupported.
 - **Delete rows / Delete columns** removes selected rows/columns and their contents. Remaining nodes and metadata are retained, and the caret stays in the remaining table. Split merged cells first. Column deletion with multiple sections or column definitions still requires HTML. Removing the final section removes the table. **Delete table** removes the entire table, including its owned wrapper/caption/column definitions. A fully selected table can also be removed with Delete/Backspace; deleting the only editable content leaves an empty paragraph. These are deliberate local draft edits and are undoable through existing native history; they do not publish or save automatically.
+
+## Page content fields (0.61.0)
+
+Pages use the same field editor and save workflow as other content items. Supported ordinary fields, such as Has Breadcrumb and Breadcrumb Title, are editable in an existing exact-locale version. Layout/presentation fields, system and Standard Template fields, unverified fallback values and unsupported types remain read-only. No page-layout editor, version creation or fallback-source writes are introduced. Eligibility is checked per field both when editing and again before Save; unchanged protected fields are never included in the mutation.

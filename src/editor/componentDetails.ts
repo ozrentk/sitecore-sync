@@ -1,9 +1,8 @@
 import type { AuthoringItemDetails } from "../sitecore/authoringClient";
 import { fieldPresentation } from "../sitecore/fieldPresentation";
 import { parseReferenceField } from "../publishing/referenceDiscovery";
-import { hasPagePresentation } from "../publicPages/publicPageUrl";
 import { orderEditorFields } from "./fieldOrder";
-import { isGuid } from "./itemEditorModel";
+import { isGuid, fieldKind } from "./itemEditorModel";
 
 export function componentItemDetails(item: AuthoringItemDetails, expectedId: string, language: string) {
   const normalize = (value: string): string => value.replace(/[{}-]/gu, "").toLowerCase();
@@ -24,15 +23,17 @@ export function componentItemDetails(item: AuthoringItemDetails, expectedId: str
       if (!references.has(key)) references.set(key, { id: reference.target, field: field.label || field.name });
     }
   }
+  // Source metadata is loaded by the editor; missing picker metadata here must not hide its entry point.
   const editable = item.version > 0 && item.path.toLowerCase().startsWith("/sitecore/content/")
-    && !hasPagePresentation(item) && !item.fields.some(field => field.containsFallbackValue);
+    && item.fields.some(field => !field.containsFallbackValue && !field.isStandardTemplate && !field.name.startsWith("__")
+      && !/layout/iu.test(`${field.type} ${field.typeKey}`) && fieldKind(field) !== undefined);
   return {
     itemId: item.itemId, name: item.displayName || item.name, path: item.path,
     requestedLanguage: language, returnedLanguage: item.language, version: item.version,
     effectiveLanguage: item.version === 0 ? "Unavailable (no exact-locale version)"
       : item.fields.some(field => field.containsFallbackValue) ? "Unknown (fallback source unverified)" : item.language,
     editable,
-    editReason: editable ? "" : "Edit requires an ordinary content item with a verified exact-locale version and no fallback values.",
+    editReason: editable ? "" : "Edit requires a supported content field in an existing exact-locale version. Layout, system and fallback fields remain read-only.",
     fields: orderEditorFields(item.fields).map(field => ({
       id: field.fieldId, name: field.label || field.name, section: field.sectionName || "Fields",
       isStandardTemplate: field.isStandardTemplate || field.name.startsWith("__"),

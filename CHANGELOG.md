@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.61.0 — 2026-10-23
+
+- Allow supported ordinary fields on pages through the existing exact-locale editor and save workflow. Keep layout/system fields, unsupported types and unverified fallback values read-only.
+- Align Components Edit availability with field eligibility and replace outdated Stage A wording.
+
 ## 0.60.0
 
 - Components expands Preview-backed list/lookup references lazily under each datasource, grouped by field. Ordered duplicates stay separate; ancestor cycles, unavailable items, malformed values and limits remain visible.

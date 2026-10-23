@@ -251,3 +251,5 @@ Implemented horizontal rule, strikethrough, subscript/superscript; two toolbar r
 ### Rich Text editing polish (0.55.0)
 
 Addressed struck-S icon, paragraph indentation, readable generated HTML, consecutive Replace, removal of Show replacement, grouped controls, distinct functional Match case, paragraph-to-table rows, populated row/column deletion and whole-table deletion. See [limits](docs/item-editor.md#editing-refinements-0550). Merged-cell row/column edits, complex margin CSS, native IME/accessibility and live-save acceptance remain bounded or unverified.
+
+- 0.61.0: ordinary content fields on page items now use the existing editor/save path. Layout/system and unverified fallback fields remain read-only. This does not implement page-layout editing or B26 fallback-source writes.
