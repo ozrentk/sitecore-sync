@@ -1,0 +1,38 @@
+# Read-only research queries. No source-locale or writable-version inference.
+# The item root has no site argument. Apply timeout/response/field limits in any adapter.
+query B27PreviewReferenceItem($id: String!, $language: String!) {
+  item(path: $id, language: $language) {
+    id
+    name
+    displayName
+    language { name }
+    version
+    fields(ownFields: false) {
+      __typename
+      id
+      name
+      value
+      definition { type section sectionSortOrder sortOrder shared unversioned }
+      ... on MultilistField { count targetIds }
+      ... on LookupField { targetId }
+    }
+  }
+}
+
+# Compare only an explicitly selected field with its occurrence in rendered output.
+# This is evidence for this request/site/item; it is not a universal site-context guarantee.
+query B27PreviewReferenceParity($site: String!, $route: String!, $id: String!, $language: String!, $field: String!) {
+  layout(site: $site, routePath: $route, language: $language) { item { rendered } }
+  item(path: $id, language: $language) {
+    id
+    language { name }
+    version
+    field(name: $field) {
+      __typename
+      id
+      name
+      value
+      ... on MultilistField { count targetIds }
+    }
+  }
+}
