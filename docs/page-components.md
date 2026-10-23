@@ -12,6 +12,8 @@ occurrences even when they use the same datasource.
 
 Each full-width row shows `Datasource display name [Rendering type]`. Without a declared datasource it shows `[Rendering type]`; unresolved declarations show **Datasource unavailable** and retain the expression in the tooltip and instance details. Labels wrap without truncation. A separate chevron expands child placeholders without changing selection.
 
+Expand **References** beneath a datasource to load its Preview-exposed stored list/lookup relationships. Each field has its own group; order and repeated targets are preserved. Expand a referenced item to inspect the next level, or select its row for exact-locale Details in the same pane. Cycles stop at an ancestor already in that branch. Missing, malformed, failed and limited nodes remain visible. This is on-demand expansion, not an automatic crawl.
+
 Field groups containing only Standard Template/system fields start collapsed. Ordinary content and mixed groups stay expanded, including content inherited from standard values. Expand any group to inspect its complete values.
 
 Drag the divider or focus it and use Left/Right (Home/End for the limits) to resize.
@@ -33,11 +35,10 @@ all editor validation/save rules remain intact. Editing is disabled for pages,
 non-content items, version zero and unverified fallback values. These actions refer
 to the selected referenced item when inspecting a reference, never its owner page.
 
-Supported relationships from Droplink, Droptree, Multilist, Treelist, Checklist,
+The Details pane separately lists exact-locale relationships from Droplink, Droptree, Multilist, Treelist, Checklist,
 General Link and Image/File fields appear under **Referenced items**. Select one
 to inspect that item's fields in the same pane. Layout fields are not relationships
-here. This is explicit, one-item-at-a-time inspection, not automatic recursive
-graph expansion; cycles do not trigger background traversal. Missing references
+here. This is explicit, one-item-at-a-time inspection, separate from the effective Preview reference tree; cycles do not trigger background traversal. Missing references
 stay unavailable. At most 100 distinct references are listed, with a visible
 limit notice. Each item read is limited to 500 fields and 1 MiB of field text;
 excessive details fail visibly rather than showing silently truncated fields.
@@ -77,3 +78,11 @@ Reads allow 30 seconds and 2 MiB per response. The tree is limited to 500 compon
 and 20 nested levels. Invalid, mismatched or excessive responses show an unavailable
 state rather than a silently truncated tree. No content is saved, published or deleted
 by this panel.
+
+### Preview reference limits
+
+The lazy tree currently supports typed Multilist and Lookup fields (including their Sitecore list/tree variants). Populated General Link and Image/File fields report unverified extraction rather than guessing relationships or substituting exact Authoring values. Layout fields and arbitrary custom resolver JSON are not traversed. Preview exposes fewer fields than Authoring; an empty group is not proof of complete template/reference coverage.
+
+Direct item queries have no site argument. The root page layout is site-validated, but equivalence for arbitrary site-dependent resolvers is unverified. Where layout output includes an explicit ordered item-reference array, disagreement with the direct read is shown as unresolved. Missing direct coverage and conflicting layout occurrences also remain unresolved. This comparison does not prove a transactional snapshot. Returned language/version never supplies an editable fallback source.
+
+Each panel layout load owns its cache (connection, selected site and locale); Refresh creates a new one. Limits are 200 item reads, four requests in flight, 500 reference occurrences, 12 reference levels, 500 fields per item and 500 raw entries per field. Each HTTP read has a 30-second deadline and 2 MiB response cap, with no automatic retries. Failed reads are retained for that load; Refresh retries. Expanding loads only the selected item's references and immediate target labels; collapsing does not restart or recursively crawl them. Closing, Refresh and locale changes cancel the load. Exact Details/Edit retain their separate existing eligibility and version guards.

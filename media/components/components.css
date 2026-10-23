@@ -57,3 +57,7 @@ pre,p,.datasource { white-space: pre-wrap; overflow-wrap: anywhere; }
   button,#page-header,#divider,.layout-metadata { border-color: CanvasText; }
   button[aria-pressed=true] { outline: 2px solid Highlight; }
 }
+
+.reference-branch { margin: 6px 0 8px 26px; }
+.reference-content .component-select { width: 100%; }
+.reference-content p { font-size: .9em; margin: 6px 0; }

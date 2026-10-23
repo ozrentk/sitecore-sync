@@ -199,6 +199,44 @@ export const pageComponentsTests: readonly IntegrationTest[] = [{
     } finally { provider.dispose(); restores.forEach(restore => restore()); spy.mock.restore(); load.mock.restore(); lookup.mock.restore(); }
   },
 },
+  {
+  name: "Components reference expansion cancels on reload and rejects stale and unknown targets",
+  async execute() {
+    const { connections, authoring } = dependencies();
+    let receive!: (message: unknown) => unknown;
+    const messages: Array<Record<string, unknown>> = [];
+    const restores: Array<() => void> = [];
+    const original = vscode.window.createWebviewPanel;
+    const spy = mock.method(vscode.window, "createWebviewPanel", (...args: Parameters<typeof original>) => {
+      const panel = original(...args);
+      const listener = mock.method(panel.webview, "onDidReceiveMessage", (fn: typeof receive) => { receive = fn; return new vscode.Disposable(() => {}); });
+      const post = mock.method(panel.webview, "postMessage", async (message: Record<string, unknown>) => { messages.push(message); return true; });
+      restores.push(() => listener.mock.restore(), () => post.mock.restore()); return panel;
+    });
+    const lookup = mock.method(authoring, "loadSelectionItem", async () => ({ itemId: datasourceId, name: "Data", displayName: "Data", path: "/sitecore/content/Example/Data", hasChildren: false }));
+    const pending: Array<{ signal: AbortSignal; resolve: (value: null) => void }> = [];
+    const provider = new PageComponentsPanel(connections, authoring, { collect: async (_origin, _token, selection) => ({ ...report, rendered: { sitecore: {
+      context: { site: { name: "Example" }, language: selection.language }, route: { ...report.rendered.sitecore.route, itemLanguage: selection.language,
+        placeholders: { main: [{ uid: id, componentName: "Text", dataSource: datasourceId, isContentResolved: true }] } },
+    } } }) }, undefined, { read: async (_origin, _token, _id, _language, signal) => new Promise(resolve => pending.push({ signal, resolve })) });
+    const wait = async (predicate: () => boolean): Promise<void> => { for (let n = 0; n < 100; n++) { if (predicate()) return; await new Promise(resolve => setTimeout(resolve, 10)); } throw Error("Reference test timeout"); };
+    try {
+      await provider.open({ connectionId: "test", itemId: id, language: "en" });
+      receive({ type: "expandReferences", revision: 1, key: "unknown" }); strictEqual(pending.length, 0);
+      const key = JSON.stringify(["main", 0]);
+      receive({ type: "expandReferences", revision: 1, key }); await wait(() => pending.length === 1);
+      receive({ type: "load", revision: 1, language: "en-AU" });
+      strictEqual(pending[0].signal.aborted, true); pending[0].resolve(null);
+      await new Promise(resolve => setTimeout(resolve, 30));
+      strictEqual(messages.some(message => message.type === "references"), false);
+      receive({ type: "expandReferences", revision: 1, key }); strictEqual(pending.length, 1);
+      receive({ type: "expandReferences", revision: 2, key }); await wait(() => pending.length === 2);
+      provider.dispose(); strictEqual(pending[1].signal.aborted, true); pending[1].resolve(null);
+      await new Promise(resolve => setTimeout(resolve, 10));
+      strictEqual(messages.some(message => message.type === "references"), false);
+    } finally { provider.dispose(); restores.forEach(restore => restore()); spy.mock.restore(); lookup.mock.restore(); }
+  },
+},
   ...([false, true] as const).map(narrowExpected => ({
   name: `Components ${narrowExpected ? "narrow" : "desktop"} header and details controls preserve selection, resize and focus`,
   async execute() {
@@ -208,13 +246,15 @@ export const pageComponentsTests: readonly IntegrationTest[] = [{
     const spy = mock.method(vscode.window, "createWebviewPanel", (...args: Parameters<typeof original>) => { panel = original(...args); return panel; });
     const originalLoad = authoring.loadItem;
     const load = mock.method(authoring, "loadItem", async (...args: Parameters<AuthoringContentClient["loadItem"]>) =>
-      "itemId" in args[2] && args[2].itemId === id ? originalLoad(...args) : groupedDetails());
+      "itemId" in args[2] && args[2].itemId === id ? originalLoad(...args) : { ...groupedDetails(), itemId: "itemId" in args[2] ? args[2].itemId : datasourceId });
     const lookup = mock.method(authoring, "loadSelectionItem", async () => ({ itemId: datasourceId, name: "Text", displayName: "SW - Title - Rich Text with a long descriptive name that should wrap", path: "/sitecore/content/Example/Data", hasChildren: false }));
     const provider = new PageComponentsPanel(connections, authoring, { collect: async () => ({ ...report, rendered: { sitecore: {
       ...report.rendered.sitecore, route: { ...report.rendered.sitecore.route, placeholders: {
         main: [{ uid: id, componentName: "Component", dataSource: datasourceId, isContentResolved: true, placeholders: { nested: [{ componentName: "Instance only" }] } }],
       } },
-    } } }) });
+    } } }) }, undefined, { read: async (_origin, _token, target) => ({ id: target, label: target === referenceId ? "Effective reference" : "Datasource", fields: [
+      { id, name: "Related", targets: target === datasourceId ? [referenceId, referenceId] : [datasourceId] },
+    ] }) });
     let timer: ReturnType<typeof setTimeout> | undefined, listener: vscode.Disposable | undefined;
     try {
       await vscode.commands.executeCommand(narrowExpected ? "workbench.action.editorLayoutTwoColumns" : "workbench.action.editorLayoutSingle");
@@ -249,7 +289,18 @@ export const pageComponentsTests: readonly IntegrationTest[] = [{
           if(Math.abs(button.getBoundingClientRect().right-row.getBoundingClientRect().right)>1||getComputedStyle(button).whiteSpace!=="normal")throw Error("Row does not fill/wrap");
           chevron.click();
           if(!document.getElementById(chevron.getAttribute("aria-controls")).hidden||workspace.classList.contains("show-details"))throw Error("Chevron selected component");
-          chevron.click(); button.click();
+          chevron.click();
+          const refs=document.querySelector("[data-reference-key]");refs.open=true;
+          await wait(()=>refs.querySelectorAll(".component-select").length===2);
+          const referenceRows=refs.querySelectorAll(".component-select");
+          if(referenceRows[0].textContent!=="Effective reference"||referenceRows[1].textContent!=="Effective reference")throw Error("Ordered repeated references lost");
+          const child=refs.querySelector(".reference-branch");child.open=true;
+          await wait(()=>child.textContent.includes("Cycle — already in this branch"));
+          referenceRows[0].click();
+          await wait(()=>document.getElementById("detail-content").textContent.includes("Referenced item"));
+          if(!document.getElementById("detail-content").textContent.includes("${referenceId}"))throw Error("Reference selection targeted owner");
+          if(narrowLayout.matches){document.getElementById("back").click();if(document.activeElement!==referenceRows[0])throw Error("Reference focus not restored");}
+          button.click();
           if(chevron.getAttribute("aria-expanded")!=="true")throw Error("Selection collapsed children");
           await wait(()=>document.querySelector(".field"));
           if(!document.getElementById("detail-content").textContent.includes("${datasourceId}"))throw Error("Wrong datasource identity");

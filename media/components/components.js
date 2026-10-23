@@ -81,6 +81,52 @@ document.querySelectorAll("[data-component]").forEach(button => {
     post({ type: "select", key, intent: ++intent });
   };
 });
+// Dynamic reference branches keep expansion independent of item selection.
+const referenceBranches = new Map();
+function bindReferenceBranch(branch) {
+  const branchKey = branch.dataset.referenceKey;
+  referenceBranches.set(branchKey, branch);
+  branch.addEventListener("toggle", () => {
+    if (!branch.open || branch.dataset.requested) return;
+    branch.dataset.requested = "true";
+    branch.querySelector(".reference-content").textContent = "Loading Preview references…";
+    post({ type: "expandReferences", key: branchKey });
+  });
+}
+document.querySelectorAll("[data-reference-key]").forEach(bindReferenceBranch);
+function renderReferences(data) {
+  const branch = referenceBranches.get(data.key); if (!branch) return;
+  const body = branch.querySelector(".reference-content"); body.replaceChildren();
+  text("p", data.notice, body).className = "muted";
+  if (!data.groups.length) text("p", "No expandable references returned.", body);
+  for (const group of data.groups) {
+    const section = document.createElement("details"); section.open = true; body.append(section);
+    text("summary", group.name, section);
+    if (group.issue) text("p", group.issue, section);
+    if (!group.nodes.length && !group.issue) text("p", "Empty reference field", section);
+    const list = document.createElement("ul"); section.append(list);
+    for (const node of group.nodes) {
+      const row = document.createElement("li"); list.append(row);
+      const button = text("button", node.label, row); button.className = "component-select";
+      button.disabled = !["ready", "cycle", "limit"].includes(node.state) || !node.itemId;
+      button.title = node.itemId || "Unresolved stored reference";
+      button.onclick = () => {
+        key = node.key; selection = -1; returnFocus = button;
+        document.querySelectorAll(".component-select[aria-pressed=true]").forEach(element => element.setAttribute("aria-pressed", "false"));
+        button.setAttribute("aria-pressed", "true");
+        workspace.classList.add("show-details"); detailsAvailable(false); content.textContent = "Loading exact-locale details…";
+        if (narrowLayout.matches) document.getElementById("back").focus();
+        post({ type: "selectReference", key, intent: ++intent });
+      };
+      if (node.state !== "ready") text("p", ({ cycle: "Cycle — already in this branch", missing: "Missing or inaccessible in Preview", error: "Preview read failed; refresh to retry", limit: "Expansion limit reached", unresolved: "Unresolved reference" })[node.state], row);
+      else {
+        const child = document.createElement("details"); child.className = "reference-branch"; child.dataset.referenceKey = node.key; row.append(child);
+        text("summary", "References", child); const container = document.createElement("div"); container.className = "reference-content"; child.append(container);
+        bindReferenceBranch(child);
+      }
+    }
+  }
+}
 const text = (tag, value, parent = content) => { const element = document.createElement(tag); element.textContent = value; parent.append(element); return element; };
 const action = (label, type, parent, extra = {}) => {
   const button = text("button", label, parent);
@@ -94,6 +140,7 @@ window.addEventListener("message", event => {
   if (event.source && (event.origin !== window.origin || [...document.querySelectorAll("iframe")].some(frame => frame.contentWindow === event.source))) return;
   const data = event.data;
   if (!data || typeof data !== "object") return;
+  if (data.type === "references" && data.revision === revision) { renderReferences(data); return; }
   if (data.type !== "details" || data.revision !== revision || data.intent !== intent || data.key !== key || data.selection < selection) return;
   selection = data.selection; content.replaceChildren();
   detailsAvailable(Boolean(data.item) && !data.loading && !data.error);
@@ -118,7 +165,7 @@ window.addEventListener("message", event => {
   if (!item.version) text("p", "No exact-locale version exists. Preview fallback content is not substituted here.");
   if (item.references.length) {
     const refs = document.createElement("details"); refs.open = true; content.append(refs);
-    text("summary", "Referenced items", refs);
+    text("summary", "Exact-locale referenced items", refs);
     for (const reference of item.references) {
       const row = document.createElement("p"); refs.append(row);
       text("span", `${reference.field}: `, row);
