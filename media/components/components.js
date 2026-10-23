@@ -103,7 +103,12 @@ function renderReferences(data) {
     const section = document.createElement("details"); section.open = true; body.append(section);
     text("summary", group.name, section);
     if (group.issue) text("p", group.issue, section);
-    if (!group.nodes.length && !group.issue) text("p", "Empty reference field", section);
+    if (group.destination) text("p", `${({external:"External URL",email:"Email",anchor:"Anchor","content-hub":"Content Hub / DAM"})[group.destination.kind]} — not an item reference: ${group.destination.value}`, section);
+    if (typeof group.rawValue === "string") {
+      const evidence = document.createElement("details"); section.append(evidence);
+      text("summary", "Link information", evidence); text("pre", group.rawValue || "(empty)", evidence);
+    }
+    if (!group.nodes.length && !group.issue && !group.destination) text("p", "Empty reference field", section);
     const list = document.createElement("ul"); section.append(list);
     for (const node of group.nodes) {
       const row = document.createElement("li"); list.append(row);

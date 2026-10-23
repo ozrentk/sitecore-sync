@@ -1,10 +1,11 @@
+import { previewGeneralLink, type PreviewLinkReference } from "./previewGeneralLink";
 import { normalizeServerUrl } from "../connections/connection";
 import { SitecoreHttpClient } from "./sitecoreHttpClient";
 import { isGuid, isLocale } from "../editor/itemEditorModel";
 
 export const referenceId = (value: string): string => value.replace(/[{}-]/gu, "").toLowerCase();
 const record = (value: unknown): value is Record<string, unknown> => !!value && typeof value === "object" && !Array.isArray(value);
-export interface PreviewReferenceField { id: string; name: string; targets: readonly string[]; issue?: string; }
+export interface PreviewReferenceField { id: string; name: string; targets: readonly string[]; issue?: string; rawValue?: string; destination?: PreviewLinkReference["destination"]; }
 export interface PreviewReferenceItem { id: string; label: string; fields: readonly PreviewReferenceField[]; }
 const query = `query XmCloudSyncReferenceItem($id: String!, $language: String!) {
   item(path: $id, language: $language) {
@@ -14,11 +15,12 @@ const query = `query XmCloudSyncReferenceItem($id: String!, $language: String!) 
       definition { type }
       ... on MultilistField { count targetIds }
       ... on LookupField { targetId }
+      ... on LinkField { linkType targetItem { id } }
     }
   }
 }`;
 
-/** Only typed stored lists/lookups are verified. Never scan arbitrary JSON for GUIDs. */
+/** Typed stored lists/lookups and ordinary internal links only. Never scan arbitrary JSON for GUIDs. */
 export function parsePreviewReferenceItem(value: unknown, id: string, language: string): PreviewReferenceItem | null {
   if (value === null) return null;
   if (!record(value) || !isGuid(value.id) || referenceId(value.id) !== referenceId(id)
@@ -41,6 +43,8 @@ export function parsePreviewReferenceItem(value: unknown, id: string, language: 
         && (field.__typename !== "MultilistField" || field.count === targets.length);
       fields.push({ id: field.id, name: field.name, targets,
         issue: !valid ? "Malformed stored reference; occurrences retained." : !agrees ? "Raw and typed Preview references disagree; unresolved." : undefined });
+    } else if (field.__typename === "LinkField" && field.definition.type === "General Link") {
+      fields.push({ id: field.id, name: field.name, ...previewGeneralLink(field.value, field.linkType, field.targetItem) });
     } else if (field.value.trim() && /^(?:General Link|Image|File)$/iu.test(field.definition.type)) {
       fields.push({ id: field.id, name: field.name, targets: [], issue: "Reference extraction for this field type is not verified in Preview." });
     }

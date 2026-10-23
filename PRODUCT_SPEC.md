@@ -657,3 +657,7 @@ Components offers on-demand field-grouped expansion using dedicated read-only Pr
 ### Page content-field editing (0.61.0)
 
 Existing exact-locale versions of page items admit the same supported ordinary field types and save workflow as other content items. Page presentation does not make unrelated fields read-only. Layout/presentation, system and Standard Template fields, unsupported types and unverified fallback values remain protected per field, including at Save. Components offers Edit when at least one field is eligible. No layout editing, fallback-source writes or version creation is introduced. User-facing reasons describe the restriction without historical stage labels.
+
+### B27 General Link references (0.62.0)
+
+Lazy Preview references include ordinary internal General Links only when bounded raw XML and typed LinkField.targetItem identity agree. Preserve raw XML in collapsed Link information. Empty, unsupported, malformed, missing and conflicting targets remain explicit. External/email/anchor/Content Hub destinations are non-followed text; never scan URLs for GUIDs. Existing order, repeats, cycles, limits, cache and cancellation apply. Compare explicit layout link IDs when available. Image/File coverage remains unverified. Requested locale does not identify fallback source; direct Preview still has no site argument. Exact Authoring Details/Edit and save guards remain unchanged.

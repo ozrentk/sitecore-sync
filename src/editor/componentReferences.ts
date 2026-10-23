@@ -1,10 +1,10 @@
 import { isGuid } from "./itemEditorModel";
-import { referenceId, type PreviewReferenceItem } from "../sitecore/previewReferences";
+import { referenceId, type PreviewReferenceField, type PreviewReferenceItem } from "../sitecore/previewReferences";
 
 export interface ReferenceOccurrence {
   key: string; label: string; itemId?: string; state: "ready" | "cycle" | "missing" | "error" | "limit" | "unresolved";
 }
-export interface ReferenceGroup { name: string; issue?: string; nodes: ReferenceOccurrence[]; }
+export interface ReferenceGroup { name: string; issue?: string; nodes: ReferenceOccurrence[]; rawValue?: string; destination?: PreviewReferenceField["destination"]; }
 export interface ReferenceExpansion { groups: ReferenceGroup[]; notice: string; }
 interface Node { id: string; ancestors: readonly string[]; evidence?: Readonly<Record<string, readonly string[]>>; }
 
@@ -56,7 +56,7 @@ export class ComponentReferences {
       const evidence = (node.evidence ?? this.evidence.get(node.id))?.[field.name];
       const disagreement = evidence && (evidence.length !== field.targets.length || evidence.some((id, i) => referenceId(id) !== referenceId(field.targets[i])));
       const issue = disagreement ? "Layout and direct Preview references disagree; unresolved." : field.issue;
-      const group: ReferenceGroup = { name: field.name, issue, nodes: [] }; groups.push(group);
+      const group: ReferenceGroup = { name: field.name, issue, nodes: [], rawValue: field.rawValue, destination: field.destination }; groups.push(group);
       // Reserve occurrence keys synchronously; async completion must not reorder rows.
       for (const target of field.targets) {
         if (this.count >= 500) { limited = true; break; }

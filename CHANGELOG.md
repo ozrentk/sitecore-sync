@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.62.0 — 2026-10-23
+
+- Follow ordinary internal General Links in Components References when raw XML and typed Preview target identities agree. Preserve raw link evidence in a collapsed information disclosure.
+- Keep external, email, anchor and Content Hub destinations visible without following them; missing, malformed and conflicting internal targets remain unresolved. Image/File extraction remains unverified.
+
 ## 0.61.0 — 2026-10-23
 
 - Allow supported ordinary fields on pages through the existing exact-locale editor and save workflow. Keep layout/system fields, unsupported types and unverified fallback values read-only.

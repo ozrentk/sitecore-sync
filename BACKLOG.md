@@ -253,3 +253,8 @@ Implemented horizontal rule, strikethrough, subscript/superscript; two toolbar r
 Addressed struck-S icon, paragraph indentation, readable generated HTML, consecutive Replace, removal of Show replacement, grouped controls, distinct functional Match case, paragraph-to-table rows, populated row/column deletion and whole-table deletion. See [limits](docs/item-editor.md#editing-refinements-0550). Merged-cell row/column edits, complex margin CSS, native IME/accessibility and live-save acceptance remain bounded or unverified.
 
 - 0.61.0: ordinary content fields on page items now use the existing editor/save path. Layout/system and unverified fallback fields remain read-only. This does not implement page-layout editing or B26 fallback-source writes.
+
+### B27 General Link coverage — 0.62.0
+
+- Ordinary internal links now use raw/typed Preview identity agreement with inert raw evidence and explicit unresolved cases. External/email/anchor/Content Hub are not followed.
+- Image/File, arbitrary resolver equivalence and writable fallback provenance remain unverified; no new mutations.

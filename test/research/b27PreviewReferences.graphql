@@ -15,6 +15,7 @@ query B27PreviewReferenceItem($id: String!, $language: String!) {
       definition { type section sectionSortOrder sortOrder shared unversioned }
       ... on MultilistField { count targetIds }
       ... on LookupField { targetId }
+      ... on LinkField { linkType targetItem { id } }
     }
   }
 }

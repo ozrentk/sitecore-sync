@@ -53,3 +53,5 @@ Components has full-width component selection rows, initially collapsed system f
 Components supports [lazy Preview reference expansion](docs/page-components.md#preview-reference-limits), with field groups, ordered duplicate occurrences, cycle detection and explicit limits. Exact-locale Details and editing remain separate from effective Preview values.
 
 Supported ordinary fields on pages can be edited through the [content field editor](docs/item-editor.md#page-content-fields-0610); layout/system fields and unverified fallback values remain protected.
+
+Components References also follows verified ordinary internal General Links. Link information preserves raw XML; external/email/anchor/Content Hub destinations remain inert. Image/File reference extraction remains unverified. See [Components](docs/page-components.md).

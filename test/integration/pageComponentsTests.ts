@@ -254,6 +254,8 @@ export const pageComponentsTests: readonly IntegrationTest[] = [{
       } },
     } } }) }, undefined, { read: async (_origin, _token, target) => ({ id: target, label: target === referenceId ? "Effective reference" : "Datasource", fields: [
       { id, name: "Related", targets: target === datasourceId ? [referenceId, referenceId] : [datasourceId] },
+      { id: referenceId, name: "Internal link", targets: [referenceId], rawValue: '<link linktype="internal" id="' + referenceId + '" />' },
+      { id: datasourceId, name: "External link", targets: [], rawValue: '<link linktype="external" url="https://example.test/" />', destination: { kind: "external" as const, value: "https://example.test/" } },
     ] }) });
     let timer: ReturnType<typeof setTimeout> | undefined, listener: vscode.Disposable | undefined;
     try {
@@ -291,9 +293,14 @@ export const pageComponentsTests: readonly IntegrationTest[] = [{
           if(!document.getElementById(chevron.getAttribute("aria-controls")).hidden||workspace.classList.contains("show-details"))throw Error("Chevron selected component");
           chevron.click();
           const refs=document.querySelector("[data-reference-key]");refs.open=true;
-          await wait(()=>refs.querySelectorAll(".component-select").length===2);
+          await wait(()=>refs.querySelectorAll(".component-select").length===3);
           const referenceRows=refs.querySelectorAll(".component-select");
           if(referenceRows[0].textContent!=="Effective reference"||referenceRows[1].textContent!=="Effective reference")throw Error("Ordered repeated references lost");
+          const evidence=[...refs.querySelectorAll("details")].filter(el=>el.querySelector("summary")?.textContent==="Link information");
+          if(evidence.length!==2||evidence.some(el=>el.open))throw Error("Link information not collapsed");
+          if(refs.querySelector("a[href]")||!refs.textContent.includes("External URL — not an item reference"))throw Error("External link was navigable or lost");
+          evidence[1].querySelector("summary").click();
+          if(!evidence[1].open||!evidence[1].querySelector("pre").textContent.includes('<link linktype="external"'))throw Error("Raw link evidence lost");
           const child=refs.querySelector(".reference-branch");child.open=true;
           await wait(()=>child.textContent.includes("Cycle — already in this branch"));
           referenceRows[0].click();
