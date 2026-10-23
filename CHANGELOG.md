@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.60.0
+
+- Components expands Preview-backed list/lookup references lazily under each datasource, grouped by field. Ordered duplicates stay separate; ancestor cycles, unavailable items, malformed values and limits remain visible.
+- Reference reads use the selected locale with a separate per-layout cache, four concurrent reads, 200 item reads, 500 reference occurrences and 12 reference levels. Refresh/language changes and closing cancel pending work and reject stale replies.
+- Other reference types remain explicitly unresolved. Direct Preview has no site argument and does not identify fallback source locale; Details/Edit continue to use independent exact-locale Authoring reads.
+
+
 ## 0.59.2 — 2026-10-20
 
 - Show each component as one full-width datasource-name/type selection row, with independent child expansion and explicit unavailable datasource state.

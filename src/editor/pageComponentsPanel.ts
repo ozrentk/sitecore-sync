@@ -2,6 +2,9 @@ import * as vscode from "vscode";
 import { randomBytes } from "node:crypto";
 import type { ConnectionStore } from "../connections/connectionStore";
 import type { AuthoringContentClient } from "../sitecore/authoringClient";
+import { PreviewReferenceClient } from "../sitecore/previewReferences";
+import { ComponentReferences } from "./componentReferences";
+import { previewReferenceEvidence } from "./componentReferenceEvidence";
 import { PreviewDiagnosticClient } from "../sitecore/previewDiagnostic";
 import { isGuid, isLocale } from "./itemEditorModel";
 import { componentRoute, componentDeviceName, escapeComponentHtml as esc, parsePageComponents, renderComponentTree, resolveComponentDatasources, type ComponentPlaceholder, type ComponentOccurrence, type PageComponents } from "./pageComponents";
@@ -24,7 +27,8 @@ export class PageComponentsPanel implements vscode.Disposable {
   private readonly lifetime = new AbortController();
   constructor(private readonly connections: Connections, private readonly authoring: Authoring,
     private readonly preview: Pick<PreviewDiagnosticClient, "collect"> = new PreviewDiagnosticClient(),
-    private readonly actions?: ComponentActions) {}
+    private readonly actions?: ComponentActions,
+    private readonly referenceClient: Pick<PreviewReferenceClient, "read"> = new PreviewReferenceClient()) {}
   dispose(): void { this.lifetime.abort(); for (const panel of this.panels) panel.dispose(); this.panels.clear(); }
 
   async open(args: unknown): Promise<void> {
@@ -69,6 +73,8 @@ export class PageComponentsPanel implements vscode.Disposable {
     const panel = vscode.window.createWebviewPanel("xmCloudSync.pageComponents", `${item.displayName || item.name} · Components`,
       vscode.ViewColumn.Active, { enableScripts: true, localResourceRoots: [] });
     this.panels.add(panel);
+    let graph: ComponentReferences | undefined;
+    let graphRequest: AbortController | undefined;
     let request: AbortController | undefined, detailRequest: AbortController | undefined;
     let revision = 0, detailRevision = 0, disposed = false, language = initialLanguage;
     const targets = new Map<string, string>();
@@ -105,7 +111,8 @@ export class PageComponentsPanel implements vscode.Disposable {
       detailRequest?.abort(); detailRevision++; selectedItem = undefined; selectedKey = undefined; references.clear();
     };
     const load = async (): Promise<void> => {
-      request?.abort(); resetDetails(); request = new AbortController();
+      request?.abort(); graphRequest?.abort(); graph = undefined; resetDetails(); request = new AbortController();
+      graphRequest = new AbortController();
       const current = ++revision;
       targets.clear(); components.clear(); lastIntent = 0;
       const selectedLanguage = language;
@@ -136,15 +143,27 @@ export class PageComponentsPanel implements vscode.Disposable {
         }
         if (disposed || current !== revision) return;
         if (!validConnection()) throw Error("Connection changed.");
+        const evidence = previewReferenceEvidence(report);
+        const graphSignal = AbortSignal.any([this.lifetime.signal, graphRequest.signal]);
+        const nextGraph = new ComponentReferences(async (id, signal) => {
+          if (!validConnection()) throw Error("Connection changed.");
+          const result = await this.referenceClient.read(connection.serverUrl, token, id, selectedLanguage, signal);
+          if (!validConnection()) throw Error("Connection changed.");
+          return result;
+        }, graphSignal, evidence);
         const collectTargets = (placeholders: readonly ComponentPlaceholder[]): void => {
           for (const placeholder of placeholders) for (const component of placeholder.components) {
             components.set(component.key, component);
             const resolved = datasources.get(component.datasource);
-            if (resolved?.itemId) targets.set(component.key, resolved.itemId);
+            if (resolved?.itemId) {
+              targets.set(component.key, resolved.itemId);
+              nextGraph.root(component.key, resolved.itemId, evidence.get(resolved.itemId.replace(/[{}-]/gu, "").toLowerCase()));
+            }
             collectTargets(component.placeholders);
           }
         };
         collectTargets(tree.placeholders);
+        graph = nextGraph;
         panel.webview.html = html(renderComponentTree(tree, datasources), false, tree, deviceName);
       } catch {
         if (disposed || current !== revision || request.signal.aborted || this.lifetime.signal.aborted) return;
@@ -200,6 +219,22 @@ export class PageComponentsPanel implements vscode.Disposable {
       if (!message || typeof message !== "object" || disposed) return;
       const value = message as Record<string, unknown>;
       if (value.revision !== revision || !validConnection()) return;
+      if (value.type === "expandReferences" && typeof value.key === "string" && graph?.target(value.key)) {
+        const currentGraph = graph, currentRevision = revision, key = value.key;
+        void currentGraph.expand(key).then(result => {
+          if (!disposed && revision === currentRevision && graph === currentGraph && validConnection())
+            return panel.webview.postMessage({ type: "references", revision, key, ...result });
+          return undefined;
+        }).catch(() => {
+          if (!disposed && revision === currentRevision && graph === currentGraph && validConnection())
+            void panel.webview.postMessage({ type: "references", revision, key, groups: [], notice: "Preview references unavailable or over limits. Refresh to retry." });
+        });
+        return;
+      }
+      if (value.type === "selectReference" && typeof value.key === "string" && graph?.target(value.key)
+        && Number.isSafeInteger(value.intent) && Number(value.intent) > lastIntent) {
+        lastIntent = Number(value.intent); void select(value.key, lastIntent, graph.target(value.key)); return;
+      }
       if (value.type === "select" && typeof value.key === "string" && components.has(value.key) && Number.isSafeInteger(value.intent) && Number(value.intent) > lastIntent) {
         lastIntent = Number(value.intent); void select(value.key, lastIntent); return;
       }
@@ -217,7 +252,7 @@ export class PageComponentsPanel implements vscode.Disposable {
       if (value.type !== "load" || typeof value.language !== "string" || !languages.includes(value.language)) return;
       language = value.language; void load();
     });
-    panel.onDidDispose(() => { disposed = true; request?.abort(); resetDetails(); listener.dispose(); this.panels.delete(panel); });
+    panel.onDidDispose(() => { disposed = true; request?.abort(); graphRequest?.abort(); resetDetails(); listener.dispose(); this.panels.delete(panel); });
     await load();
   }
 }

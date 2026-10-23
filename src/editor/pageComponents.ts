@@ -138,7 +138,8 @@ export function renderComponentTree(tree: PageComponents, datasources: ReadonlyM
       ? `<button class="branch-toggle" aria-expanded="true" aria-controls="${children}" aria-label="Collapse children of ${esc(label)}" data-branch-label="${esc(label)}"><span aria-hidden="true">›</span></button>`
       : '<span class="branch-spacer" aria-hidden="true"></span>'}
       <button class="component-select" data-component="${esc(component.key)}" aria-pressed="false" title="${esc(title)}">${esc(label)}</button></div>
-      ${children ? `<ul id="${children}">${render(component.placeholders)}</ul>` : ""}</li>`;
+      ${children ? `<ul id="${children}">${render(component.placeholders)}</ul>` : ""}
+      ${resolved?.itemId ? `<details class="reference-branch" data-reference-key="${esc(component.key)}"><summary>References</summary><div class="reference-content"></div></details>` : ""}</li>`;
   };
   const render = (placeholders: readonly ComponentPlaceholder[]): string => placeholders.map(placeholder =>
     `<li class="placeholder"><details open><summary>${esc(placeholder.name)} <span>(${placeholder.components.length})</span></summary><ul>${placeholder.components.map(row).join("")}</ul></details></li>`).join("");
