@@ -1,10 +1,11 @@
+import { isMediaLibraryPath } from "../sitecore/previewMediaReference";
 import { isGuid } from "./itemEditorModel";
 import { referenceId, type PreviewReferenceField, type PreviewReferenceItem } from "../sitecore/previewReferences";
 
 export interface ReferenceOccurrence {
-  key: string; label: string; itemId?: string; state: "ready" | "cycle" | "missing" | "error" | "limit" | "unresolved";
+  key: string; label: string; itemId?: string; requiresMedia?: boolean; state: "ready" | "cycle" | "missing" | "error" | "limit" | "unresolved";
 }
-export interface ReferenceGroup { name: string; issue?: string; nodes: ReferenceOccurrence[]; rawValue?: string; destination?: PreviewReferenceField["destination"]; }
+export interface ReferenceGroup { name: string; issue?: string; nodes: ReferenceOccurrence[]; rawValue?: string; evidenceLabel?: string; destination?: PreviewReferenceField["destination"]; }
 export interface ReferenceExpansion { groups: ReferenceGroup[]; notice: string; }
 interface Node { id: string; ancestors: readonly string[]; evidence?: Readonly<Record<string, readonly string[]>>; }
 
@@ -56,7 +57,7 @@ export class ComponentReferences {
       const evidence = (node.evidence ?? this.evidence.get(node.id))?.[field.name];
       const disagreement = evidence && (evidence.length !== field.targets.length || evidence.some((id, i) => referenceId(id) !== referenceId(field.targets[i])));
       const issue = disagreement ? "Layout and direct Preview references disagree; unresolved." : field.issue;
-      const group: ReferenceGroup = { name: field.name, issue, nodes: [], rawValue: field.rawValue, destination: field.destination }; groups.push(group);
+      const group: ReferenceGroup = { name: field.name, issue, nodes: [], rawValue: field.rawValue, evidenceLabel: field.evidenceLabel, destination: field.destination }; groups.push(group);
       // Reserve occurrence keys synchronously; async completion must not reorder rows.
       for (const target of field.targets) {
         if (this.count >= 500) { limited = true; break; }
@@ -64,7 +65,7 @@ export class ComponentReferences {
         const id = isGuid(target) ? referenceId(target) : undefined;
         const cycle = id !== undefined && ancestors.includes(id);
         const state = issue || !id ? "unresolved" : cycle ? "cycle" : ancestors.length >= 12 ? "limit" : "ready";
-        group.nodes.push({ key, label: target || "Empty reference", itemId: id, state });
+        group.nodes.push({ key, label: target || "Empty reference", itemId: id, state, requiresMedia: field.targetKind === "media" });
         if (id && (state === "ready" || state === "cycle" || state === "limit")) this.nodes.set(key, { id, ancestors });
       }
       if (limited) break;
@@ -74,11 +75,13 @@ export class ComponentReferences {
       if (!item.fields.some(field => field.name === name)) groups.push({ name, nodes: [], issue: "Layout relationship has no verified direct Preview field; unresolved." });
     }
     await Promise.all(groups.flatMap(group => group.nodes.map(async occurrence => {
-      if (occurrence.state !== "ready" || !occurrence.itemId) return;
+      if (!occurrence.itemId || (occurrence.state !== "ready" && !(occurrence.requiresMedia && ["cycle", "limit"].includes(occurrence.state)))) return;
       try {
         const item = await this.item(occurrence.itemId);
         if (!item) { occurrence.state = "missing"; this.nodes.delete(occurrence.key); }
-        else occurrence.label = item.label;
+        else if (occurrence.requiresMedia && !isMediaLibraryPath(item.path)) {
+          occurrence.state = "unresolved"; occurrence.label = "Target is not a verified Media Library item"; this.nodes.delete(occurrence.key);
+        } else occurrence.label = item.label;
       } catch {
         this.signal.throwIfAborted();
         occurrence.state = this.cache.has(occurrence.itemId) ? "error" : "limit";

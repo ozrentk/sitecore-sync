@@ -198,3 +198,9 @@ test("page content fields save in en/en-GB while presentation, system and fallba
     throws(() => checkConflicts(current, { ...base, fields: [{ ...base.fields[0], containsFallbackValue: true }, checkbox, layout] }, planChanges(current)));
   }
 });
+
+test("Media Library inspection does not enable editor writes", () => {
+  const current = { ...state(), base: { ...item(), path: "/sitecore/media library/Images/Logo" } };
+  strictEqual(Boolean(readOnlyReason(current.base, current.base.fields[0])), true);
+  throws(() => planChanges(current));
+});

@@ -5,6 +5,7 @@ query B27PreviewReferenceItem($id: String!, $language: String!) {
     id
     name
     displayName
+    path
     language { name }
     version
     fields(ownFields: false) {
@@ -16,6 +17,8 @@ query B27PreviewReferenceItem($id: String!, $language: String!) {
       ... on MultilistField { count targetIds }
       ... on LookupField { targetId }
       ... on LinkField { linkType targetItem { id } }
+      ... on ImageField { src }
+      ... on FileField { url }
     }
   }
 }

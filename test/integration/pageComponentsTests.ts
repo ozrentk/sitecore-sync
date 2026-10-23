@@ -252,8 +252,9 @@ export const pageComponentsTests: readonly IntegrationTest[] = [{
       ...report.rendered.sitecore, route: { ...report.rendered.sitecore.route, placeholders: {
         main: [{ uid: id, componentName: "Component", dataSource: datasourceId, isContentResolved: true, placeholders: { nested: [{ componentName: "Instance only" }] } }],
       } },
-    } } }) }, undefined, { read: async (_origin, _token, target) => ({ id: target, label: target === referenceId ? "Effective reference" : "Datasource", fields: [
+    } } }) }, undefined, { read: async (_origin, _token, target) => ({ id: target, label: target === referenceId ? "Effective reference" : "Datasource", path: "/sitecore/media library/Logo", fields: [
       { id, name: "Related", targets: target === datasourceId ? [referenceId, referenceId] : [datasourceId] },
+      { id, name: "Media", targets: [referenceId], targetKind: "media" as const, evidenceLabel: "Asset information", rawValue: '<image mediaid="' + referenceId + '" />' },
       { id: referenceId, name: "Internal link", targets: [referenceId], rawValue: '<link linktype="internal" id="' + referenceId + '" />' },
       { id: datasourceId, name: "External link", targets: [], rawValue: '<link linktype="external" url="https://example.test/" />', destination: { kind: "external" as const, value: "https://example.test/" } },
     ] }) });
@@ -293,9 +294,13 @@ export const pageComponentsTests: readonly IntegrationTest[] = [{
           if(!document.getElementById(chevron.getAttribute("aria-controls")).hidden||workspace.classList.contains("show-details"))throw Error("Chevron selected component");
           chevron.click();
           const refs=document.querySelector("[data-reference-key]");refs.open=true;
-          await wait(()=>refs.querySelectorAll(".component-select").length===3);
+          await wait(()=>refs.querySelectorAll(".component-select").length===4);
           const referenceRows=refs.querySelectorAll(".component-select");
           if(referenceRows[0].textContent!=="Effective reference"||referenceRows[1].textContent!=="Effective reference")throw Error("Ordered repeated references lost");
+          const asset=[...refs.querySelectorAll("details")].find(el=>el.querySelector("summary")?.textContent==="Asset information");
+          if(!asset||asset.open)throw Error("Asset evidence absent or not collapsed");
+          asset.querySelector("summary").click();
+          if(!asset.querySelector("pre").textContent.includes('<image mediaid="'))throw Error("Asset XML lost");
           const evidence=[...refs.querySelectorAll("details")].filter(el=>el.querySelector("summary")?.textContent==="Link information");
           if(evidence.length!==2||evidence.some(el=>el.open))throw Error("Link information not collapsed");
           if(refs.querySelector("a[href]")||!refs.textContent.includes("External URL — not an item reference"))throw Error("External link was navigable or lost");

@@ -18,7 +18,7 @@ test("Preview references preserve ordered repeated raw occurrences and distingui
   const disagreement = parsePreviewReferenceItem(raw([{ ...field(), targetIds: [b, c] }]), a, "en-NZ")!;
   match(disagreement.fields[0].issue!, /disagree/);
   const asset = parsePreviewReferenceItem({ ...raw(), fields: [{ ...field(), __typename: "ImageField", definition: { type: "Image" }, value: '<image mediaid="' + b + '" />' }] }, a, "en-NZ")!;
-  equal(asset.fields[0].targets.length, 0); match(asset.fields[0].issue!, /not verified/);
+  equal(asset.fields[0].targets.length, 1); equal(asset.fields[0].targetKind, "media");
 });
 test("Preview rejects wrong identities, locale, incomplete and excessive fields", () => {
   for (const value of [{ ...raw(), id: b }, { ...raw(), language: { name: "en" } }, { ...raw(), version: 0 },
