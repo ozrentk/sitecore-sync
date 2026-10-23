@@ -54,4 +54,4 @@ Components supports [lazy Preview reference expansion](docs/page-components.md#p
 
 Supported ordinary fields on pages can be edited through the [content field editor](docs/item-editor.md#page-content-fields-0610); layout/system fields and unverified fallback values remain protected.
 
-Components References also follows verified ordinary internal General Links. Link information preserves raw XML; external/email/anchor/Content Hub destinations remain inert. Image/File reference extraction remains unverified. See [Components](docs/page-components.md).
+Components References also follows verified ordinary internal General Links. Link information preserves raw XML; external/email/anchor/Content Hub destinations remain inert. Image/File media references require a verified Media Library target; Content Hub and external assets are not followed. Image has live verification; File has schema/synthetic coverage only. See [Components](docs/page-components.md).

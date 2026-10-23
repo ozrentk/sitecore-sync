@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.63.0 — 2026-10-23
+
+- Components References follows Image/File media IDs only after verifying the target belongs to the Sitecore Media Library. Raw XML remains in Asset information; missing, malformed and conflicting targets remain explicit.
+- Content Hub and other asset URLs remain non-followed destinations. No asset downloads, media editing or uploads. Image behavior was checked read-only in Dev; File coverage has schema and synthetic tests but no live populated File sample.
+
 ## 0.62.0 — 2026-10-23
 
 - Follow ordinary internal General Links in Components References when raw XML and typed Preview target identities agree. Preserve raw link evidence in a collapsed information disclosure.

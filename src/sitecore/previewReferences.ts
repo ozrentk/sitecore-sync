@@ -1,3 +1,4 @@
+import { previewMediaReference } from "./previewMediaReference";
 import { previewGeneralLink, type PreviewLinkReference } from "./previewGeneralLink";
 import { normalizeServerUrl } from "../connections/connection";
 import { SitecoreHttpClient } from "./sitecoreHttpClient";
@@ -5,17 +6,19 @@ import { isGuid, isLocale } from "../editor/itemEditorModel";
 
 export const referenceId = (value: string): string => value.replace(/[{}-]/gu, "").toLowerCase();
 const record = (value: unknown): value is Record<string, unknown> => !!value && typeof value === "object" && !Array.isArray(value);
-export interface PreviewReferenceField { id: string; name: string; targets: readonly string[]; issue?: string; rawValue?: string; destination?: PreviewLinkReference["destination"]; }
-export interface PreviewReferenceItem { id: string; label: string; fields: readonly PreviewReferenceField[]; }
+export interface PreviewReferenceField { id: string; name: string; targets: readonly string[]; issue?: string; rawValue?: string; evidenceLabel?: string; targetKind?: "media"; destination?: PreviewLinkReference["destination"]; }
+export interface PreviewReferenceItem { id: string; label: string; path?: string; fields: readonly PreviewReferenceField[]; }
 const query = `query XmCloudSyncReferenceItem($id: String!, $language: String!) {
   item(path: $id, language: $language) {
-    id name displayName language { name } version
+    id name displayName path language { name } version
     fields(ownFields: false) {
       __typename id name value
       definition { type }
       ... on MultilistField { count targetIds }
       ... on LookupField { targetId }
       ... on LinkField { linkType targetItem { id } }
+      ... on ImageField { src }
+      ... on FileField { url }
     }
   }
 }`;
@@ -45,11 +48,14 @@ export function parsePreviewReferenceItem(value: unknown, id: string, language: 
         issue: !valid ? "Malformed stored reference; occurrences retained." : !agrees ? "Raw and typed Preview references disagree; unresolved." : undefined });
     } else if (field.__typename === "LinkField" && field.definition.type === "General Link") {
       fields.push({ id: field.id, name: field.name, ...previewGeneralLink(field.value, field.linkType, field.targetItem) });
+    } else if ((field.__typename === "ImageField" && field.definition.type === "Image") || (field.__typename === "FileField" && field.definition.type === "File")) {
+      const kind = field.__typename === "ImageField" ? "image" : "file";
+      fields.push({ id: field.id, name: field.name, ...previewMediaReference(field.value, kind, kind === "image" ? field.src : field.url) });
     } else if (field.value.trim() && /^(?:General Link|Image|File)$/iu.test(field.definition.type)) {
-      fields.push({ id: field.id, name: field.name, targets: [], issue: "Reference extraction for this field type is not verified in Preview." });
+      fields.push({ id: field.id, name: field.name, targets: [], rawValue: field.value, evidenceLabel: /^(?:Image|File)$/iu.test(field.definition.type) ? "Asset information" : undefined, issue: "Reference extraction for this field type is not verified in Preview." });
     }
   }
-  return { id: referenceId(value.id), label: value.displayName || value.name, fields };
+  return { id: referenceId(value.id), label: value.displayName || value.name, path: typeof value.path === "string" && value.path.length <= 8192 ? value.path : undefined, fields };
 }
 
 /** Separate effective reader: no Authoring fallback, redirects, retries or editable-version claims. */

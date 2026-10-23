@@ -106,7 +106,7 @@ function renderReferences(data) {
     if (group.destination) text("p", `${({external:"External URL",email:"Email",anchor:"Anchor","content-hub":"Content Hub / DAM"})[group.destination.kind]} — not an item reference: ${group.destination.value}`, section);
     if (typeof group.rawValue === "string") {
       const evidence = document.createElement("details"); section.append(evidence);
-      text("summary", "Link information", evidence); text("pre", group.rawValue || "(empty)", evidence);
+      text("summary", group.evidenceLabel || "Link information", evidence); text("pre", group.rawValue || "(empty)", evidence);
     }
     if (!group.nodes.length && !group.issue && !group.destination) text("p", "Empty reference field", section);
     const list = document.createElement("ul"); section.append(list);

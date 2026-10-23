@@ -258,3 +258,9 @@ Addressed struck-S icon, paragraph indentation, readable generated HTML, consecu
 
 - Ordinary internal links now use raw/typed Preview identity agreement with inert raw evidence and explicit unresolved cases. External/email/anchor/Content Hub are not followed.
 - Image/File, arbitrary resolver equivalence and writable fallback provenance remain unverified; no new mutations.
+
+### B27 Image/File coverage — 0.63.0
+
+- Added bounded raw mediaid references with independent Preview Media Library target verification and Asset information evidence. Non-item Content Hub/external assets remain unfollowed.
+- Live Image and Content Hub samples checked read-only; File schema and synthetic checks passed, but no populated File sample was found in the bounded download-candidate check. Live File verification remains outstanding.
+- No media editing/upload/download, fallback-source writes or resolver-equivalence expansion.

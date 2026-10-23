@@ -22,6 +22,9 @@ export function previewReferenceEvidence(report: unknown): Map<string, Record<st
           if (field.value.linktype === "internal" && isGuid(field.value.id)) ids = [referenceId(field.value.id)];
           else if (["external", "mailto", "anchor"].includes(field.value.linktype)) ids = [];
           else continue;
+        } else if (record(field) && record(field.value) && Object.hasOwn(field.value, "mediaid") && field.value.mediaid) {
+          // Only explicit media identity is comparable; asset URLs/connector IDs are not.
+          ids = isGuid(field.value.mediaid) ? [referenceId(field.value.mediaid)] : ["invalid-layout-media-identity"];
         } else continue;
         // Conflicting occurrences must not let the last one silently win.
         fields[name] = fields[name] && JSON.stringify(fields[name]) !== JSON.stringify(ids) ? ["conflicting-layout-occurrences"] : ids;

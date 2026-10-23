@@ -53,3 +53,7 @@ test("Components permits opening the editor before picker Source metadata loads"
   const fallback = { ...field, fieldId: "22222222222222222222222222222222", name: "Fallback", containsFallbackValue: true };
   equal(componentItemDetails({ ...item, fields: [field, fallback] }, id, "en-AU").editable, true);
 });
+
+test("Media Library targets stay non-editable even with supported ordinary text fields", () => {
+  equal(componentItemDetails({ ...item, path: "/sitecore/media library/Images/Logo" }, id, "en-AU").editable, false);
+});
