@@ -9,6 +9,7 @@ For Rich Text implementation instructions, start with the [agent development gui
 - [Fallback investigation](fallback-spike.md)
 - [B27 authoring component/reference discovery](b27-authoring-discovery-spike.md)
 - [B27 CM Preview access gate and verification protocol](b27-preview-verification.md)
+- [B27 reference-provider mismatch and next gate](b27-reference-provider-verification.md)
 - [Tiptap/CodeMirror compatibility](richtext-compatibility-spike.md)
 - [Direct ProseMirror comparison](prosemirror-compatibility-spike.md)
 - [Custom Rich Text editing compatibility and decision](custom-richtext-compatibility-spike.md)
