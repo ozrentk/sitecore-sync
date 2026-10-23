@@ -31,8 +31,7 @@ label lookup per layout load, with at most four requests in flight.
 resolved datasource path, retaining the connection and requested language. Browse
 shows its usual latest version. **Edit datasource** opens or reuses the ordinary
 item editor at the exact numbered version shown in Details; existing drafts and
-all editor validation/save rules remain intact. Editing is disabled for pages,
-non-content items, version zero and unverified fallback values. These actions refer
+all editor validation/save rules remain intact. Editing requires at least one supported ordinary field in an existing exact-locale content version, including page items. Layout/system fields and unverified fallback values remain read-only. These actions refer
 to the selected referenced item when inspecting a reference, never its owner page.
 
 The Details pane separately lists exact-locale relationships from Droplink, Droptree, Multilist, Treelist, Checklist,

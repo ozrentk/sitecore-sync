@@ -171,3 +171,30 @@ test("unsupported values remain byte-for-byte untouched when another field chang
     strictEqual(parseEditorState(JSON.stringify({...initial,base})).base.fields[1].value,unsupported.value);
   }
 });
+
+
+test("page content fields save in en/en-GB while presentation, system and fallback fields stay protected", async () => {
+  const layout = { ...field("Layout", '<r><d l="{AAAAAAAA-AAAA-AAAA-AAAA-AAAAAAAAAAAA}" /></r>'), fieldId: "44444444444444444444444444444444", name: "__Renderings", isStandardTemplate: true };
+  const checkbox = { ...field("Checkbox", ""), fieldId: "55555555555555555555555555555555", name: "Has Breadcrumb", scope: "SHARED" as const };
+  for (const language of ["en", "en-GB"]) {
+    const base = { ...item(), language, fields: [field(), checkbox, layout] };
+    const current = { ...state(), target: { ...state().target, language }, base,
+      drafts: { ...state().drafts, [checkbox.fieldId]: { input: "1", clear: false } } };
+    strictEqual(readOnlyReason(base, base.fields[0]), undefined);
+    strictEqual(readOnlyReason(base, checkbox), undefined);
+    let reads = 0;
+    const saved = await saveEditor(current, {
+      read: async () => ++reads === 1 ? base : { ...base, fields: [{ ...base.fields[0], value: "changed" }, { ...checkbox, value: "1" }, layout] },
+      write: async changes => { deepStrictEqual(changes.map(change => change.name), ["Title", "Has Breadcrumb"]); }, persist: async () => {},
+    }, () => {});
+    deepStrictEqual(saved.drafts, {}); strictEqual(saved.base.fields[2].value, layout.value);
+    for (const protectedField of [layout, { ...field(), name: "__System" }, { ...field(), isStandardTemplate: true },
+      { ...field(), containsFallbackValue: true }, { ...field(), typeKey: "layout" }]) {
+      const guarded = { ...base, fields: [protectedField] };
+      throws(() => planChanges({ ...current, base: guarded, drafts: { [protectedField.fieldId]: { input: "changed", clear: false } } }));
+    }
+    throws(() => planChanges({ ...current, base: { ...base, version: 0 } }));
+    throws(() => planChanges({ ...current, base: { ...base, path: "/sitecore/templates/Test" } }));
+    throws(() => checkConflicts(current, { ...base, fields: [{ ...base.fields[0], containsFallbackValue: true }, checkbox, layout] }, planChanges(current)));
+  }
+});

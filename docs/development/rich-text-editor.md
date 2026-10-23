@@ -245,3 +245,7 @@ The controller authorizes only the specific preflighted transaction's resulting 
 ### Replacement casing
 
 Use the shared pure replacementText helper in both Visual and HTML; validate the optional boolean at the frame boundary. Apply casing per original match before mutation, and calculate HTML selection offsets from the transformed replacement length (Unicode uppercase may expand). Keep Replace all atomic and preserve existing metadata, wrapper, size and native history checks. Uncased or mixed-case matches retain the replacement as entered.
+
+## Page ordinary-field scope (0.61.0)
+
+Explicitly authorized page content-field editing uses the existing per-field eligibility and save flow. Presentation no longer blocks unrelated supported fields, including the existing Rich Text profile. Layout/system fields and unverified fallback values remain protected. This changes item eligibility only; it does not widen HTML/CSS/schema admission, layout editing or mutation semantics.

@@ -3,7 +3,6 @@ import { newRichLinkTargets } from "./richTextLinks";
 import { isMultipleSelection, selectionKind, selectionSourceReason } from "./singleSelection";
 import { createHash } from "node:crypto";
 import type { AuthoringItemDetails, AuthoringItemField } from "../sitecore/authoringClient";
-import { hasPagePresentation } from "../publicPages/publicPageUrl";
 import { parseNameValues, serializeNameValues } from "./nameValueList";
 import { generalLinkInput, isGeneralLink, linkSourceReason, parseGeneralLink, serializeGeneralLink, validateLinkValues } from "./generalLink";
 
@@ -74,9 +73,10 @@ export function fieldInput(field: AuthoringItemField): string {
 
 export function readOnlyReason(item: AuthoringItemDetails, field: AuthoringItemField): string | undefined {
   if (item.version < 1) return "No exact-locale version exists. Choose an existing locale/version; this editor creates no versions.";
-  if (!item.path.toLowerCase().startsWith("/sitecore/content/") || hasPagePresentation(item)) return "Stage A edits ordinary content items only; page editing is deferred.";
+  if (!item.path.toLowerCase().startsWith("/sitecore/content/")) return "Only content items can be edited.";
   if (field.containsFallbackValue) return "Fallback source is unverified. This editor only writes exact-locale values.";
-  if (field.name.startsWith("__") || field.isStandardTemplate) return "System and Standard Template fields are read-only in Stage A.";
+  if (/layout/iu.test(`${field.type} ${field.typeKey}`)) return "Layout and presentation fields are read-only.";
+  if (field.name.startsWith("__") || field.isStandardTemplate) return "System and Standard Template fields are read-only.";
   if (item.fields.filter(other => other.name.toLowerCase() === field.name.toLowerCase()).length !== 1) return "Ambiguous field name; cannot safely target the Authoring mutation.";
   const kind = fieldKind(field);
   if (!kind) return "Editing is not supported for this field type.";

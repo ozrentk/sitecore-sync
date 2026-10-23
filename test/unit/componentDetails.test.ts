@@ -38,3 +38,18 @@ test("standard section classification does not collapse ordinary standard-value 
   equal(fields.filter(value => value.isStandardTemplate).length, 2);
   equal(fields.length, 3);
 });
+
+
+test("Components offers page content editing while keeping per-field fallback guards", () => {
+  const layout = { ...field, fieldId: "22222222222222222222222222222222", name: "__Renderings", type: "Layout", value: '<r><d l="{AAAAAAAA-AAAA-AAAA-AAAA-AAAAAAAAAAAA}" /></r>', isStandardTemplate: true };
+  equal(componentItemDetails({ ...item, fields: [field, layout] }, id, "en-AU").editable, true);
+  equal(componentItemDetails({ ...item, fields: [layout] }, id, "en-AU").editable, false);
+  equal(componentItemDetails({ ...item, fields: [{ ...field, containsFallbackValue: true }, layout] }, id, "en-AU").editable, false);
+});
+
+
+test("Components permits opening the editor before picker Source metadata loads", () => {
+  equal(componentItemDetails({ ...item, fields: [{ ...field, type: "Droplink", typeKey: "droplink", selectionSource: undefined }] }, id, "en-AU").editable, true);
+  const fallback = { ...field, fieldId: "22222222222222222222222222222222", name: "Fallback", containsFallbackValue: true };
+  equal(componentItemDetails({ ...item, fields: [field, fallback] }, id, "en-AU").editable, true);
+});
