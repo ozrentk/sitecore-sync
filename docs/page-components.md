@@ -12,7 +12,7 @@ occurrences even when they use the same datasource.
 
 Each full-width row shows `Datasource display name [Rendering type]`. Without a declared datasource it shows `[Rendering type]`; unresolved declarations show **Datasource unavailable** and retain the expression in the tooltip and instance details. Labels wrap without truncation. A separate chevron expands child placeholders without changing selection.
 
-Expand **References** beneath a datasource to load its Preview-exposed stored list/lookup relationships. Each field has its own group; order and repeated targets are preserved. Expand a referenced item to inspect the next level, or select its row for exact-locale Details in the same pane. Cycles stop at an ancestor already in that branch. Missing, malformed, failed and limited nodes remain visible. This is on-demand expansion, not an automatic crawl.
+Expand **References** beneath a datasource to load its Preview-exposed stored list/lookup and verified ordinary internal General Link relationships. Each field has its own group; order and repeated targets are preserved. Expand a referenced item to inspect the next level, or select its row for exact-locale Details in the same pane. Cycles stop at an ancestor already in that branch. Missing, malformed, failed and limited nodes remain visible. This is on-demand expansion, not an automatic crawl.
 
 Field groups containing only Standard Template/system fields start collapsed. Ordinary content and mixed groups stay expanded, including content inherited from standard values. Expand any group to inspect its complete values.
 
@@ -80,7 +80,7 @@ by this panel.
 
 ### Preview reference limits
 
-The lazy tree currently supports typed Multilist and Lookup fields (including their Sitecore list/tree variants). Populated General Link and Image/File fields report unverified extraction rather than guessing relationships or substituting exact Authoring values. Layout fields and arbitrary custom resolver JSON are not traversed. Preview exposes fewer fields than Authoring; an empty group is not proof of complete template/reference coverage.
+The lazy tree currently supports typed Multilist and Lookup fields (including their Sitecore list/tree variants). Ordinary internal General Links additionally require agreement between their raw XML ID and typed Preview target. Missing or conflicting targets stay unresolved. Link information retains the original XML. External, email, anchor and Content Hub destinations are inert text, never item edges. Unsupported link variants remain unresolved. Populated Image/File fields report unverified extraction rather than guessing relationships or substituting exact Authoring values. Layout fields and arbitrary custom resolver JSON are not traversed. Preview exposes fewer fields than Authoring; an empty group is not proof of complete template/reference coverage.
 
 Direct item queries have no site argument. The root page layout is site-validated, but equivalence for arbitrary site-dependent resolvers is unverified. Where layout output includes an explicit ordered item-reference array, disagreement with the direct read is shown as unresolved. Missing direct coverage and conflicting layout occurrences also remain unresolved. This comparison does not prove a transactional snapshot. Returned language/version never supplies an editable fallback source.
 

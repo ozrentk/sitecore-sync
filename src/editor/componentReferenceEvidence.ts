@@ -1,7 +1,7 @@
 import { isGuid } from "./itemEditorModel";
 import { referenceId } from "../sitecore/previewReferences";
 
-/** Only explicit item fields with ordered item-shaped arrays provide parity evidence.
+/** Only explicit item fields with ordered item arrays or typed link values provide parity evidence.
  * Custom resolver JSON and absent fields do not establish absence of references. */
 export function previewReferenceEvidence(report: unknown): Map<string, Record<string, readonly string[]>> {
   const result = new Map<string, Record<string, readonly string[]>>();
@@ -15,8 +15,14 @@ export function previewReferenceEvidence(report: unknown): Map<string, Record<st
     if (id && record(value.fields)) {
       const fields = result.get(referenceId(id)) ?? Object.create(null) as Record<string, readonly string[]>;
       for (const [name, field] of Object.entries(value.fields)) {
-        if (!Array.isArray(field) || !field.every(target => record(target) && isGuid(target.id))) continue;
-        const ids = field.map(target => referenceId((target as { id: string }).id));
+        let ids: string[];
+        if (Array.isArray(field) && field.every(target => record(target) && isGuid(target.id))) {
+          ids = field.map(target => referenceId((target as { id: string }).id));
+        } else if (record(field) && record(field.value) && typeof field.value.linktype === "string") {
+          if (field.value.linktype === "internal" && isGuid(field.value.id)) ids = [referenceId(field.value.id)];
+          else if (["external", "mailto", "anchor"].includes(field.value.linktype)) ids = [];
+          else continue;
+        } else continue;
         // Conflicting occurrences must not let the last one silently win.
         fields[name] = fields[name] && JSON.stringify(fields[name]) !== JSON.stringify(ids) ? ["conflicting-layout-occurrences"] : ids;
       }
