@@ -263,8 +263,11 @@ export const pageComponentsTests: readonly IntegrationTest[] = [{
       await vscode.commands.executeCommand(narrowExpected ? "workbench.action.editorLayoutTwoColumns" : "workbench.action.editorLayoutSingle");
       await provider.open({ connectionId: "test", itemId: id, language: "en" });
       const result = new Promise<void>((resolve, reject) => {
-        timer = setTimeout(() => reject(Error("Components UI timeout")), 20000);
+        // Include cold webview startup in addition to the individual DOM waits below.
+        let phase = "waiting for the test script to start";
+        timer = setTimeout(() => reject(Error("Components UI timeout: " + phase)), 60000);
         listener = panel!.webview.onDidReceiveMessage(message => {
+          if (message.type === "componentsSmokeProgress") phase = String(message.phase);
           if (message.type === "componentsSmoke") {
             try { strictEqual(message.ok, true, message.error); strictEqual(message.narrow, narrowExpected, "Unexpected editor group width"); resolve(); } catch (error) { reject(error); }
           }
@@ -278,7 +281,8 @@ export const pageComponentsTests: readonly IntegrationTest[] = [{
       const nonce = /nonce="([a-f0-9]+)"/u.exec(panel!.webview.html)![1];
       const script = `(async()=>{
         try{
-          const wait=async fn=>{for(let n=0;n<200;n++){if(fn())return;await new Promise(r=>setTimeout(r,25));}throw Error("Details UI did not settle");};
+          api.postMessage({type:"componentsSmokeProgress",phase:"checking the initial layout"});
+          const wait=async fn=>{api.postMessage({type:"componentsSmokeProgress",phase:String(fn)});for(let n=0;n<200;n++){if(fn())return;await new Promise(r=>setTimeout(r,25));}throw Error("Details UI did not settle: "+String(fn));};
           const header=document.getElementById("page-header"), tree=document.getElementById("tree"), toggle=document.getElementById("expand");
           if(!header.contains(document.getElementById("component-count"))||!header.contains(document.getElementById("layout-context")))throw Error("Metadata is not in header");
           if(tree.contains(document.getElementById("layout-context")))throw Error("Metadata still in tree");

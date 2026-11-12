@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.63.1 — 2026-10-26
+
+- Fix Components Reveal in Browse stopping after tab activation because its own navigation start invalidated the prior request guard. Preserve supersession checks against subsequent navigation.
+- Record B27 acceptance evidence and remaining closure gaps; effective per-node fallback provenance is not claimed.
+
 ## 0.63.0 — 2026-10-23
 
 - Components References follows Image/File media IDs only after verifying the target belongs to the Sitecore Media Library. Raw XML remains in Asset information; missing, malformed and conflicting targets remain explicit.
