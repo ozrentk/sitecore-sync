@@ -2,9 +2,7 @@
 
 ## Decision
 
-**Partial pass; keep B27 open pending the closure boundary decision and remaining live acceptance.** Standard supported references have bounded implementation and regression coverage. This is not acceptance of the original promise that each node identifies its effective locale/fallback source, nor proof of arbitrary site-dependent resolver equivalence.
-
-Candidate closure boundary: the selected locale applies to the whole Preview tree, source locale remains explicitly unknown, and exact Authoring Details/Edit stays separate. This boundary is proposed, not silently substituted for the original requirement. Arbitrary custom resolvers, verified fallback-source identification and arbitrary devices remain outside the verified implementation; the device constraint was previously agreed. Live File and nested/base partial-design coverage remain gaps rather than assumed passes.
+**Closed on 2026-11-12 to the scope accepted by the user.** The selected language applies to the whole tree. Preview may use fallback without identifying the source language; the tree must display that limitation. Exact Authoring Details and Edit remain separate. Live populated File and nested/base partial-design checks are deferred, not passed.
 
 ## Evidence by layer
 
@@ -31,13 +29,12 @@ Reveal referenced item in Browse activated the Browse tab but left the old vehic
 
 ## Locale requirement and clarity
 
-Current UI has one selected Language control and explicit “Source locale: unknown (Preview)” context; lazy branches repeat source-unknown context. Exact Details separately reports requested and Authoring locale/version. This is truthful and avoids inventing per-node fallback provenance. No redundant per-node language badges were added during acceptance. Original per-node effective-locale/fallback-chain acceptance remains unmet; accepting inherited requested-locale context with unknown provenance requires an explicit scope decision.
+The tree has one Language control and a visible warning that Preview may use fallback without identifying its source language; lazy branches repeat source-unknown context. Exact Details separately reports requested and Authoring locale/version. This is truthful and avoids inventing per-node fallback provenance. No redundant per-node language badges were added during acceptance. Original per-node effective-locale/fallback-chain acceptance remains unmet; the user accepted tree-level requested-language context instead.
 
-## Remaining acceptance
+## Deferred checks and evidence limits
 
-- Confirm the proposed requested-locale/source-unknown boundary, or retain the original provenance requirement as open.
 - The installed Reveal scenario passed; other live UI observations above were made in the Development Host.
-- Supply an existing populated File-field example and a representative nested/base partial-design page for read-only checks, or explicitly accept these coverage limitations.
+- Deferred: check a populated File field and nested/base partial-design inheritance when representative live examples become available.
 - Live repeated references and precise refresh/close races were not manufactured; their current evidence is synthetic.
 
 No Sitecore content was created, modified, deleted or published. No assets were crawled or downloaded. No remote branches, releases or tags were published.

@@ -79,6 +79,7 @@ export class PageComponentsPanel implements vscode.Disposable {
     let revision = 0, detailRevision = 0, disposed = false, language = initialLanguage;
     const targets = new Map<string, string>();
     const components = new Map<string, ComponentOccurrence>();
+    let editableSelection = false;
     let selectedItem: AuthoringItemDetails | undefined;
     let selectedKey: string | undefined;
     let lastIntent = 0;
@@ -96,7 +97,7 @@ export class PageComponentsPanel implements vscode.Disposable {
       <link rel="stylesheet" href="${uri(media, "components.css")}"><link rel="stylesheet" href="${uri(shared, "readOnlyField.css")}"><style id="pane-size" nonce="${nonce}">:root{--tree-width:50%}</style></head>
       <body data-revision="${revision}"><header id="page-header"><div class="header-controls"><h1>${esc(item.displayName || item.name)}</h1><label>Language <select id="language" ${busy ? "disabled" : ""}>${languages.map(value =>
         `<option ${value === language ? "selected" : ""}>${esc(value)}</option>`).join("")}</select></label><button id="refresh" ${busy ? "disabled" : ""}>Refresh</button></div>
-      <p>${esc(connection.name)} · ${esc(site.name)} · Source locale: unknown (Preview)</p>
+      <p>${esc(connection.name)} · ${esc(site.name)} · Showing Preview content for ${esc(language)}. It may use fallback; Preview does not identify the source language.</p>
       ${layout ? `<div class="layout-summary"><span id="component-count">${layout.count} component occurrence(s)</span>
         <details id="layout-context"><summary title="Layout context" aria-label="Layout context">${actionIconSvg("info")}</summary><div class="layout-metadata">
         <p>Returned locale/version: ${esc(layout.returnedLanguage)} / ${layout.returnedVersion}</p>
@@ -108,7 +109,7 @@ export class PageComponentsPanel implements vscode.Disposable {
       <script nonce="${nonce}" src="${uri(shared, "readOnlyField.js")}"></script><script nonce="${nonce}" src="${uri(media, "components.js")}"></script></body></html>`;
     };
     const resetDetails = (): void => {
-      detailRequest?.abort(); detailRevision++; selectedItem = undefined; selectedKey = undefined; references.clear();
+      detailRequest?.abort(); detailRevision++; selectedItem = undefined; editableSelection = false; selectedKey = undefined; references.clear();
     };
     const load = async (): Promise<void> => {
       request?.abort(); graphRequest?.abort(); graph = undefined; resetDetails(); request = new AbortController();
@@ -207,9 +208,10 @@ export class PageComponentsPanel implements vscode.Disposable {
         signal.throwIfAborted();
         if (!currentSelection()) return;
         selectedItem = details;
+        editableSelection = view.editable && !graph?.isMedia(key);
         for (const [refKey, id] of localReferences) references.set(refKey, id);
         await panel.webview.postMessage({ type: "details", revision, selection: current, intent, key, instance,
-          connectionName: connection.name, item: { ...view, role: referenceId ? "Referenced item" : "Datasource", references: resolvedReferences.sort((a, b) => Number(a.key.slice(10)) - Number(b.key.slice(10))) } });
+          connectionName: connection.name, item: { ...view, editable: editableSelection, editReason: graph?.isMedia(key) ? "Media targets are read-only." : view.editReason, role: referenceId ? "Referenced item" : "Datasource", references: resolvedReferences.sort((a, b) => Number(a.key.slice(10)) - Number(b.key.slice(10))) } });
       } catch {
         if (currentSelection() && !detailRequest.signal.aborted) await panel.webview.postMessage({ type: "details", revision, selection: current, intent, key, instance,
           error: "Item details unavailable. Check the connection and requested locale; the item may be missing, inaccessible or exceed inspection limits." });
@@ -245,7 +247,7 @@ export class PageComponentsPanel implements vscode.Disposable {
       if ((value.type === "reveal" || value.type === "edit") && value.selection === detailRevision && selectedItem && this.actions) {
         const target = selectedItem;
         const operation = value.type === "reveal" ? this.actions.reveal(connection.id, target.itemId, language, target.path)
-          : componentItemDetails(target, target.itemId, language).editable ? this.actions.edit(connection.id, target.itemId, language, target.version) : undefined;
+          : editableSelection ? this.actions.edit(connection.id, target.itemId, language, target.version) : undefined;
         void operation?.catch(() => vscode.window.showErrorMessage("Unable to open the selected datasource. Check its connection and exact-locale version."));
         return;
       }

@@ -40,6 +40,7 @@ function detailsAvailable(available) {
   if (!available) setExpanded(false);
 }
 function back() {
+  cancelGesture();
   workspace.classList.remove("show-details"); setExpanded(false);
   returnFocus?.focus();
 }
@@ -56,8 +57,9 @@ expand.onclick = () => {
   if (expand.disabled || expand.hidden || narrowLayout.matches) return;
   setExpanded(!workspace.classList.contains("expanded"));
 };
-document.getElementById("refresh").onclick = () => post({ type: "load", language: document.getElementById("language").value });
-document.getElementById("language").onchange = event => post({ type: "load", language: event.target.value });
+function reload(language) { cancelGesture(); key = undefined; ++intent; post({ type: "load", language }); }
+document.getElementById("refresh").onclick = () => reload(document.getElementById("language").value);
+document.getElementById("language").onchange = event => reload(event.target.value);
 document.querySelectorAll("[aria-controls][data-branch-label]").forEach(button => {
   button.onclick = () => {
     const expanded = button.getAttribute("aria-expanded") !== "true";
@@ -66,21 +68,44 @@ document.querySelectorAll("[aria-controls][data-branch-label]").forEach(button =
     button.setAttribute("aria-label", `${expanded ? "Collapse" : "Expand"} children of ${button.dataset.branchLabel}`);
   };
 });
-document.querySelectorAll("[data-component]").forEach(button => {
+let pendingEdit, verifiedEdit, paneTimer;
+function cancelGesture() {
+  clearTimeout(paneTimer); pendingEdit = undefined; verifiedEdit = undefined;
+}
+function bindItem(button, rowKey, type) {
   button.onclick = event => {
     event.preventDefault(); event.stopPropagation();
-    key = button.dataset.component;
-    selection = -1; returnFocus = button;
-    document.querySelectorAll("[aria-pressed=true][data-component]").forEach(node => node.setAttribute("aria-pressed", "false"));
+    if (event.detail > 1 && key === rowKey && returnFocus === button) return;
+    cancelGesture();
+    key = rowKey; selection = -1; returnFocus = button;
+    document.querySelectorAll(".component-select[aria-pressed=true]").forEach(node => node.setAttribute("aria-pressed", "false"));
     button.setAttribute("aria-pressed", "true");
-    workspace.classList.add("show-details");
-    detailsAvailable(false);
-    content.textContent = "Loading details…";
-    document.getElementById("back").focus();
-    if (!matchMedia("(max-width:700px)").matches && !workspace.classList.contains("expanded")) button.focus();
-    post({ type: "select", key, intent: ++intent });
+    detailsAvailable(false); content.textContent = "Loading details…";
+    const showPane = () => {
+      workspace.classList.add("show-details");
+      if (narrowLayout.matches) document.getElementById("back").focus();
+    };
+    // Keep the pointer target visible for the second click in the narrow layout.
+    if (narrowLayout.matches && event.detail === 1) paneTimer = setTimeout(showPane, 550);
+    else showPane();
+    post({ type, key, intent: ++intent });
   };
-});
+  button.ondblclick = event => {
+    event.preventDefault(); event.stopPropagation();
+    if (returnFocus !== button || key !== rowKey) return;
+    clearTimeout(paneTimer);
+    workspace.classList.add("show-details");
+    if (narrowLayout.matches) document.getElementById("back").focus();
+    pendingEdit = intent;
+    if (verifiedEdit) openPendingEditor();
+  };
+}
+function openPendingEditor() {
+  if (pendingEdit !== intent || !verifiedEdit || verifiedEdit.intent !== intent) return;
+  pendingEdit = undefined;
+  if (verifiedEdit.editable) post({ type: "edit", selection });
+}
+document.querySelectorAll("[data-component]").forEach(button => bindItem(button, button.dataset.component, "select"));
 // Dynamic reference branches keep expansion independent of item selection.
 const referenceBranches = new Map();
 function bindReferenceBranch(branch) {
@@ -115,14 +140,7 @@ function renderReferences(data) {
       const button = text("button", node.label, row); button.className = "component-select";
       button.disabled = !["ready", "cycle", "limit"].includes(node.state) || !node.itemId;
       button.title = node.itemId || "Unresolved stored reference";
-      button.onclick = () => {
-        key = node.key; selection = -1; returnFocus = button;
-        document.querySelectorAll(".component-select[aria-pressed=true]").forEach(element => element.setAttribute("aria-pressed", "false"));
-        button.setAttribute("aria-pressed", "true");
-        workspace.classList.add("show-details"); detailsAvailable(false); content.textContent = "Loading exact-locale details…";
-        if (narrowLayout.matches) document.getElementById("back").focus();
-        post({ type: "selectReference", key, intent: ++intent });
-      };
+      bindItem(button, node.key, "selectReference");
       if (node.state !== "ready") text("p", ({ cycle: "Cycle — already in this branch", missing: "Missing or inaccessible in Preview", error: "Preview read failed; refresh to retry", limit: "Expansion limit reached", unresolved: "Unresolved reference" })[node.state], row);
       else {
         const child = document.createElement("details"); child.className = "reference-branch"; child.dataset.referenceKey = node.key; row.append(child);
@@ -162,6 +180,7 @@ window.addEventListener("message", event => {
   if (data.error) { text("p", data.error); return; }
   const item = data.item;
   if (!item) return;
+  verifiedEdit = { intent, editable: item.editable }; openPendingEditor();
   text("h2", `${item.role}: ${item.name}`);
   text("p", `${data.connectionName} · Requested: ${item.requestedLanguage} · Authoring: ${item.returnedLanguage} v${item.version}\nField source locale: ${item.effectiveLanguage}\n${item.path}\nID: ${item.itemId}`);
   const actions = document.createElement("nav"); content.append(actions);

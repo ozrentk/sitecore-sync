@@ -88,4 +88,6 @@ Each panel layout load owns its cache (connection, selected site and locale); Re
 
 ## Acceptance status
 
-See the [2026-10-26 acceptance review](research/b27-acceptance.md) for live UI/API versus synthetic evidence and remaining closure gaps. The selected language is the requested locale for the whole tree; unknown source locale is not a verified effective-locale badge for each node. Version 0.63.1 fixes Reveal in Browse stopping after tab activation.
+See the [2026-10-26 acceptance review](research/b27-acceptance.md) for live UI/API versus synthetic evidence and deferred live checks. The selected language is the requested locale for the whole tree; unknown source locale is not a verified effective-locale badge for each node. Version 0.63.1 fixes Reveal in Browse stopping after tab activation.
+
+The selected language applies to the entire Components tree. A visible notice explains that Preview may use fallback without identifying the source language. Click a row to inspect it; double-click to edit an eligible datasource or referenced item in the exact locale. The Edit button remains available for keyboard use.

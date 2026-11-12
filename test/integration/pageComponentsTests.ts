@@ -44,7 +44,7 @@ export const pageComponentsTests: readonly IntegrationTest[] = [{
     try {
       await provider.open({ connectionId: "test", itemId: id, language: "en" });
       match(panel!.webview.html, /&lt;RichText&gt;/u);
-      match(panel!.webview.html, /Source locale: unknown/u);
+      match(panel!.webview.html, /Showing Preview content for en\. It may use fallback; Preview does not identify the source language\./u);
       match(panel!.webview.html, /default-src 'none'/u);
       doesNotMatch(panel!.webview.html, /preview-secret|authoring-secret|<RichText>/u);
       strictEqual(panel!.webview.options.localResourceRoots?.length, 2);
@@ -240,19 +240,22 @@ export const pageComponentsTests: readonly IntegrationTest[] = [{
   ...([false, true] as const).map(narrowExpected => ({
   name: `Components ${narrowExpected ? "narrow" : "desktop"} header and details controls preserve selection, resize and focus`,
   async execute() {
-    const { connections, authoring } = dependencies();
+    const { connection, connections, authoring } = dependencies();
+    const locale = narrowExpected ? "en-AU" : "en";
+    connection.id = narrowExpected ? "second" : "test";
     let panel: vscode.WebviewPanel | undefined;
     const original = vscode.window.createWebviewPanel;
     const spy = mock.method(vscode.window, "createWebviewPanel", (...args: Parameters<typeof original>) => { panel = original(...args); return panel; });
     const originalLoad = authoring.loadItem;
     const load = mock.method(authoring, "loadItem", async (...args: Parameters<AuthoringContentClient["loadItem"]>) =>
-      "itemId" in args[2] && args[2].itemId === id ? originalLoad(...args) : { ...groupedDetails(), itemId: "itemId" in args[2] ? args[2].itemId : datasourceId });
+      "itemId" in args[2] && args[2].itemId === id ? originalLoad(...args) : { ...groupedDetails(), language: locale, itemId: "itemId" in args[2] ? args[2].itemId : datasourceId });
     const lookup = mock.method(authoring, "loadSelectionItem", async () => ({ itemId: datasourceId, name: "Text", displayName: "SW - Title - Rich Text with a long descriptive name that should wrap", path: "/sitecore/content/Example/Data", hasChildren: false }));
+    const edits: unknown[][] = [];
     const provider = new PageComponentsPanel(connections, authoring, { collect: async () => ({ ...report, rendered: { sitecore: {
-      ...report.rendered.sitecore, route: { ...report.rendered.sitecore.route, placeholders: {
+      ...report.rendered.sitecore, context: { ...report.rendered.sitecore.context, language: locale }, route: { ...report.rendered.sitecore.route, itemLanguage: locale, placeholders: {
         main: [{ uid: id, componentName: "Component", dataSource: datasourceId, isContentResolved: true, placeholders: { nested: [{ componentName: "Instance only" }] } }],
       } },
-    } } }) }, undefined, { read: async (_origin, _token, target) => ({ id: target, label: target === referenceId ? "Effective reference" : "Datasource", path: "/sitecore/media library/Logo", fields: [
+    } } }) }, { extensionUri: vscode.extensions.getExtension("OzrenTK.sitecore-xm-cloud-sync")!.extensionUri, reveal: async () => {}, edit: async (...args) => { edits.push(args); } }, { read: async (_origin, _token, target) => ({ id: target, label: target === referenceId ? "Effective reference" : "Datasource", path: "/sitecore/media library/Logo", fields: [
       { id, name: "Related", targets: target === datasourceId ? [referenceId, referenceId] : [datasourceId] },
       { id, name: "Media", targets: [referenceId], targetKind: "media" as const, evidenceLabel: "Asset information", rawValue: '<image mediaid="' + referenceId + '" />' },
       { id: referenceId, name: "Internal link", targets: [referenceId], rawValue: '<link linktype="internal" id="' + referenceId + '" />' },
@@ -261,7 +264,8 @@ export const pageComponentsTests: readonly IntegrationTest[] = [{
     let timer: ReturnType<typeof setTimeout> | undefined, listener: vscode.Disposable | undefined;
     try {
       await vscode.commands.executeCommand(narrowExpected ? "workbench.action.editorLayoutTwoColumns" : "workbench.action.editorLayoutSingle");
-      await provider.open({ connectionId: "test", itemId: id, language: "en" });
+      await provider.open({ connectionId: connection.id, itemId: id, language: locale });
+      strictEqual(panel!.webview.html.includes("Showing Preview content for " + locale), true);
       const result = new Promise<void>((resolve, reject) => {
         // Include cold webview startup in addition to the individual DOM waits below.
         let phase = "waiting for the test script to start";
@@ -269,7 +273,7 @@ export const pageComponentsTests: readonly IntegrationTest[] = [{
         listener = panel!.webview.onDidReceiveMessage(message => {
           if (message.type === "componentsSmokeProgress") phase = String(message.phase);
           if (message.type === "componentsSmoke") {
-            try { strictEqual(message.ok, true, message.error); strictEqual(message.narrow, narrowExpected, "Unexpected editor group width"); resolve(); } catch (error) { reject(error); }
+            try { strictEqual(message.ok, true, message.error); strictEqual(message.narrow, narrowExpected, "Unexpected editor group width"); deepStrictEqual(edits, [[connection.id, referenceId, locale, 2], [connection.id, datasourceId, locale, 2]]); resolve(); } catch (error) { reject(error); }
           }
         });
       });
@@ -312,11 +316,18 @@ export const pageComponentsTests: readonly IntegrationTest[] = [{
           if(!evidence[1].open||!evidence[1].querySelector("pre").textContent.includes('<link linktype="external"'))throw Error("Raw link evidence lost");
           const child=refs.querySelector(".reference-branch");child.open=true;
           await wait(()=>child.textContent.includes("Cycle — already in this branch"));
+          const doubleClick=el=>{for(const [name,detail] of [["click",1],["click",2],["dblclick",2]])el.dispatchEvent(new MouseEvent(name,{detail,bubbles:true,cancelable:true}));};
+          doubleClick(referenceRows[2]); // media occurrence stays read-only even if Authoring returns a content path
+          await wait(()=>document.querySelector("#detail-content nav button:disabled"));
+          doubleClick(button); // superseded before exact Details arrive
           referenceRows[0].click();
           await wait(()=>document.getElementById("detail-content").textContent.includes("Referenced item"));
           if(!document.getElementById("detail-content").textContent.includes("${referenceId}"))throw Error("Reference selection targeted owner");
+          doubleClick(referenceRows[0]);
+          await wait(()=>document.querySelector("#detail-content nav button:not([disabled])"));
           if(narrowLayout.matches){document.getElementById("back").click();if(document.activeElement!==referenceRows[0])throw Error("Reference focus not restored");}
-          button.click();
+
+          doubleClick(button);
           if(chevron.getAttribute("aria-expanded")!=="true")throw Error("Selection collapsed children");
           await wait(()=>document.querySelector(".field"));
           if(!document.getElementById("detail-content").textContent.includes("${datasourceId}"))throw Error("Wrong datasource identity");
@@ -344,7 +355,7 @@ export const pageComponentsTests: readonly IntegrationTest[] = [{
             toggle.click();
             if(getComputedStyle(tree).display==="none"||toggle.title!=="Expand details"||document.activeElement!==toggle)throw Error("Restore/focus failed");
           }
-          document.querySelectorAll("[data-component]")[1].click();
+          doubleClick(document.querySelectorAll("[data-component]")[1]);
           await wait(()=>document.getElementById("detail-content").textContent.includes("No datasource is declared"));
           if(!toggle.hidden||!toggle.disabled||!document.getElementById("detail-content").textContent.includes("Component instance"))throw Error("Instance-only control state invalid");
           api.postMessage({type:"componentsSmoke",ok:true,narrow});
