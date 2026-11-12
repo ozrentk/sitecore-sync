@@ -56,4 +56,4 @@ Supported ordinary fields on pages can be edited through the [content field edit
 
 Components References also follows verified ordinary internal General Links. Link information preserves raw XML; external/email/anchor/Content Hub destinations remain inert. Image/File media references require a verified Media Library target; Content Hub and external assets are not followed. Image has live verification; File has schema/synthetic coverage only. See [Components](docs/page-components.md).
 
-[B27 acceptance status](docs/research/b27-acceptance.md) distinguishes verified reference behavior from remaining live samples and fallback-provenance limits.
+Click a Components row to inspect it, or double-click to edit an eligible exact-locale item. [B27 acceptance status](docs/research/b27-acceptance.md) distinguishes verified reference behavior from remaining live samples and fallback-provenance limits.

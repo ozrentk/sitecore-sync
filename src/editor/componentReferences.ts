@@ -7,7 +7,7 @@ export interface ReferenceOccurrence {
 }
 export interface ReferenceGroup { name: string; issue?: string; nodes: ReferenceOccurrence[]; rawValue?: string; evidenceLabel?: string; destination?: PreviewReferenceField["destination"]; }
 export interface ReferenceExpansion { groups: ReferenceGroup[]; notice: string; }
-interface Node { id: string; ancestors: readonly string[]; evidence?: Readonly<Record<string, readonly string[]>>; }
+interface Node { id: string; media?: boolean; ancestors: readonly string[]; evidence?: Readonly<Record<string, readonly string[]>>; }
 
 /** One session per connection/site/locale/layout load. Cache identities, never occurrences. */
 export class ComponentReferences {
@@ -24,6 +24,7 @@ export class ComponentReferences {
     if (isGuid(id)) this.nodes.set(key, { id: referenceId(id), ancestors: [], evidence });
   }
   target(key: string): string | undefined { return this.nodes.get(key)?.id; }
+  isMedia(key: string): boolean { return this.nodes.get(key)?.media === true; }
   expand(key: string): Promise<ReferenceExpansion> {
     const existing = this.expansions.get(key); if (existing) return existing;
     const node = this.nodes.get(key);
@@ -66,7 +67,7 @@ export class ComponentReferences {
         const cycle = id !== undefined && ancestors.includes(id);
         const state = issue || !id ? "unresolved" : cycle ? "cycle" : ancestors.length >= 12 ? "limit" : "ready";
         group.nodes.push({ key, label: target || "Empty reference", itemId: id, state, requiresMedia: field.targetKind === "media" });
-        if (id && (state === "ready" || state === "cycle" || state === "limit")) this.nodes.set(key, { id, ancestors });
+        if (id && (state === "ready" || state === "cycle" || state === "limit")) this.nodes.set(key, { id, ancestors, media: field.targetKind === "media" });
       }
       if (limited) break;
     }

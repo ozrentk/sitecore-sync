@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.64.0 — 2026-11-12
+
+- Double-click a Components row to edit its eligible exact-locale item. A tree-level notice explains that Preview does not identify the source language.
+
 ## 0.63.1 — 2026-10-26
 
 - Fix Components Reveal in Browse stopping after tab activation because its own navigation start invalidated the prior request guard. Preserve supersession checks against subsequent navigation.
