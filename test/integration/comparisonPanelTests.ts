@@ -205,7 +205,7 @@ export const comparisonPanelTests: readonly IntegrationTest[] = [{
       getItemDetails: async () => ({ itemId: "datasource", language: "en-NZ", path: "/sitecore/content/Data/Actual" }),
       panel: { reveal() {}, webview: { postMessage: async () => true } },
       cancelRequests: () => session.cancelPending(), clearFieldDiffSelection: async () => undefined,
-      cancelModeSwitch() {}, resolvePendingFavoriteReveals() {}, navigationLoadingEmitter: { fire() {} },
+      resolvePendingFavoriteReveals() {}, navigationLoadingEmitter: { fire() {} },
       postState: async () => undefined, loadInitialTrees: async () => undefined,
       tryRevealFavorite: async (navigation: unknown) => { revealed.push(navigation); return true; },
     });

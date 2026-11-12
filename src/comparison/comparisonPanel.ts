@@ -401,6 +401,8 @@ export class ComparisonPanelManager implements vscode.Disposable {
     await this.clearFieldDiffSelection();
     if (intent !== this.modeIntent) return;
     const navigation = this.beginFavoriteNavigation(connectionId, details.path, "left", "lookup");
+    // Beginning navigation supersedes the previous mode intent, including our own.
+    const navigationIntent = this.modeIntent;
     try {
       if (!this.panel) {
         this.pendingFavoriteNavigation = navigation;
@@ -409,9 +411,9 @@ export class ComparisonPanelManager implements vscode.Disposable {
       }
       this.panel.reveal(vscode.ViewColumn.Active);
       await this.postState();
-      if (intent !== this.modeIntent) return;
+      if (navigationIntent !== this.modeIntent) return;
       await this.loadInitialTrees();
-      if (intent !== this.modeIntent) return;
+      if (navigationIntent !== this.modeIntent) return;
       if (!valid()) throw Error("Connection changed. Refresh Components.");
       await this.navigateToFavorite(navigation);
     } catch (error) { this.finishFavoriteNavigation(navigation); throw error; }
