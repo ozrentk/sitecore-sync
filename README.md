@@ -28,6 +28,7 @@ Before starting, [install the extension and have your CM URL and automation-clie
 | Configure connections, sites or public-page URLs | [Connections](docs/connections.md) |
 | Browse, search, use favorites or compare items | [Browse and Compare](docs/browse-and-compare.md) |
 | Edit supported fields and save changes | [Item editor](docs/item-editor.md) |
+| Inspect a page's components and datasource references | [Page components](docs/page-components.md) |
 | Edit Rich Text HTML, styled text, headings, lists, quotes, tables and links | [Rich Text editing](docs/item-editor.md#rich-text-html-source) |
 | Transfer a field or subtree | [Transfers](docs/transfers.md) |
 | Publish and trace content delivery | [Publishing](docs/publishing.md) |
@@ -44,3 +45,17 @@ Replace offers an optional **Preserve casing** checkbox in Visual and HTML. Each
 Use [Troubleshooting and support](docs/troubleshooting.md) for diagnostic steps and known limitations, or browse the [documentation index](docs/README.md).
 
 [Contributing and development](CONTRIBUTING.md) · [Changelog](CHANGELOG.md) · [Product specification](PRODUCT_SPEC.md) · [Backlog](BACKLOG.md) · [Research](docs/research/README.md) · [MIT license](LICENSE)
+
+CM Preview research diagnostics are available through [local MCP](docs/mcp.md#cm-preview-layout-diagnostic), using a separate Preview token in Connection settings.
+
+Components has full-width component selection rows, initially collapsed system field groups, a compact layout-info header and resizable read-only details pane, with explicit Reveal in Browse and Edit actions for the actual datasource; see [Page components](docs/page-components.md).
+
+Components supports [lazy Preview reference expansion](docs/page-components.md#preview-reference-limits), with field groups, ordered duplicate occurrences, cycle detection and explicit limits. Exact-locale Details and editing remain separate from effective Preview values.
+
+Supported ordinary fields on pages can be edited through the [content field editor](docs/item-editor.md#page-content-fields-0610); layout/system fields and unverified fallback values remain protected.
+
+Components References also follows verified ordinary internal General Links. Link information preserves raw XML; external/email/anchor/Content Hub destinations remain inert. Image/File media references require a verified Media Library target; Content Hub and external assets are not followed. Image has live verification; File has schema/synthetic coverage only. See [Components](docs/page-components.md).
+
+Click a Components row to inspect it, or double-click to edit an eligible exact-locale item. [B27 acceptance status](docs/research/b27-acceptance.md) distinguishes verified reference behavior from remaining live samples and fallback-provenance limits.
+
+Read-only [published Delivery diagnostics](docs/mcp.md#published-delivery-diagnostics) collect and compare Preview/Edge layouts through MCP using the existing saved endpoint and separate tokens.

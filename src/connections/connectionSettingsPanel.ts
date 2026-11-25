@@ -65,7 +65,7 @@ export class ConnectionSettingsPanel implements vscode.Disposable {
           publishingEnabled: Boolean(profile), edgeEndpoint: profile?.edgeEndpoint ?? "https://edge.sitecorecloud.io/api/graphql/v1", siteName: profile?.siteName ?? "",
           applicationBaseUrl: profile?.applicationBaseUrl ?? "", publicTemplate: settings().get("publicPageUrlTemplate", ""), defaultSite: values.defaultSite ?? "",
           sites: [...new Set([...sites.map(site => site.name), ...Object.keys(values.sites ?? {})])].map(name => ({ name, publicBaseUrl: values.sites?.[name]?.publicBaseUrl ?? "", deploymentBaseUrl: values.sites?.[name]?.deploymentBaseUrl ?? "" })),
-        }, stored: { clientSecret: Boolean(id && await this.store.getClientSecret(id)), deploymentSecret: Boolean(id && await this.store.getDeploymentClientSecret(id)), edgeToken: Boolean(id && await this.store.getEdgeToken(id)) },
+        }, stored: { previewToken: Boolean(id && await this.store.getPreviewToken(id)), clientSecret: Boolean(id && await this.store.getClientSecret(id)), deploymentSecret: Boolean(id && await this.store.getDeploymentClientSecret(id)), edgeToken: Boolean(id && await this.store.getEdgeToken(id)) },
       });
     };
     const effective = async (edit: SecretEdit, kind: "clientSecret" | "deploymentSecret" | "edgeToken"): Promise<string | undefined> => {
@@ -162,6 +162,7 @@ export class ConnectionSettingsPanel implements vscode.Disposable {
         else {
           if (revision() !== baseline) { throw new SettingsValidationError({ form: "Settings changed elsewhere. Reload saved values before saving." }); }
           if (!id && !authoringSecret) { throw new SettingsValidationError({ clientSecret: "A client secret is required for a new connection." }); }
+          if (old && old.serverUrl !== input.serverUrl && input.previewToken.action === "keep" && await this.store.getPreviewToken(old.id)) { throw new SettingsValidationError({ previewToken: "Replace or clear the Preview token when changing the CM server." }); }
           const identityChanged = !old || old.serverUrl !== input.serverUrl || old.clientId !== input.clientId || input.clientSecret.action !== "keep";
           if (old && identityChanged && this.inUse(old.id)) { throw new SettingsValidationError({ form: "Close comparisons and finish or remove queued operations referencing this connection before changing its credentials or server." }); }
           if (old && (old.serverUrl !== input.serverUrl || old.clientId !== input.clientId) && input.clientSecret.action !== "replace") { throw new SettingsValidationError({ clientSecret: "Replace the secret when changing the server or client ID." }); }
@@ -214,7 +215,7 @@ export class ConnectionSettingsPanel implements vscode.Disposable {
     const oldTemplate = settings.inspect<string>("publicPageUrlTemplate")?.globalValue;
     const oldValues = settings.inspect<Record<string, unknown>>("publicPageValues")?.globalValue;
     const remove: SecretEdit = { action: "remove", value: "" };
-    await this.store.saveSettings(connection, { clientSecret: input.clientSecret, deploymentSecret: input.deploymentEnabled ? input.deploymentSecret : remove, edgeToken: input.publishingEnabled ? input.edgeToken : remove },
+    await this.store.saveSettings(connection, { previewToken: input.previewToken, clientSecret: input.clientSecret, deploymentSecret: input.deploymentEnabled ? input.deploymentSecret : remove, edgeToken: input.publishingEnabled ? input.edgeToken : remove },
       input.publishingEnabled ? { ...previousProfile, connectionId: connection.id, edgeEndpoint: input.edgeEndpoint, siteName: input.siteName || undefined, applicationBaseUrl: input.applicationBaseUrl || undefined } : undefined,
       async () => {
         try {

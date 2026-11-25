@@ -1,3 +1,6 @@
+import { LayoutDiagnosticClient } from "../../src/sitecore/layoutDiagnostic";
+import { SitecoreHttpClient } from "../../src/sitecore/sitecoreHttpClient";
+import { QueuedHttpRuntime, noOpLogger, jsonResponse } from "./sitecoreClientTestHelpers";
 import { deepStrictEqual, strictEqual, rejects } from "node:assert/strict";
 import { test } from "node:test";
 import { McpService, type McpOperation } from "../../src/mcp/service";
@@ -8,7 +11,7 @@ import { scopeFields, type ScopeFixtureManifest } from "../../src/sitecore/scope
 
 const itemId = "00000000-0000-0000-0000-000000000001";
 const fieldId = "00000000-0000-0000-0000-000000000002";
-function fixture() {
+function fixture(delivery?: { endpoint: string; token: string; previewToken?: string; client: LayoutDiagnosticClient }) {
   let details: AuthoringItemDetails = { itemId, name: "Test", displayName: "Test", path: "/sitecore/content/Test", language: "en", version: 1,
     hasChildren: false, template: { templateId: itemId, name: "Page" }, availableVersions: [{ language: "en", version: 1 }],
     fields: [{ fieldId, name: "Title", label: "Title", value: "old", type: "Single-Line Text", typeKey: "single-line text", scope: "VERSIONED",
@@ -17,6 +20,7 @@ function fixture() {
   let records: McpOperation[] = []; let confirmed = true; let writes = 0; let reads = 0;
   let current = testConnection; let fail = false; let failSave = false;
   const service = new McpService({ get: id => id === current.id ? current : undefined,
+    getEdgeToken: async () => delivery?.token, getDeliveryEndpoint: () => delivery?.endpoint, getPreviewToken: async () => delivery?.previewToken,
     getClientSecret: async () => "private-credential", listVerifiedSites: () => [] }, {
     loadItem: async () => { reads++; return details; }, loadLanguages: async () => [{ name: "en", displayName: "English", englishName: "English", nativeName: "English" }],
     validateAddItemVersion: async () => { if (fail) { throw new Error("Unsupported contract"); } },
@@ -45,7 +49,7 @@ function fixture() {
         ? field : { ...field, value: input.fields[field.name]!, containsStandardValue: false }) }; return details;
     },
   }, [testConnection], { confirm: async () => confirmed, loadJournal: () => records,
-    saveJournal: async value => { if (failSave) { throw new Error("storage failed"); } records = structuredClone(value) as McpOperation[]; } });
+    saveJournal: async value => { if (failSave) { throw new Error("storage failed"); } records = structuredClone(value) as McpOperation[]; } }, undefined, delivery?.client);
   const call = (name: string, input: unknown = {}) => service.call(name, input, new AbortController().signal);
   return { service, call, records: () => records, reads: () => reads, writes: () => writes,
     seedJournal: (value: McpOperation[]) => { records = structuredClone(value); },
@@ -274,4 +278,39 @@ test("scope rule failures retain unknown outcomes and strict boolean arguments",
   f.fail();
   await rejects(f.call("execute_plan", { planId: plan.planId }), /Inspect list_operations/u);
   strictEqual(f.records().at(-1)!.status, "outcome-unknown"); strictEqual(f.writes(), 1);
+});
+
+
+test("Preview diagnostic requires its own saved credential without Authoring reads or writes", async () => {
+  const f = fixture();
+  await rejects(f.call("collect_preview_diagnostic", { connectionId: testConnection.id, site: "Example", route: "/", language: "en" }), /Preview token/);
+  strictEqual(f.reads(), 0); strictEqual(f.writes(), 0);
+  strictEqual(toolSchemas.collect_preview_diagnostic.safeParse({ connectionId: testConnection.id, site: "Example", route: "https://other.example", language: "en" }).success, false);
+});
+
+
+test("delivery MCP reuses stored credentials without Authoring reads, validates exposure and preserves comparison inputs", async () => {
+  const responses = Array.from({ length: 3 }, () => jsonResponse({ data: { layout: { item: { rendered: { sitecore: { route: { placeholders: {} } } } } } } }));
+  const runtime = new QueuedHttpRuntime(responses);
+  const f = fixture({ endpoint: "https://edge.example.test/api/graphql/v1", token: "saved-edge", previewToken: "saved-preview",
+    client: new LayoutDiagnosticClient(new SitecoreHttpClient(noOpLogger, runtime)) });
+  const args = { connectionId: testConnection.id, site: "Example", route: "/", language: "en" };
+  await f.call("collect_published_layout_diagnostic", args);
+  const compared = await f.call("compare_layout_diagnostics", args) as { comparison: { status: string } };
+  strictEqual(compared.comparison.status, "compared-observed-content");
+  strictEqual(f.reads(), 0); strictEqual(f.writes(), 0);
+  deepStrictEqual(runtime.requests.map(request => new Headers(request.init.headers).get("sc_apikey")), ["saved-edge", "saved-edge", "saved-preview"]);
+  deepStrictEqual(runtime.requests.map(request => JSON.parse(String(request.init.body)).variables), Array(3).fill({ site: "Example", route: "/", language: "en" }));
+  await rejects(f.call("collect_published_layout_diagnostic", { ...args, connectionId: "not-exposed" }), /not exposed/);
+  await rejects(f.call("collect_published_layout_diagnostic", { ...args, endpoint: "https://evil.test" }), /Invalid/);
+  f.changeConnection(); await rejects(f.call("compare_layout_diagnostics", args), /changed/);
+  strictEqual(runtime.requests.length, 3);
+  f.service.dispose();
+});
+test("old connection profiles remain usable and missing Delivery credentials never fall back to CM", async () => {
+  const f = fixture();
+  for (const name of ["collect_published_layout_diagnostic", "compare_layout_diagnostics"]) {
+    await rejects(f.call(name, { connectionId: testConnection.id, site: "Example", route: "/", language: "en" }), /Experience Edge/);
+  }
+  strictEqual(f.reads(), 0); f.service.dispose();
 });

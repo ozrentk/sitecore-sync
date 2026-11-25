@@ -14,6 +14,8 @@ export const actionPaths = {
   fallback: 'M3 3v6h10 M10 6l3 3-3 3', info: 'M8 7v5 M8 4v.2 M15 8A7 7 0 1 1 1 8a7 7 0 0 1 14 0',
   edit: 'M3 10 11 2l3 3-8 8-4 1Z M9 4l3 3', favorite: 'm8 1 2 5 5 .5-4 3.5 1 5-4-2.5L4 15l1-5L1 6.5 5 6Z',
   expand: 'M3 5l5 6 5-6', collapse: 'M3 11l5-6 5 6', pause: 'M5 3v10 M11 3v10',
+  expandPane: 'M6 2H2v4 M2 2l5 5 M10 14h4v-4 M14 14l-5-5',
+  restorePane: 'M2 2h12v12H2Z M7 2v12',
   bold: 'M4 2h5a3 3 0 0 1 0 6H4V2 M4 8h6a3 3 0 0 1 0 6H4V8',
   italic: 'M7 2h6 M3 14h6 M10 2 6 14', underline: 'M4 2v6a4 4 0 0 0 8 0V2 M2 14h12',
   bulletList: 'M2 4h.2 M2 8h.2 M2 12h.2 M6 4h8 M6 8h8 M6 12h8',

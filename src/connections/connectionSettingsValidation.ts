@@ -3,7 +3,7 @@ import { validatePublicPageTemplate } from "../publicPages/publicPageUrl";
 
 export interface SecretEdit { action: "keep" | "replace" | "remove"; value: string; }
 export interface ConnectionSettingsInput {
-  name: string; serverUrl: string; clientId: string; clientSecret: SecretEdit;
+  name: string; serverUrl: string; clientId: string; clientSecret: SecretEdit; previewToken: SecretEdit;
   deploymentEnabled: boolean; deploymentClientId: string; deploymentSecret: SecretEdit;
   deploymentEnvironmentId: string;
   publishingEnabled: boolean; edgeEndpoint: string; edgeToken: SecretEdit; siteName: string;
@@ -30,7 +30,7 @@ export function parseConnectionSettings(value: unknown, section = "save"): Conne
     return { action: edit.action as SecretEdit["action"], value: edit.action === "replace" ? edit.value : "" };
   };
   const input: ConnectionSettingsInput = {
-    name: string("name"), serverUrl: string("serverUrl"), clientId: string("clientId"), clientSecret: secret("clientSecret"),
+    name: string("name"), serverUrl: string("serverUrl"), clientId: string("clientId"), clientSecret: secret("clientSecret"), previewToken: raw.previewToken === undefined ? { action: "keep", value: "" } : secret("previewToken"),
     deploymentEnabled: raw.deploymentEnabled === true, deploymentClientId: string("deploymentClientId"), deploymentSecret: secret("deploymentSecret"), deploymentEnvironmentId: string("deploymentEnvironmentId"),
     publishingEnabled: raw.publishingEnabled === true, edgeEndpoint: string("edgeEndpoint"), edgeToken: secret("edgeToken"), siteName: string("siteName"),
     applicationBaseUrl: string("applicationBaseUrl"), publicTemplate: string("publicTemplate"), defaultSite: string("defaultSite"), sites: [],
@@ -84,6 +84,7 @@ export function parseConnectionSettings(value: unknown, section = "save"): Conne
   if (section === "connection") { delete errors.deploymentSecret; delete errors.edgeToken; }
   if (section === "deployment") { delete errors.edgeToken; }
   if (section === "publishing") { delete errors.deploymentSecret; }
+  if (section !== "save") { delete errors.previewToken; }
   if (Object.keys(errors).length) { throw new SettingsValidationError(errors); }
   return input;
 }

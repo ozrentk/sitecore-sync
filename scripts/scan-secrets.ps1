@@ -19,10 +19,10 @@ if (-not (Test-Path -LiteralPath $scanner)) {
 }
 
 if ($Mode -eq 'History') {
-  & $scanner git . --log-opts=--all --redact --no-banner
+  & $scanner git . --config .gitleaks.toml --log-opts=--all --redact --no-banner
 } else {
   $packageDirectory = Join-Path ([System.IO.Path]::GetTempPath()) ('xm-cloud-sync-package-scan-' + [guid]::NewGuid())
   [System.IO.Compression.ZipFile]::ExtractToDirectory((Join-Path $PWD 'dist/sitecore-xm-cloud-sync.vsix'), $packageDirectory)
-  & $scanner dir $packageDirectory --redact --no-banner
+  & $scanner dir $packageDirectory --config .gitleaks.toml --redact --no-banner
 }
 if ($LASTEXITCODE -ne 0) { throw "Secret scan failed ($Mode). Inspect the redacted findings before publishing." }

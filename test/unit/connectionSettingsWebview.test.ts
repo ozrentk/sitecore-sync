@@ -26,9 +26,9 @@ test("dashboard secret fields infer replacement, preserve empty drafts and reset
   }
   new Script(await readFile("media/connectionSettings/settings.js", "utf8")).runInContext(context);
   const run = (code: string): unknown => new Script(code).runInContext(context);
-  run(`const initial = {type:'initialize',isNew:false,values:{name:'Test',clientId:'client',serverUrl:'https://cm.example.test',sites:[]},stored:{clientSecret:true,deploymentSecret:true,edgeToken:true}};
+  run(`const initial = {type:'initialize',isNew:false,values:{name:'Test',clientId:'client',serverUrl:'https://cm.example.test',sites:[]},stored:{clientSecret:true,deploymentSecret:true,edgeToken:true,previewToken:true}};
     receive({data:initial}); receive({data:{type:'idle'}});`);
-  for (const id of ["clientSecret", "deploymentSecret", "edgeToken"]) {
+  for (const id of ["clientSecret", "deploymentSecret", "edgeToken", "previewToken"]) {
     strictEqual(run(`get('${id}-action')`), null);
     strictEqual(run(`get('${id}').type`), "password");
     strictEqual(run(`get('${id}').disabled`), false);

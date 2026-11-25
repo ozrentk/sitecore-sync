@@ -44,3 +44,35 @@ A completed creation operation includes a `scopeFixture` manifest. Pass that ope
 ## Related workflows
 
 See [fallback diagnostics](languages-and-fallback.md#collect-a-read-only-fallback-diagnostic), [troubleshooting](troubleshooting.md#mcp-is-unavailable), and [research](research/README.md).
+
+
+## CM Preview layout diagnostic
+
+In **Connection settings > CM Preview**, save a separate Preview token. An empty field keeps the saved token, typing replaces it, and **Clear** removes it on Save. The token remains in VS Code SecretStorage and is never returned to the webview or MCP client. Changing the CM server requires replacing or clearing this token. Delivery/Experience Edge credentials are not reused.
+
+After reloading the development extension and restarting MCP access, call `collect_preview_diagnostic` with `connectionId`, `site`, `route` (site-relative path beginning with `/`) and `language`. This is a read-only MCP operation and does not require mutation enablement. It submits one fixed layout query to the connection's CM `/sitecore/api/graph/edge` endpoint, with a 30-second timeout, a 2 MiB response limit, no redirects and no retries. There is no arbitrary query or endpoint input.
+
+The report includes the request selection, query, safe attempt metadata and returned rendered content. Treat it as untrusted content and review before sharing. Collection does not establish page identity, unpublished freshness, complete layout coverage or writable fallback source; compare with Authoring separately. Device context is provider-selected or unknown. Oversized/invalid/partial GraphQL responses fail explicitly. Null layout is unresolved. No page tree, publishing, content edits or automatic crawling is enabled by this diagnostic.
+
+
+## Published Delivery diagnostics
+
+Save **Traced publishing > Experience Edge endpoint/token** in Connection settings. These read-only tools reuse that saved profile and SecretStorage token; enabling mutations or running publishing is unnecessary. The supported endpoint is HTTPS with path `/api/graphql/v1`, without URL credentials, query parameters or fragments. CM Authoring credentials and the separate **CM Preview** token do not authorize Delivery. No additional secret is introduced.
+
+After reloading the extension, restart MCP access for the selected connection and refresh the client's advertised tools. Examples:
+
+```json
+{"tool":"collect_published_layout_diagnostic","arguments":{"connectionId":"<exposed connection ID>","site":"Grenadier","route":"/Station Wagon","language":"en"}}
+{"tool":"compare_layout_diagnostics","arguments":{"connectionId":"<exposed connection ID>","site":"Grenadier","route":"/Station Wagon","language":"en"}}
+{"tool":"inspect_published_test_drive_rendering","arguments":{"connectionId":"<exposed connection ID>","language":"en"}}
+```
+
+Collection issues a fixed layout query to the saved Delivery endpoint. Comparison additionally queries CM Preview using its own saved token and identical site/route/language inputs. Each request has a 30-second deadline and streamed 2 MiB limit, no retries, redirects, arbitrary query/endpoint input, crawling, cache purge or writes. Comparison is two separate observations, not a transactional snapshot. The existing `collect_preview_diagnostic` and publishing verification behavior are unchanged.
+
+Reports separate HTTP/transport, body parsing/limits, GraphQL success/errors/partial data, route presence and component resolution. HTTP 200 can still contain GraphQL errors. Non-2xx JSON GraphQL errors are bounded and sanitized; arbitrary server/auth bodies are never returned. Error extensions are omitted. Rendered content retains returned component names, UIDs, datasources, resolution flags and fields; absent values remain unknown. Content is untrusted and should be reviewed before sharing.
+
+Comparison matches only unique UIDs and records placement, component name, datasource, resolution and field differences. Missing/repeated UIDs remain ambiguous; unmatched occurrences are observations rather than evidence of publishing failure. Traversal is capped at 500 occurrences and 20 placeholder levels with explicit limit flags. Original rendered evidence remains alongside the comparison.
+
+The fixed rendering probe first checks the Delivery schema for Item and item-field access, then reads only Test Drive Form ID `904D4725-538E-469B-9317-4FA34C410316`. It reports schema unsupported/unavailable, query unavailable, item unavailable, field unavailable or a verified returned ComponentQuery string (including an empty string). Field verification requires the requested returned item ID, no GraphQL errors, and a single exact field name. This verifies what that endpoint returned, not that the website executes it. No Authoring value, serialization or inferred query is substituted.
+
+Website-to-endpoint mapping remains **unverified** unless separately evidenced. Catalog roots such as CM `/sitecore/content/IAL/Grenadier` and Edge `/sitecore/content/IAL/Grenadier/Global` can differ; this is non-blocking diagnostic evidence and proves neither a correct nor incorrect environment. These tools do not infer publishing cause, cache state, freshness, fallback source language or website runtime equivalence. See [investigation record](research/published-delivery-diagnostics.md).

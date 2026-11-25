@@ -1,0 +1,33 @@
+# Research candidates. Parseable GraphQL is not live schema validation.
+# Execute one operation at a time in the authenticated CM Preview IDE.
+query B27PreviewRoot {
+  __schema { queryType { name } }
+}
+
+# Use the root type name returned above, then inspect the named return types
+# for layout/item before submitting the corresponding candidate query.
+query B27PreviewType($name: String!) {
+  __type(name: $name) {
+    name kind
+    fields {
+      name
+      args { name defaultValue type { kind name ofType { kind name ofType { kind name } } } }
+      type { kind name ofType { kind name ofType { kind name } } }
+    }
+  }
+}
+
+query B27PreviewSites {
+  site { allSiteInfo { results { name rootPath language } } }
+}
+
+query B27PreviewPage($site: String!, $language: String!, $route: String!) {
+  layout(site: $site, language: $language, routePath: $route) {
+    item { rendered }
+  }
+}
+
+# Confirm item arguments/fields in this environment before executing.
+query B27PreviewIdentity($path: String!, $language: String!) {
+  item(path: $path, language: $language) { id name path }
+}

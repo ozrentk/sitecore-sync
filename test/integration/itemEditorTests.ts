@@ -729,11 +729,16 @@ export const itemEditorTests: readonly IntegrationTest[] = [{
     } finally { warning.mock.restore(); registration.dispose(); provider.dispose(); await rm(directory, { recursive: true, force: true }); }
   },
 }, {
-  name: "item editor protects pinned targets, drafts, backup/revert, cancellation and save readback",
+  name: "page content editor protects layout, pinned targets, drafts, backup/revert and save readback",
   async execute(): Promise<void> {
     const directory = await mkdtemp(join(tmpdir(), "xm-editor-host-"));
     const extension = vscode.extensions.getExtension("OzrenTK.sitecore-xm-cloud-sync")!;
-    let remote = fixture().base; const writes: UpdateAuthoringItemInput[] = []; const reads: unknown[][] = [];
+    const page = fixture();
+    const layoutId = "44444444444444444444444444444444";
+    const layout = { ...page.base.fields[0], fieldId: layoutId, name: "__Renderings", type: "Layout", typeKey: "layout", isStandardTemplate: true,
+      value: '<r><d l="{AAAAAAAA-AAAA-AAAA-AAAA-AAAAAAAAAAAA}" /></r>' };
+    const pageState = { ...page, base: { ...page.base, fields: [...page.base.fields, layout] } };
+    let remote = pageState.base; const writes: UpdateAuthoringItemInput[] = []; const reads: unknown[][] = [];
     let serverUrl = "https://example.test";
     let failWrite = false;
     const store = { get: () => ({ id: "test", name: "Test", serverUrl }), getClientSecret: async () => "test-secret" } as unknown as ConnectionStore;
@@ -751,9 +756,11 @@ export const itemEditorTests: readonly IntegrationTest[] = [{
     const warning = mock.method(vscode.window, "showWarningMessage", async () => confirm ? "Save to Sitecore" : undefined);
     try {
       await vscode.workspace.fs.createDirectory(provider.directory);
-      const state = fixture(); const uri = vscode.Uri.joinPath(provider.directory, `${editorKey(state.target)}.xmitem`);
+      const state = pageState; const uri = vscode.Uri.joinPath(provider.directory, `${editorKey(state.target)}.xmitem`);
       await vscode.workspace.fs.writeFile(uri, Buffer.from(JSON.stringify(state)));
       doc = await provider.openCustomDocument(uri, { backupId: undefined, untitledDocumentData: undefined });
+      await harness.message(doc, { type: "change", revision: 0, id: layoutId, input: "forged", clear: false });
+      strictEqual(doc.state.drafts[layoutId], undefined);
       let changes = 0; const subscription = provider.onDidChangeCustomDocument(() => changes++);
       await harness.message(doc, { type: "change", revision: 0, id: fieldId, input: "draft", clear: false });
       strictEqual(changes, 1);
@@ -772,7 +779,7 @@ export const itemEditorTests: readonly IntegrationTest[] = [{
       confirm = true;
       await provider.saveCustomDocument(doc, token.token);
       strictEqual(writes.length, 1); strictEqual(writes[0].version, 2); strictEqual(writes[0].language, "en-AU");
-      deepStrictEqual(writes[0].fields, { Title: "draft" }); deepStrictEqual(doc.state.drafts, {});
+      deepStrictEqual(writes[0].fields, { Title: "draft" }); strictEqual(remote.fields[1].value, layout.value); deepStrictEqual(doc.state.drafts, {});
       for (const read of reads) { strictEqual(read[4], 2); strictEqual(read[6], false); strictEqual(read[7], true); }
       await harness.message(doc, { type: "change", revision: doc.revision, id: fieldId, input: "later", clear: false });
       serverUrl = "https://other.test";

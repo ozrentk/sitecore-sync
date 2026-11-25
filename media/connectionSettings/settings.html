@@ -14,6 +14,7 @@
 <label>Client ID<input id="clientId" required autocomplete="off"><span class="error" id="clientId-error"></span></label></div>
 <div class="secret" data-secret="clientSecret"></div><button type="button" data-test="connection">Test connection</button>
 </section>
+<section id="preview"><h2>CM Preview</h2><p>Read-only layout diagnostics use this connection's CM server and a separate Preview token.</p><div class="secret" data-secret="previewToken"></div></section>
 <section id="deployment"><h2>Deployment monitoring</h2><label class="toggle"><input id="deploymentEnabled" type="checkbox">Use organization credentials for deployment monitoring</label><p>Turning this off removes the saved organization secret on Save. Automatic monitoring remains available when the environment client has permission.</p>
 <div class="grid"><label>Organization client ID<input id="deploymentClientId" autocomplete="off"><span class="error" id="deploymentClientId-error"></span></label>
 <label>Environment ID<input id="deploymentEnvironmentId" placeholder="Resolved by Test monitoring"><span class="error" id="deploymentEnvironmentId-error"></span></label></div>

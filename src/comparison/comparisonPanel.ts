@@ -381,6 +381,44 @@ export class ComparisonPanelManager implements vscode.Disposable {
     await this.loadInitialTrees();
   }
 
+  /** Open a component datasource in Browse, retaining its requested locale, never inferred provenance. */
+  async openDatasourceDetails(connectionId: string, itemId: string, language: string, path: string): Promise<void> {
+    const saved = this.connectionStore.get(connectionId);
+    if (!saved) throw Error("Connection no longer exists.");
+    const serverUrl = saved.serverUrl, clientId = saved.clientId;
+    const valid = (): boolean => {
+      const current = this.connectionStore.get(connectionId);
+      return current?.serverUrl === serverUrl && current.clientId === clientId;
+    };
+    const intent = ++this.modeIntent;
+    const details = await this.getItemDetails(connectionId, language, itemId);
+    if (intent !== this.modeIntent) return;
+    if (!valid() || details.language.toLowerCase() !== language.toLowerCase()
+      || details.itemId.replace(/[{}-]/gu, "").toLowerCase() !== itemId.replace(/[{}-]/gu, "").toLowerCase()
+      || details.path.toLowerCase() !== path.toLowerCase()) throw Error("Datasource identity or path changed. Refresh Components.");
+    this.cancelRequests();
+    this.contentSession.openConnection({ connectionId, language, rootPath: "/" });
+    await this.clearFieldDiffSelection();
+    if (intent !== this.modeIntent) return;
+    const navigation = this.beginFavoriteNavigation(connectionId, details.path, "left", "lookup");
+    // Beginning navigation supersedes the previous mode intent, including our own.
+    const navigationIntent = this.modeIntent;
+    try {
+      if (!this.panel) {
+        this.pendingFavoriteNavigation = navigation;
+        await this.openPanel();
+        return; // The webview ready handler performs the reveal after loading its tree.
+      }
+      this.panel.reveal(vscode.ViewColumn.Active);
+      await this.postState();
+      if (navigationIntent !== this.modeIntent) return;
+      await this.loadInitialTrees();
+      if (navigationIntent !== this.modeIntent) return;
+      if (!valid()) throw Error("Connection changed. Refresh Components.");
+      await this.navigateToFavorite(navigation);
+    } catch (error) { this.finishFavoriteNavigation(navigation); throw error; }
+  }
+
   private get browseMode(): boolean { return this.contentSession?.state?.mode === "browse"; }
 
   async open(): Promise<void> {
@@ -1089,13 +1127,13 @@ export class ComparisonPanelManager implements vscode.Disposable {
       return;
     }
 
-    if (message.type === "editItem") {
+    if (message.type === "editItem" || message.type === "viewPageComponents") {
       if (this.pendingLanguageView || message.viewContext !== this.contentSession.revisionId ||
         (message.side !== "left" && message.side !== "right") || typeof message.itemId !== "string") return;
       const selection = this.getSelection();
       const connectionId = message.side === "left" ? selection.leftConnectionId : selection.rightConnectionId;
       const language = message.side === "left" ? selection.leftLanguage : selection.rightLanguage;
-      if (connectionId) await vscode.commands.executeCommand("xmCloudSync.editItem", { connectionId, itemId: message.itemId, language });
+      if (connectionId) await vscode.commands.executeCommand(message.type === "editItem" ? "xmCloudSync.editItem" : "xmCloudSync.viewPageComponents", { connectionId, itemId: message.itemId, language });
       return;
     }
 
@@ -2591,7 +2629,7 @@ export class ComparisonPanelManager implements vscode.Disposable {
     connectionId: string,
     path: string,
     side: TreeSide,
-    source: "favorite" | "site" = "favorite",
+    source: "favorite" | "site" | "lookup" = "favorite",
   ): FavoriteNavigation {
     this.cancelModeSwitch();
     this.lookupController?.abort();
@@ -2605,7 +2643,7 @@ export class ComparisonPanelManager implements vscode.Disposable {
       side,
     };
     this.activeFavoriteNavigation = navigation;
-    this.navigationLoadingEmitter.fire({ source, connectionId, path });
+    if (source !== "lookup") this.navigationLoadingEmitter.fire({ source, connectionId, path });
     return navigation;
   }
 

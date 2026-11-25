@@ -1,5 +1,68 @@
 # Changelog
 
+## 0.65.0 — 2026-11-25
+
+- Add read-only MCP published-layout collection and Preview/Delivery comparison using separate saved credentials. Preserve partial GraphQL evidence and ambiguous component identities.
+- Add a fixed published Test Drive Form rendering capability/value probe; unavailable data is never replaced with Authoring content.
+
+## 0.64.0 — 2026-11-12
+
+- Double-click a Components row to edit its eligible exact-locale item. A tree-level notice explains that Preview does not identify the source language.
+
+## 0.63.1 — 2026-10-26
+
+- Fix Components Reveal in Browse stopping after tab activation because its own navigation start invalidated the prior request guard. Preserve supersession checks against subsequent navigation.
+- Record B27 acceptance evidence and remaining closure gaps; effective per-node fallback provenance is not claimed.
+
+## 0.63.0 — 2026-10-23
+
+- Components References follows Image/File media IDs only after verifying the target belongs to the Sitecore Media Library. Raw XML remains in Asset information; missing, malformed and conflicting targets remain explicit.
+- Content Hub and other asset URLs remain non-followed destinations. No asset downloads, media editing or uploads. Image behavior was checked read-only in Dev; File coverage has schema and synthetic tests but no live populated File sample.
+
+## 0.62.0 — 2026-10-23
+
+- Follow ordinary internal General Links in Components References when raw XML and typed Preview target identities agree. Preserve raw link evidence in a collapsed information disclosure.
+- Keep external, email, anchor and Content Hub destinations visible without following them; missing, malformed and conflicting internal targets remain unresolved. Image/File extraction remains unverified.
+
+## 0.61.0 — 2026-10-23
+
+- Allow supported ordinary fields on pages through the existing exact-locale editor and save workflow. Keep layout/system fields, unsupported types and unverified fallback values read-only.
+- Align Components Edit availability with field eligibility and replace outdated Stage A wording.
+
+## 0.60.0
+
+- Components expands Preview-backed list/lookup references lazily under each datasource, grouped by field. Ordered duplicates stay separate; ancestor cycles, unavailable items, malformed values and limits remain visible.
+- Reference reads use the selected locale with a separate per-layout cache, four concurrent reads, 200 item reads, 500 reference occurrences and 12 reference levels. Refresh/language changes and closing cancel pending work and reject stale replies.
+- Other reference types remain explicitly unresolved. Direct Preview has no site argument and does not identify fallback source locale; Details/Edit continue to use independent exact-locale Authoring reads.
+
+
+## 0.59.2 — 2026-10-20
+
+- Show each component as one full-width datasource-name/type selection row, with independent child expansion and explicit unavailable datasource state.
+- Collapse system-only field groups when opening Components details; keep content and mixed groups expanded and all values inspectable.
+
+## 0.59.1 — 2026-10-20
+
+- Move component count and compact layout context into the full-width header with a theme-aware separator. Show verified device names while retaining IDs; remove redundant Preview prose without changing locale/edit guards.
+- Use one accessible icon toggle for desktop details expansion/restoration, shown only for loaded item details. Reserve Back to tree for narrow navigation and preserve instance-only inspection.
+
+## 0.59.0 — 2026-10-20
+
+- Keep Components inspection in a resizable right-hand details pane, with expand/restore, keyboard resizing and narrow-width Back navigation. Reuse read-only field rendering and show exact Authoring locale/version separately from Preview provenance.
+- Fix datasource navigation to reveal the actual datasource path in Browse. Offer explicit version-pinned Edit through the existing item editor; component selection no longer changes global Item Details.
+- Add bounded, lazy inspection of supported referenced items, with cancellation and stale selection/locale/action guards.
+
+## 0.58.0 — 2026-10-20
+
+- Resolve component datasource GUIDs and absolute paths to item labels with bounded Authoring lookups. Show unavailable targets and unresolved expressions explicitly.
+- Open resolved datasources in Item Details in Browse, preserving the connection and requested language. Reject stale navigation after layout changes. Fallback source provenance remains unknown.
+
+## 0.57.0 — 2026-10-20
+
+- Add View components… in Browse and Compare: a read-only CM Preview tree with nested placeholders, partial-design wrappers, component occurrences and immediate datasource references.
+- Add language reload and Refresh, strict page/site/locale validation, bounded traversal and cancellation. Keep unknown fallback provenance and effective versus raw parameters explicit.
+- Include separate CM Preview credentials and the fixed read-only MCP layout diagnostic. Recursive reference expansion and page-layout editing remain deferred.
+
 ## 0.56.0 — 2026-10-17
 
 - Add optional Preserve casing to Replace in Visual and HTML: pro/Pro/PRO becomes aqua/Aqua/AQUA. Mixed casing uses the replacement as entered.
