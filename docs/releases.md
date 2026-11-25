@@ -20,6 +20,8 @@ The workflow uses its built-in GitHub token, so no personal access token or Mark
 
 The local Git Flow release is not online until its branches and tag are pushed. When publication is authorized, push `main` and `develop`, then the specific version tag. Verify the GitHub Actions tag run, the published release and its attached VSIX. Do not describe a local package or branch-only CI artifact as a published release.
 
+Secret scans retain the default Gitleaks rules. The checked-in configuration excludes only the generated `rowKey: record4.comparisonRowKey` property access, which the generic API-key rule misidentifies as a credential.
+
 ## Known verification exception for v0.45.0
 
 The published v0.45.0 release explicitly accepted B31's exact General Link destination-focus assertion failure; its notes disclose that the remaining steps of that test might not have run. This remains historical release evidence. The B31 fix removes the exception from current CI and the test harness; every assertion is now required. Published tags and release notes have not been rewritten.
