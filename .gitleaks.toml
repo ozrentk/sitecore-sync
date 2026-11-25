@@ -1,0 +1,9 @@
+[extend]
+useDefault = true
+
+# esbuild renames a local variable; this is a property access, not a secret.
+[[allowlists]]
+description = "Bundled comparison row identity property access"
+regexTarget = "match"
+regexes = ['''\browKey:\s*record4\.comparisonRowKey\b''']
+
