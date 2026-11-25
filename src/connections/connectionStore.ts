@@ -261,6 +261,10 @@ export class ConnectionStore implements vscode.Disposable {
     return this.secrets.get(previewTokenSecretKey(connectionId));
   }
 
+  getDeliveryEndpoint(connectionId: string): string | undefined {
+    return readPublishingProfiles(this.globalState.get(publishingProfilesKey, [])).find(profile => profile.connectionId === connectionId)?.edgeEndpoint;
+  }
+
   async getEdgeToken(connectionId: string): Promise<string | undefined> {
     return this.secrets.get(edgeTokenSecretKey(connectionId));
   }

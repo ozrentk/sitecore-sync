@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.65.0 — 2026-11-25
+
+- Add read-only MCP published-layout collection and Preview/Delivery comparison using separate saved credentials. Preserve partial GraphQL evidence and ambiguous component identities.
+- Add a fixed published Test Drive Form rendering capability/value probe; unavailable data is never replaced with Authoring content.
+
 ## 0.64.0 — 2026-11-12
 
 - Double-click a Components row to edit its eligible exact-locale item. A tree-level notice explains that Preview does not identify the source language.
